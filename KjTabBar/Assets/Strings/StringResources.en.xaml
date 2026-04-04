@@ -1,0 +1,25 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:system="clr-namespace:System;assembly=mscorlib">
+    <system:String x:Key="SettingsWindowTitle">Settings</system:String>
+    <system:String x:Key="SettingsLabelFont">Font:</system:String>
+    <system:String x:Key="SettingsLabelSize">Size:</system:String>
+    <system:String x:Key="SettingsLabelDecoration">Style:</system:String>
+    <system:String x:Key="SettingsLabelBold">Bold</system:String>
+    <system:String x:Key="SettingsLabelItalic">Italic</system:String>
+    <system:String x:Key="SettingsButtonSave">Save</system:String>
+    <system:String x:Key="SettingsButtonCancel">Cancel</system:String>
+    
+    <system:String x:Key="MenuDuplicateTab">Duplicate Tab(&amp;D)</system:String>
+    <system:String x:Key="MenuOpenNewWindow">Open in New Window(&amp;N)</system:String>
+    <system:String x:Key="MenuCopyPath">Copy Path(&amp;P)</system:String>
+    <system:String x:Key="MenuCloseTab">Close Tab(&amp;C)</system:String>
+    <system:String x:Key="MenuCloseTabsToRight">Close Tabs to the Right(&amp;R)</system:String>
+    <system:String x:Key="MenuCloseTabsToLeft">Close Tabs to the Left(&amp;L)</system:String>
+    <system:String x:Key="MenuReopenClosedTab">Reopen Closed Tab(&amp;T)</system:String>
+    <system:String x:Key="MenuSettings">Settings...</system:String>
+    <system:String x:Key="MenuCopyHere">Copy Here(&amp;C)</system:String>
+    <system:String x:Key="MenuMoveHere">Move Here(&amp;M)</system:String>
+    
+    <system:String x:Key="TrayMenuExit">Exit</system:String>
+</ResourceDictionary>

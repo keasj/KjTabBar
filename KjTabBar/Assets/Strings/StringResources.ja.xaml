@@ -1,0 +1,25 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:system="clr-namespace:System;assembly=mscorlib">
+    <system:String x:Key="SettingsWindowTitle">設定</system:String>
+    <system:String x:Key="SettingsLabelFont">フォント:</system:String>
+    <system:String x:Key="SettingsLabelSize">サイズ:</system:String>
+    <system:String x:Key="SettingsLabelDecoration">装飾:</system:String>
+    <system:String x:Key="SettingsLabelBold">太字</system:String>
+    <system:String x:Key="SettingsLabelItalic">斜体</system:String>
+    <system:String x:Key="SettingsButtonSave">保存</system:String>
+    <system:String x:Key="SettingsButtonCancel">キャンセル</system:String>
+    
+    <system:String x:Key="MenuDuplicateTab">タブの複製(&amp;D)</system:String>
+    <system:String x:Key="MenuOpenNewWindow">別ウィンドウで開く(&amp;N)</system:String>
+    <system:String x:Key="MenuCopyPath">パスのコピー(&amp;P)</system:String>
+    <system:String x:Key="MenuCloseTab">タブを閉じる(&amp;C)</system:String>
+    <system:String x:Key="MenuCloseTabsToRight">右側のタブを閉じる(&amp;R)</system:String>
+    <system:String x:Key="MenuCloseTabsToLeft">左側のタブを閉じる(&amp;L)</system:String>
+    <system:String x:Key="MenuReopenClosedTab">閉じたタブを開く(&amp;T)</system:String>
+    <system:String x:Key="MenuSettings">設定...</system:String>
+    <system:String x:Key="MenuCopyHere">ここにコピー(&amp;C)</system:String>
+    <system:String x:Key="MenuMoveHere">ここに移動(&amp;M)</system:String>
+    
+    <system:String x:Key="TrayMenuExit">終了</system:String>
+</ResourceDictionary>
