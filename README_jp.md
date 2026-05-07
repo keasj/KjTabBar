@@ -1,4 +1,4 @@
-# KjTabBar
+﻿# KjTabBar
 
 [英語版 README](./README.md)
 
@@ -48,3 +48,9 @@ Windows エクスプローラー（`explorer.exe`）を独自のタブバーで�
 
 本プロジェクトは **MIT License** のもとで公開・提供されています。
 詳細については、[LICENSE](LICENSE) ファイルをご覧ください。
+
+## ダウンロード
+
+最新版はこちら：
+
+https://github.com/keasj/KjTabBar/releases/latest

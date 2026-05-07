@@ -48,3 +48,10 @@ Instead of hooking into or modifying Explorer itself, it places an independent t
 
 This project is distributed under the **MIT License**.
 For details, see the [LICENSE](LICENSE) file.
+
+## Download
+
+Latest version:
+
+https://github.com/keasj/KjTabBar/releases/latest
+
