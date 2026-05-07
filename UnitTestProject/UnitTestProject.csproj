@@ -41,6 +41,7 @@
     <Reference Include="System" />
     <Reference Include="System.ComponentModel.DataAnnotations" />
     <Reference Include="System.Configuration" />
+    <Reference Include="System.Configuration.Install" />
     <Reference Include="System.Core" />
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
@@ -61,6 +62,7 @@
     <Compile Include="ExplorerAbsorptionDecisionMakerTests.cs" />
     <Compile Include="ExplorerManagerTests.cs" />
     <Compile Include="MockExplorerService.cs" />
+    <Compile Include="SetupCustomActionsTests.cs" />
     <Compile Include="SettingsViewModelTests.cs" />
     <Compile Include="TabBarViewModelTests.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

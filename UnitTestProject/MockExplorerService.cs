@@ -35,6 +35,7 @@ namespace UnitTestProject
         public string NormalizeShellNamespacePath(string path) => path;
         public void OpenInNewWindow(string path) { }
         public void CreateShortcuts(string[] sourceFiles, string destinationFolder, IntPtr targetWindowHandle) { }
+        public void CreateSymbolicLinks(string[] sourceFiles, string destinationFolder, IntPtr targetWindowHandle) { }
         public void ReleaseCachedComObjects() { }
         public string ResolveShortcutTarget(string path) => path;
         public void SelectItems(IntPtr explorerHwnd, List<string> itemPaths) { }
@@ -42,6 +43,18 @@ namespace UnitTestProject
         public KjTabBar.Helpers.NativeMethods.RECT GetExplorerWindowRect(IntPtr hwnd)
         {
             return new KjTabBar.Helpers.NativeMethods.RECT { Left = 0, Top = 0, Right = 800, Bottom = 600 };
+        }
+
+        public string GetParentFolderName(string path)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(path)) return null;
+                string parent = System.IO.Path.GetDirectoryName(path.TrimEnd('\\'));
+                if (string.IsNullOrEmpty(parent)) return null;
+                return System.IO.Path.GetFileName(parent) ?? parent;
+            }
+            catch { return null; }
         }
     }
 }

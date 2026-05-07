@@ -37,7 +37,7 @@ namespace KjTabBar
         private NativeMethods.WinEventDelegate _foregroundEventProc;
         private System.Windows.Forms.NotifyIcon _trayIcon;
         private System.Windows.Forms.ContextMenuStrip _trayMenu;
-        private string _lastSavedTabs = null;
+        private string _lastSavedTabs = ""; // 初期化時に保存済みとみなすことで初回冗長保存を抑制
         private DateTime _lastMemoryMaintenanceUtc = DateTime.MinValue;
         private static readonly TimeSpan MemoryMaintenanceInterval = TimeSpan.FromSeconds(60);
         private IntPtr _showEventHook = IntPtr.Zero;
@@ -45,6 +45,12 @@ namespace KjTabBar
         private Dictionary<IntPtr, DateTime> _hiddenPendingAbsorb = new Dictionary<IntPtr, DateTime>();
         private Dictionary<IntPtr, NativeMethods.RECT> _hiddenOriginalRects = new Dictionary<IntPtr, NativeMethods.RECT>();
         private static readonly TimeSpan MaxHiddenDuration = TimeSpan.FromSeconds(2);
+        private HashSet<string> _desktopShellItemPathsCache = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private DateTime _lastDesktopShellItemCacheUtc = DateTime.MinValue;
+        private static readonly TimeSpan DesktopShellItemCacheDuration = TimeSpan.FromSeconds(5);
+        private readonly object _desktopShellItemCacheSync = new object();
+        private System.Drawing.Icon _trayIconObj;
+        private IntPtr _trayIconHandle = IntPtr.Zero;
         private const string ShellRelaunchArgument = "--kjtb-shell";
 
 
@@ -87,6 +93,18 @@ namespace KjTabBar
                 _trayIcon = null;
             }
 
+            if (_trayIconObj != null)
+            {
+                _trayIconObj.Dispose();
+                _trayIconObj = null;
+            }
+
+            if (_trayIconHandle != IntPtr.Zero)
+            {
+                NativeMethods.DestroyIcon(_trayIconHandle);
+                _trayIconHandle = IntPtr.Zero;
+            }
+
             if (_trayMenu != null)
             {
                 _trayMenu.Dispose();
@@ -125,6 +143,7 @@ namespace KjTabBar
                 _foregroundEventHook = IntPtr.Zero;
                 _foregroundEventProc = null;
             }
+
 
             if (_mutex != null)
             {
@@ -167,8 +186,6 @@ namespace KjTabBar
             }
 
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
-
-            RegisterStartup();
 
             SetupTrayIcon();
             SetupForegroundHook();
@@ -287,59 +304,6 @@ namespace KjTabBar
             }
         }
 
-        private void RegisterStartup()
-        {
-            try
-            {
-                Microsoft.Win32.RegistryKey key = null;
-                try
-                {
-                    key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true);
-                    if (key != null)
-                    {
-                        string appName = "KjTabBar";
-                        string currentExePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
-
-                        // .NET Framework等の場合、.dllのパスが返ることがあるため、拡張子をチェックして.exeにするか、Process.GetCurrentProcess().MainModule.FileNameを使う
-                        System.Diagnostics.Process currentProcess = null;
-                        try
-                        {
-                            currentProcess = System.Diagnostics.Process.GetCurrentProcess();
-                            currentExePath = currentProcess.MainModule.FileName;
-                        }
-                        finally
-                        {
-                            if (currentProcess != null)
-                            {
-                                currentProcess.Dispose();
-                            }
-                        }
-
-                        // 引用符で囲んで登録する
-                        string runCommand = "\"" + currentExePath + "\"";
-
-                        // まだ登録されていない、またはパスが変わっている場合に更新
-                        object val = key.GetValue(appName);
-                        if (val == null || val.ToString() != runCommand)
-                        {
-                            key.SetValue(appName, runCommand);
-                        }
-                    }
-                }
-                finally
-                {
-                    if (key != null)
-                    {
-                        key.Dispose();
-                    }
-                }
-            }
-            catch
-            {
-                // スタートアップ登録に失敗してもアプリケーションはそのまま続行する
-            }
-        }
-
         private void SetupTrayIcon()
         {
             _trayIcon = new System.Windows.Forms.NotifyIcon();
@@ -370,10 +334,11 @@ namespace KjTabBar
                     try
                     {
                         bitmap = new System.Drawing.Bitmap(stream);
-                        // 背景の黒を透過させる
-                        bitmap.MakeTransparent(System.Drawing.Color.Black);
-                        IntPtr hIcon = bitmap.GetHicon();
-                        _trayIcon.Icon = System.Drawing.Icon.FromHandle(hIcon);
+                        // 背景の黒を透過させる処理は、高品質なPNGのアルファ値を損なうため削除。
+                        // GetHicon() が返すネイティブハンドルは明示的な破棄が必要。
+                        _trayIconHandle = bitmap.GetHicon();
+                        _trayIconObj = System.Drawing.Icon.FromHandle(_trayIconHandle);
+                        _trayIcon.Icon = _trayIconObj;
                     }
                     finally
                     {
@@ -727,11 +692,19 @@ namespace KjTabBar
             try
             {
                 _explorerService.ReleaseCachedComObjects();
+                // バックグラウンドスレッド側のCOMキャッシュもクリアしてリークを防止
+                _ = Services.ComThreadService.Instance.InvokeAsync(() =>
+                {
+                    _explorerService.ReleaseCachedComObjects();
+                });
+
                 System.Runtime.InteropServices.Marshal.CleanupUnusedObjectsInCurrentContext();
+                // spec.md に従い明示的な収集を実行
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
             }
-            catch
-            {
-            }
+            catch { }
         }
 
         private void RemoveClosedWindows(HashSet<IntPtr> collection, List<IntPtr> explorerWindows)
@@ -793,6 +766,7 @@ namespace KjTabBar
                 {
                     string[] paths = System.IO.File.ReadAllLines(file);
                     vm.RestoreTabs(paths);
+                    _lastSavedTabs = paths.Length > 0 ? string.Join("|", paths) + "|" : "";
                 }
             }
             catch { }
@@ -1015,12 +989,18 @@ namespace KjTabBar
 
             TabBarViewModel activeControlPanelTarget = null;
             TabBarViewModel firstControlPanelTarget = null;
+            TabBarViewModel fallbackControlPanelHost = null;
             foreach (KeyValuePair<IntPtr, TabBarWindow> kvp in _tabBars)
             {
                 TabBarViewModel vm;
                 if (!TryGetAliveTabBarViewModel(kvp, out vm))
                 {
                     continue;
+                }
+
+                if (fallbackControlPanelHost == null && HasAnyControlPanelTab(vm))
+                {
+                    fallbackControlPanelHost = vm;
                 }
 
                 if (!HasEquivalentControlPanelTab(vm, path))
@@ -1053,7 +1033,36 @@ namespace KjTabBar
                 return activeControlPanelTarget;
             }
 
+            if (fallbackControlPanelHost != null)
+            {
+                return fallbackControlPanelHost;
+            }
+
             return firstControlPanelTarget;
+        }
+
+        private bool HasAnyControlPanelTab(TabBarViewModel targetVM)
+        {
+            if (targetVM == null)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < targetVM.Tabs.Count; i++)
+            {
+                string tabPath = targetVM.Tabs[i].Path;
+                if (string.IsNullOrEmpty(tabPath))
+                {
+                    continue;
+                }
+
+                if (_explorerService.IsControlPanelPath(tabPath))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private bool TryRegisterDesktopLaunchCandidate(IntPtr hwnd)
@@ -1505,79 +1514,124 @@ namespace KjTabBar
                 return false;
             }
 
-            string normalizedPath;
-            bool hasNormalizedPath = TryNormalizePath(path, out normalizedPath);
-            string normalizedShellPath = _explorerService.NormalizeShellNamespacePath(path);
-
-            object shellObject = null;
-            object desktopFolder = null;
-            object desktopItems = null;
-            try
+            DateTime now = DateTime.UtcNow;
+            bool needsUpdate = false;
+            lock (_desktopShellItemCacheSync)
             {
-                if (!Models.ExplorerManager.TryGetShellApplication(out shellObject)) return false;
+                if ((now - _lastDesktopShellItemCacheUtc) > DesktopShellItemCacheDuration)
+                {
+                    needsUpdate = true;
+                }
+            }
 
-                object shell = shellObject;
-                desktopFolder = Models.ExplorerManager.InvokeComMethod(shell, "NameSpace", 0);
-                if (desktopFolder == null) return false;
-
-                desktopItems = Models.ExplorerManager.InvokeComMethod(desktopFolder, "Items");
-                object countObj = Models.ExplorerManager.GetComProperty(desktopItems, "Count");
-                if (countObj == null) return false;
-
-                int count = 0;
+            if (needsUpdate)
+            {
+                HashSet<string> newCache = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                bool success = false;
+                object shellObject = null;
+                object desktopFolder = null;
+                object desktopItems = null;
                 try
                 {
-                    count = Convert.ToInt32(countObj);
-                }
-                catch
-                {
-                    return false;
-                }
-                for (int i = 0; i < count; i++)
-                {
-                    object item = null;
-                    try
+                    if (Models.ExplorerManager.TryGetShellApplication(out shellObject))
                     {
-                        item = Models.ExplorerManager.InvokeComMethod(desktopItems, "Item", i);
-                        if (item == null) continue;
-
-                        string itemPath = null;
-                        try { itemPath = Models.ExplorerManager.GetComProperty(item, "Path") as string; } catch { }
-                        if (string.IsNullOrEmpty(itemPath)) continue;
-
-                        string normalizedItemPath;
-                        if (hasNormalizedPath && TryNormalizePath(itemPath, out normalizedItemPath))
+                        desktopFolder = Models.ExplorerManager.InvokeComMethod(shellObject, "NameSpace", 0);
+                        if (desktopFolder != null)
                         {
-                            if (normalizedItemPath.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase))
+                            desktopItems = Models.ExplorerManager.InvokeComMethod(desktopFolder, "Items");
+                            object countObj = Models.ExplorerManager.GetComProperty(desktopItems, "Count");
+                            if (countObj != null)
                             {
-                                return true;
+                                int count = 0;
+                                try { count = Convert.ToInt32(countObj); } catch { }
+
+                                for (int i = 0; i < count; i++)
+                                {
+                                    object item = null;
+                                    try
+                                    {
+                                        item = Models.ExplorerManager.InvokeComMethod(desktopItems, "Item", i);
+                                        if (item == null) continue;
+
+                                        string itemPath = Models.ExplorerManager.GetComProperty(item, "Path") as string;
+                                        if (!string.IsNullOrEmpty(itemPath))
+                                        {
+                                            newCache.Add(itemPath);
+
+                                            string normalizedItemShellPath = _explorerService.NormalizeShellNamespacePath(itemPath);
+                                            if (!string.IsNullOrEmpty(normalizedItemShellPath))
+                                            {
+                                                newCache.Add(normalizedItemShellPath);
+                                            }
+
+                                            string normalizedPath;
+                                            if (TryNormalizePath(itemPath, out normalizedPath))
+                                            {
+                                                newCache.Add(normalizedPath);
+                                            }
+                                        }
+                                    }
+                                    catch { }
+                                    finally
+                                    {
+                                        Models.ExplorerManager.ReleaseComObjectSafe(item);
+                                    }
+                                }
+                                success = true;
                             }
                         }
-
-                        string normalizedItemShellPath = _explorerService.NormalizeShellNamespacePath(itemPath);
-                        if (!string.IsNullOrEmpty(normalizedShellPath) &&
-                            !string.IsNullOrEmpty(normalizedItemShellPath) &&
-                            normalizedItemShellPath.Equals(normalizedShellPath, StringComparison.OrdinalIgnoreCase))
-                        {
-                            return true;
-                        }
                     }
-                    catch { }
-                    finally
+                }
+                catch { }
+                finally
+                {
+                    Models.ExplorerManager.ReleaseComObjectSafe(desktopItems);
+                    Models.ExplorerManager.ReleaseComObjectSafe(desktopFolder);
+                }
+
+                if (success)
+                {
+                    lock (_desktopShellItemCacheSync)
                     {
-                        Models.ExplorerManager.ReleaseComObjectSafe(item);
+                        _desktopShellItemPathsCache = newCache;
+                        _lastDesktopShellItemCacheUtc = now;
                     }
                 }
             }
-            catch { }
-            finally
+
+            bool result = false;
+            lock (_desktopShellItemCacheSync)
             {
-                Models.ExplorerManager.ReleaseComObjectSafe(desktopItems);
-                Models.ExplorerManager.ReleaseComObjectSafe(desktopFolder);
-                // shellObject はキャッシュ済みインスタンスのため解放しない
+                if (_desktopShellItemPathsCache.Contains(path))
+                {
+                    result = true;
+                }
+                else
+                {
+                    string normalizedPath = null;
+                    if (TryNormalizePath(path, out normalizedPath))
+                    {
+                        if (_desktopShellItemPathsCache.Contains(normalizedPath))
+                        {
+                            result = true;
+                        }
+                    }
+
+                    if (!result)
+                    {
+                        string normalizedShellPath = _explorerService.NormalizeShellNamespacePath(path);
+                        if (!string.IsNullOrEmpty(normalizedShellPath))
+                        {
+                            if (_desktopShellItemPathsCache.Contains(normalizedShellPath))
+                            {
+                                result = true;
+                            }
+                        }
+                    }
+                }
             }
 
-            return false;
+            return result;
         }
 
         private bool HasShortcutToPathInDesktop(string desktopPath, string targetPath)

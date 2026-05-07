@@ -775,7 +775,8 @@ namespace KjTabBar.ViewModels
                     if (!PathEquals(_activeTab.Path, normalizedCPPath))
                     {
                         _activeTab.Path = normalizedCPPath;
-                        _activeTab.Title = _explorerService.GetLocalizedControlPanelTitle();
+                        _activeTab.BaseTitle = _explorerService.GetLocalizedControlPanelTitle();
+                        _activeTab.Title = _activeTab.BaseTitle;
                         shouldUpdateTitles = true;
                     }
                     ClearPendingNavigationTracking();
@@ -813,7 +814,8 @@ namespace KjTabBar.ViewModels
                 if (_navigatingToPath != null && PathEquals(_navigatingToPath, currentPath))
                 {
                     _activeTab.Path = currentPath;
-                    _activeTab.Title = _explorerService.GetFolderName(currentPath);
+                    _activeTab.BaseTitle = _explorerService.GetFolderName(currentPath);
+                    _activeTab.Title = _activeTab.BaseTitle;
                     ClearPendingNavigationTracking();
                     shouldUpdateTitles = true;
                     if (_pendingSelectedItems != null)
@@ -860,7 +862,8 @@ namespace KjTabBar.ViewModels
                 }
 
                 _activeTab.Path = currentPath;
-                _activeTab.Title = _explorerService.GetFolderName(currentPath);
+                _activeTab.BaseTitle = _explorerService.GetFolderName(currentPath);
+                _activeTab.Title = _activeTab.BaseTitle;
                 shouldUpdateTitles = true;
             }
             catch
@@ -908,74 +911,83 @@ namespace KjTabBar.ViewModels
         {
             if (_tabs == null || _tabs.Count == 0) return;
 
-            // 1. 各タブの基本情報（フォルダ名）を取得し、タイトルを一旦リセット
-            string[] folderNames = new string[_tabs.Count];
+            // 1. 各タブの基本情報（フォルダ名）を取得し、タイトルを一旦リセット (キャッシュを活用して高速化)
             for (int i = 0; i < _tabs.Count; i++)
             {
-                folderNames[i] = _explorerService.GetFolderName(_tabs[i].Path);
-                _tabs[i].Title = folderNames[i];
+                TabItemViewModel tab = _tabs[i];
+                if (string.IsNullOrEmpty(tab.BaseTitle))
+                {
+                    tab.BaseTitle = _explorerService.GetFolderName(tab.Path);
+                }
+                tab.Title = tab.BaseTitle;
             }
 
-            // 2. 「フォルダ名」が同じだが「フルパス」が異なるタブ（名前重複）を特定
-            List<int> collisionIndices = new List<int>();
+            // 2. 「フォルダ名」が同じだが「フルパス」が異なるタブ（名前重複）を特定 (O(N) に最適化)
+            Dictionary<string, List<int>> baseNameGroups = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < _tabs.Count; i++)
             {
-                if (string.IsNullOrEmpty(_tabs[i].Path) || _tabs[i].Path.StartsWith("::{") || _tabs[i].Path.StartsWith("shell:")) continue;
-
-                bool nameCollided = false;
-                for (int j = 0; j < _tabs.Count; j++)
-                {
-                    if (i == j) continue;
-                    if (string.Equals(folderNames[i], folderNames[j], StringComparison.OrdinalIgnoreCase) &&
-                        !string.Equals(_tabs[i].Path, _tabs[j].Path, StringComparison.OrdinalIgnoreCase))
-                    {
-                        nameCollided = true;
-                        break;
-                    }
-                }
-                if (nameCollided) collisionIndices.Add(i);
+                string title = _tabs[i].Title;
+                if (string.IsNullOrEmpty(title)) title = "Home";
+                if (!baseNameGroups.ContainsKey(title)) baseNameGroups[title] = new List<int>();
+                baseNameGroups[title].Add(i);
             }
 
-            // 3. 名前重複があるタブに対し、まずは「ルートパス」を表示する（第1段階の拡張）
-            foreach (int i in collisionIndices)
+            HashSet<int> collisionIndices = new HashSet<int>();
+            foreach (KeyValuePair<string, List<int>> kvp in baseNameGroups)
             {
-                _tabs[i].Title = GetDeeperTitle(_tabs[i].Path, _tabs[i].Title);
-            }
-
-            // 4. 重複があるタブの中で、まだ表示名（Title）が被っているものがあれば、さらにパスを伸ばす
-            bool changed = true;
-            int maxIterations = 20; // 階層が深い場合を考慮
-            while (changed && maxIterations-- > 0)
-            {
-                changed = false;
-
-                // 現在のTitleごとに、どのインデックスがそれを使っているか集計
-                Dictionary<string, List<int>> titleGroups = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
-                for (int m = 0; m < collisionIndices.Count; m++)
+                if (kvp.Value.Count > 1)
                 {
-                    int idx = collisionIndices[m];
-                    string title = _tabs[idx].Title;
-                    if (!titleGroups.ContainsKey(title))
+                    // パスが異なるものが1つでもあれば、そのグループ全体を深堀り対象とする
+                    string firstPath = _tabs[kvp.Value[0]].Path;
+                    bool hasDifferentPath = false;
+                    for (int i = 1; i < kvp.Value.Count; i++)
                     {
-                        titleGroups[title] = new List<int>();
-                    }
-                    titleGroups[title].Add(idx);
-                }
-
-                // 2つ以上のタブが同じTitleを持っているグループをすべて一斉に拡張する
-                foreach (KeyValuePair<string, List<int>> entry in titleGroups)
-                {
-                    List<int> groupIndices = entry.Value;
-                    if (groupIndices.Count > 1)
-                    {
-                        for (int k = 0; k < groupIndices.Count; k++)
+                        if (!string.Equals(firstPath, _tabs[kvp.Value[i]].Path, StringComparison.OrdinalIgnoreCase))
                         {
-                            int idx = groupIndices[k];
-                            string nextTitle = GetDeeperTitle(_tabs[idx].Path, _tabs[idx].Title);
-                            if (!string.Equals(nextTitle, _tabs[idx].Title, StringComparison.OrdinalIgnoreCase))
+                            hasDifferentPath = true;
+                            break;
+                        }
+                    }
+
+                    if (hasDifferentPath)
+                    {
+                        for (int i = 0; i < kvp.Value.Count; i++)
+                        {
+                            collisionIndices.Add(kvp.Value[i]);
+                        }
+                    }
+                }
+            }
+
+            // 3. 名前重複があるタブに対し、階層を遡る
+            if (collisionIndices.Count > 0)
+            {
+                bool changed = true;
+                int maxIterations = 10;
+                while (changed && maxIterations-- > 0)
+                {
+                    changed = false;
+                    Dictionary<string, List<int>> currentTitleGroups = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+                    foreach (int idx in collisionIndices)
+                    {
+                        string t = _tabs[idx].Title;
+                        if (string.IsNullOrEmpty(t)) continue;
+                        if (!currentTitleGroups.ContainsKey(t)) currentTitleGroups[t] = new List<int>();
+                        currentTitleGroups[t].Add(idx);
+                    }
+
+                    foreach (KeyValuePair<string, List<int>> entry in currentTitleGroups)
+                    {
+                        if (entry.Value.Count > 1)
+                        {
+                            foreach (int idx in entry.Value)
                             {
-                                _tabs[idx].Title = nextTitle;
-                                changed = true;
+                                string nextTitle = GetDeeperTitle(_tabs[idx].Path, _tabs[idx].Title);
+                                if (!string.Equals(nextTitle, _tabs[idx].Title, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    _tabs[idx].Title = nextTitle;
+                                    changed = true;
+                                }
                             }
                         }
                     }
@@ -1027,52 +1039,60 @@ namespace KjTabBar.ViewModels
                 return currentTitle;
             }
 
+            if (currentTitle.Contains("..."))
+            {
+                return path;
+            }
+
             string normalizedPath = path.TrimEnd('\\');
             // セグメントに分割（空要素を除去することで UNC の先頭バックスラッシュ等も一時的に消える）
             string[] segments = normalizedPath.Split(new char[] { '\\' }, StringSplitOptions.RemoveEmptyEntries);
-            if (segments.Length <= 1)
-            {
-                return normalizedPath;
-            }
+
+            if (segments.Length == 0) return path;
 
             // 現在表示されているセグメント数をカウント
-            // 短縮（...）が含まれている場合は、すでに特殊な状態なので、フルパスへ移行を試みる
-            if (currentTitle.Contains("..."))
-            {
-                return normalizedPath;
-            }
-
+            // currentTitle内の「\」の数から推定（例: "Folder" -> 1, "Parent\Folder" -> 2）
             int currentSegmentCount = currentTitle.Split(new char[] { '\\' }, StringSplitOptions.RemoveEmptyEntries).Length;
             int nextSegmentCount = currentSegmentCount + 1;
 
-            if (nextSegmentCount > segments.Length)
+            if (segments.Length <= 1 || nextSegmentCount > segments.Length)
             {
-                return normalizedPath;
-            }
-
-            // 後ろから nextSegmentCount 個のセグメントを結合
-            string newTitle = "";
-            for (int i = segments.Length - nextSegmentCount; i < segments.Length; i++)
-            {
-                if (newTitle.Length > 0)
+                // すでに絶対パス形式（ドライブ文字等を含む）の場合は、さらに親を付加すると冗長になるため避ける
+                if (currentTitle.Length >= 2 && currentTitle[1] == ':')
                 {
-                    newTitle += @"\";
+                    return currentTitle;
                 }
-                newTitle += segments[i];
+
+                // 物理的な階層がこれ以上ない場合、シェルオブジェクト経由で親の名前を取得することを試みる（仮想フォルダ対応）
+                string parentName = _explorerService.GetParentFolderName(normalizedPath);
+                if (!string.IsNullOrEmpty(parentName) && !string.Equals(parentName, currentTitle, StringComparison.OrdinalIgnoreCase))
+                {
+                    string joined = parentName + @"\" + currentTitle;
+                    // ドライブ名（"Windows (C:)" 等）に対して joined が "C:\Windows (C:)" になるのを防ぐ
+                    if (path.Length >= 2 && path[1] == ':' && string.Equals(parentName, path.Substring(0, 2), StringComparison.OrdinalIgnoreCase))
+                    {
+                         return path;
+                    }
+                    return joined;
+                }
+                return path;
             }
 
-            // UNC パスの場合は先頭に \\ を復元
-            if (path.StartsWith(@"\\") && !newTitle.StartsWith(@"\\"))
+            // 1つ上のセグメントを取得
+            string parentSegment = segments[segments.Length - nextSegmentCount];
+            string result = parentSegment + @"\" + currentTitle;
+
+            // UNC パスまたはドライブレター、ルートに関する補正
+            if (path.StartsWith(@"\\") && !result.StartsWith(@"\\") && segments.Length == nextSegmentCount)
             {
-                newTitle = @"\\" + newTitle;
+                result = @"\\" + result;
             }
-            // ドライブレター直下の場合はバックスラッシュが消えている可能性があるので補正（C:Work -> C:\Work）
-            else if (newTitle.Length >= 2 && newTitle[1] == ':' && newTitle.Length > 2 && newTitle[2] != '\\')
+            else if (result.Length >= 2 && result[1] == ':' && result.Length > 2 && result[2] != '\\')
             {
-                newTitle = newTitle.Insert(2, @"\");
+                result = result.Insert(2, @"\");
             }
 
-            return newTitle;
+            return result;
         }
 
         private string ShortenTitle(string title, int maxLen)
@@ -1100,7 +1120,8 @@ namespace KjTabBar.ViewModels
                 if (string.IsNullOrEmpty(leafName)) leafName = title; // 末尾が \ の場合など
 
                 // ルート部分 + "...\" + 末尾部分 で収まるかチェック
-                if (rootLen + 3 + leafName.Length <= maxLen)
+                // ルートが特定できている場合のみ構造を維持
+                if ((rootLen > 0 || title.StartsWith(@"\\")) && rootLen + 3 + leafName.Length <= maxLen)
                 {
                     string rootPart = title.Substring(0, rootLen);
                     // 必要なら "\" を補う
