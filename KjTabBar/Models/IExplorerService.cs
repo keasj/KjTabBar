@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using KjTabBar.Helpers;
 
@@ -23,6 +23,8 @@ namespace KjTabBar.Models
         bool Navigate(IntPtr explorerHwnd, string path);
         void OpenInNewWindow(string path);
         void CreateShortcuts(string[] sourceFiles, string destinationFolder, IntPtr targetWindowHandle);
+        void CreateSymbolicLinks(string[] sourceFiles, string destinationFolder, IntPtr targetWindowHandle);
+        string GetParentFolderName(string path);
 
         string GetLocalizedControlPanelTitle();
         string GetLocalizedNetworkTitle();

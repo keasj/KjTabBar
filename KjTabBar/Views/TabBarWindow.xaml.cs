@@ -875,6 +875,14 @@ namespace KjTabBar.Views
                             moveItem.Click += (s, ev) => ExecuteFileOperation(paths, targetTab.Path, NativeMethods.FO_MOVE);
                             menu.Items.Add(moveItem);
 
+                            MenuItem shortcutItem = new MenuItem() { Header = TryFindResource("MenuShortcutHere") as string ?? "ショートカットをここに作成(&S)" };
+                            shortcutItem.Click += (s, ev) => _explorerService.CreateShortcuts(paths, targetTab.Path, _myHwnd);
+                            menu.Items.Add(shortcutItem);
+
+                            MenuItem symlinkItem = new MenuItem() { Header = TryFindResource("MenuSymlinkHere") as string ?? "シンボリックリンクをここに作成(&L)" };
+                            symlinkItem.Click += (s, ev) => _explorerService.CreateSymbolicLinks(paths, targetTab.Path, _myHwnd);
+                            menu.Items.Add(symlinkItem);
+
                             menu.Items.Add(new Separator());
 
                             MenuItem cancelItem = new MenuItem() { Header = TryFindResource("SettingsButtonCancel") as string ?? "キャンセル" };

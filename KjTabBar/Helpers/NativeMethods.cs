@@ -251,6 +251,14 @@ namespace KjTabBar.Helpers
         public const ushort FOF_ALLOWUNDO = 0x0040;
         public const ushort FOF_NOCONFIRMATION = 0x0010;
 
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.I1)]
+        public static extern bool CreateSymbolicLink(string lpSymlinkFileName, string lpTargetFileName, uint dwFlags);
+
+        public const uint SYMBOLIC_LINK_FLAG_FILE = 0x0;
+        public const uint SYMBOLIC_LINK_FLAG_DIRECTORY = 0x1;
+        public const uint SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE = 0x2;
+
         // Window Composition (Blur Behind / Acrylic)
         [DllImport("user32.dll")]
         public static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref WindowCompositionAttributeData data);
@@ -308,16 +316,28 @@ namespace KjTabBar.Helpers
             void EnumItems(out IntPtr ppenumShellItems);
         }
 
+        [DllImport("shell32.dll", ExactSpelling = true)]
+        public static extern int SHGetNameFromIDList(IntPtr pidl, SIGDN sigdnName, out IntPtr ppszName);
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        public static extern int SHParseDisplayName(string pszName, IntPtr pbc, out IntPtr ppidl, uint sfgaoIn, out uint psfgaoOut);
+
+        [DllImport("shell32.dll", ExactSpelling = true)]
+        public static extern int SHCreateItemFromIDList(IntPtr pidl, [In] ref Guid riid, [Out, MarshalAs(UnmanagedType.Interface)] out IShellItem ppv);
+
+        [DllImport("shell32.dll", ExactSpelling = true)]
+        public static extern uint ILGetSize(IntPtr pidl);
+
         [ComImport]
         [Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe")]
         [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
         public interface IShellItem
         {
-            void BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppv);
-            void GetParent(out IShellItem ppsi);
-            void GetDisplayName(SIGDN sigdnName, out IntPtr ppszName);
-            void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
-            void Compare(IShellItem psi, uint hint, out int piOrder);
+            [PreserveSig] int BindToHandler(IntPtr pbc, [In] ref Guid bhid, [In] ref Guid riid, out IntPtr ppv);
+            [PreserveSig] int GetParent(out IShellItem ppsi);
+            [PreserveSig] int GetDisplayName(SIGDN sigdnName, out IntPtr ppszName);
+            [PreserveSig] int GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
+            [PreserveSig] int Compare(IShellItem psi, uint hint, out int piOrder);
         }
 
         public enum SIGDN : uint
@@ -338,15 +358,5 @@ namespace KjTabBar.Helpers
 
         [DllImport("shell32.dll", ExactSpelling = true)]
         public static extern void ILFree(IntPtr pidl);
-
-        [DllImport("shell32.dll", ExactSpelling = true)]
-        public static extern int SHGetNameFromIDList(IntPtr pidl, SIGDN sigdnName, out IntPtr ppszName);
-
-        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-        public static extern int SHParseDisplayName(string pszName, IntPtr pbc, out IntPtr ppidl, uint sfgaoIn, out uint psfgaoOut);
-
-        [DllImport("shell32.dll", ExactSpelling = true)]
-        public static extern uint ILGetSize(IntPtr pidl);
     }
 }
-

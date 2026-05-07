@@ -1,65 +1,71 @@
 ﻿<Window x:Class="KjTabBar.Views.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="{DynamicResource SettingsWindowTitle}" Height="280" Width="300"
+        Title="{DynamicResource SettingsWindowTitle}" Height="300" Width="340"
         WindowStartupLocation="CenterOwner" Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize"
         Icon="pack://application:,,,/KjTabBar;component/Assets/Icons/app_icon.png"
-        Background="{DynamicResource SettingsBg}">
+        Background="{DynamicResource SettingsBg}"
+        FontFamily="Segoe UI"
+        FontSize="13">
     <Window.Resources>
-        <!-- テーマ用デフォルト値（実行時にコードビハインドで上書きされる） -->
         <SolidColorBrush x:Key="SettingsBg" Color="{x:Static SystemColors.WindowColor}"/>
         <SolidColorBrush x:Key="SettingsFg" Color="Black"/>
         <SolidColorBrush x:Key="SettingsControlBg" Color="White"/>
         <SolidColorBrush x:Key="SettingsControlFg" Color="Black"/>
         <SolidColorBrush x:Key="SettingsBorderBrush" Color="#CCCCCC"/>
+
+        <Style x:Key="SettingsInputStyle" TargetType="Control">
+            <Setter Property="Background" Value="{DynamicResource SettingsControlBg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource SettingsControlFg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SettingsBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="6,4"/>
+        </Style>
     </Window.Resources>
-    <Grid Margin="10" Background="{DynamicResource SettingsBg}">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto"/>
-            <ColumnDefinition Width="*"/>
-        </Grid.ColumnDefinitions>
+    <Border Margin="10" Padding="12" Background="{DynamicResource SettingsBg}" BorderBrush="{DynamicResource SettingsBorderBrush}" BorderThickness="1" CornerRadius="10">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
 
-        <TextBlock Text="{DynamicResource SettingsLabelFont}" Grid.Row="0" Grid.Column="0" Margin="0,5,5,5" VerticalAlignment="Center" Foreground="{DynamicResource SettingsFg}"/>
-        <ComboBox Name="FontCombo" Grid.Row="0" Grid.Column="1" Margin="0,5,0,5" 
-                  Background="{DynamicResource SettingsControlBg}" Foreground="{DynamicResource SettingsControlFg}" BorderBrush="{DynamicResource SettingsBorderBrush}"
-                  ItemsSource="{Binding AvailableFonts}" 
-                  SelectedItem="{Binding FontFamily}"/>
+            <TextBlock Text="{DynamicResource SettingsLabelFont}" Grid.Row="0" Grid.Column="0" Margin="0,6,10,6" VerticalAlignment="Center" Foreground="{DynamicResource SettingsFg}"/>
+            <ComboBox Name="FontCombo" Grid.Row="0" Grid.Column="1" Margin="0,6,0,6" Style="{StaticResource SettingsInputStyle}" ItemsSource="{Binding AvailableFonts}" SelectedItem="{Binding FontFamily}"/>
 
-        <TextBlock Text="{DynamicResource SettingsLabelSize}" Grid.Row="1" Grid.Column="0" Margin="0,5,5,5" VerticalAlignment="Center" Foreground="{DynamicResource SettingsFg}"/>
-        <StackPanel Orientation="Horizontal" Grid.Row="1" Grid.Column="1" Margin="0,5,0,5">
-            <TextBox Name="SizeText" Width="50" Margin="0,0,5,0" VerticalContentAlignment="Center" Text="{Binding FontSize, UpdateSourceTrigger=PropertyChanged}" Background="{DynamicResource SettingsControlBg}" Foreground="{DynamicResource SettingsControlFg}" BorderBrush="{DynamicResource SettingsBorderBrush}"/>
-            <Button Content="A-" Width="24" Height="24" Click="BtnDecreaseFontSize_Click" Margin="0,0,2,0" FontWeight="Bold" Background="{DynamicResource SettingsControlBg}" Foreground="{DynamicResource SettingsControlFg}" BorderBrush="{DynamicResource SettingsBorderBrush}"/>
-            <Button Content="A+" Width="24" Height="24" Click="BtnIncreaseFontSize_Click" FontWeight="Bold" Background="{DynamicResource SettingsControlBg}" Foreground="{DynamicResource SettingsControlFg}" BorderBrush="{DynamicResource SettingsBorderBrush}"/>
-        </StackPanel>
-
-        <TextBlock Text="{DynamicResource SettingsLabelDecoration}" Grid.Row="2" Grid.Column="0" Margin="0,5,5,5" VerticalAlignment="Center" Foreground="{DynamicResource SettingsFg}"/>
-        <StackPanel Orientation="Horizontal" Grid.Row="2" Grid.Column="1" Margin="0,5,0,5">
-            <CheckBox Content="{DynamicResource SettingsLabelBold}" IsChecked="{Binding IsBold}" Margin="0,0,10,0" VerticalAlignment="Center" Foreground="{DynamicResource SettingsFg}"/>
-            <CheckBox Content="{DynamicResource SettingsLabelItalic}" IsChecked="{Binding IsItalic}" VerticalAlignment="Center" Foreground="{DynamicResource SettingsFg}"/>
-        </StackPanel>
-
-        <StackPanel Grid.Row="6" Grid.ColumnSpan="2" Margin="0,15,0,0">
-            <Separator Height="1" Background="{DynamicResource SettingsBorderBrush}" Margin="0,0,0,5" Opacity="0.5"/>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <TextBlock Text="{Binding ProgramName}" Foreground="{DynamicResource SettingsFg}" Opacity="0.7" Margin="0,0,10,0"/>
-                <TextBlock Text="{Binding Version}" Foreground="{DynamicResource SettingsFg}" Opacity="0.7"/>
+            <TextBlock Text="{DynamicResource SettingsLabelSize}" Grid.Row="1" Grid.Column="0" Margin="0,6,10,6" VerticalAlignment="Center" Foreground="{DynamicResource SettingsFg}"/>
+            <StackPanel Orientation="Horizontal" Grid.Row="1" Grid.Column="1" Margin="0,6,0,6">
+                <TextBox Name="SizeText" Width="60" Margin="0,0,6,0" VerticalContentAlignment="Center" Text="{Binding FontSize, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SettingsInputStyle}"/>
+                <Button Content="A-" Width="30" Height="28" Click="BtnDecreaseFontSize_Click" Margin="0,0,4,0" FontWeight="SemiBold" Style="{StaticResource SettingsInputStyle}"/>
+                <Button Content="A+" Width="30" Height="28" Click="BtnIncreaseFontSize_Click" FontWeight="SemiBold" Style="{StaticResource SettingsInputStyle}"/>
             </StackPanel>
-        </StackPanel>
 
-        <StackPanel Grid.Row="7" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
-            <Button Content="{DynamicResource SettingsButtonSave}" Width="70" Margin="0,0,10,0" Click="Save_Click" Background="{DynamicResource SettingsControlBg}" Foreground="{DynamicResource SettingsControlFg}" BorderBrush="{DynamicResource SettingsBorderBrush}"/>
-            <Button Content="{DynamicResource SettingsButtonCancel}" Width="70" Click="Cancel_Click" Background="{DynamicResource SettingsControlBg}" Foreground="{DynamicResource SettingsControlFg}" BorderBrush="{DynamicResource SettingsBorderBrush}"/>
-        </StackPanel>
-    </Grid>
+            <TextBlock Text="{DynamicResource SettingsLabelDecoration}" Grid.Row="2" Grid.Column="0" Margin="0,6,10,6" VerticalAlignment="Center" Foreground="{DynamicResource SettingsFg}"/>
+            <StackPanel Orientation="Horizontal" Grid.Row="2" Grid.Column="1" Margin="0,6,0,6">
+                <CheckBox Content="{DynamicResource SettingsLabelBold}" IsChecked="{Binding IsBold}" Margin="0,0,12,0" VerticalAlignment="Center" Foreground="{DynamicResource SettingsFg}"/>
+                <CheckBox Content="{DynamicResource SettingsLabelItalic}" IsChecked="{Binding IsItalic}" VerticalAlignment="Center" Foreground="{DynamicResource SettingsFg}"/>
+            </StackPanel>
+
+            <StackPanel Grid.Row="5" Grid.ColumnSpan="2" Margin="0,12,0,0">
+                <Separator Height="1" Background="{DynamicResource SettingsBorderBrush}" Margin="0,0,0,6" Opacity="0.5"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <TextBlock Text="{Binding ProgramName}" Foreground="{DynamicResource SettingsFg}" Opacity="0.7" Margin="0,0,10,0"/>
+                    <TextBlock Text="{Binding Version}" Foreground="{DynamicResource SettingsFg}" Opacity="0.7"/>
+                </StackPanel>
+            </StackPanel>
+
+            <StackPanel Grid.Row="6" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                <Button Content="{DynamicResource SettingsButtonSave}" Width="80" Height="30" Margin="0,0,10,0" Click="Save_Click" Style="{StaticResource SettingsInputStyle}"/>
+                <Button Content="{DynamicResource SettingsButtonCancel}" Width="80" Height="30" Click="Cancel_Click" Style="{StaticResource SettingsInputStyle}"/>
+            </StackPanel>
+        </Grid>
+    </Border>
 </Window>
-

@@ -1,4 +1,4 @@
-using Microsoft.VisualStudio.TestTools.UnitTesting;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using KjTabBar.Models;
 using System;
 
@@ -102,6 +102,31 @@ namespace UnitTestProject
             Assert.IsTrue(allowSpecialPath);
         }
 
+        [TestMethod]
+        public void Evaluate_ControlPanel_DesktopCandidate_HiddenPending_Returns_Absorb()
+        {
+            ExplorerWindowContext context = new ExplorerWindowContext
+            {
+                CurrentPath = "::{26EE0668-A00A-44D7-9371-BEB064C98683}",
+                TitleVirtualPath = "Control Panel",
+                HasValidTarget = true,
+                HasControlPanelTarget = false,
+                IsDesktopCandidate = true,
+                IsHiddenPending = true,
+                IsDesktopShortcutTargetFunc = (p) => false,
+                IsDesktopFolderPathFunc = (p) => false,
+                IsDesktopShellItemPathFunc = (p) => false
+            };
+
+            _explorerService.IsControlPanelPathFunc = (p) => true;
+
+            string resolvedPath;
+            bool allowSpecialPath;
+            AbsorptionAction action = ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath);
+
+            Assert.AreEqual(AbsorptionAction.Absorb, action);
+            Assert.IsTrue(allowSpecialPath);
+        }
         [TestMethod]
         public void Evaluate_ControlPanel_WithoutDesktopEvidence_Returns_Ignore()
         {
@@ -245,3 +270,4 @@ namespace UnitTestProject
         }
     }
 }
+

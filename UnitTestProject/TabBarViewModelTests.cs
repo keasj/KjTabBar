@@ -9,6 +9,13 @@ namespace UnitTestProject
     [TestClass]
     public class TabBarViewModelTests
     {
+        private TabBarViewModel CreateViewModel()
+        {
+            MockUserSettings mockSettings = new MockUserSettings();
+            MockExplorerService mockExplorer = new MockExplorerService();
+            return new TabBarViewModel(IntPtr.Zero, mockSettings, mockExplorer);
+        }
+
         [TestMethod]
         public void Load_TabBarViewModel_Applies_UserSettings()
         {
@@ -178,6 +185,7 @@ namespace UnitTestProject
             Assert.AreEqual(@"C:\Tab3", vm.Tabs[3].Path);
             Assert.AreEqual(@"C:\Tab4", vm.Tabs[4].Path);
         }
+
         [TestMethod]
         public void UpdateTabTitles_Disambiguates_Duplicate_Folder_Names_By_Parent_Folder()
         {
@@ -206,6 +214,22 @@ namespace UnitTestProject
 
             Assert.AreEqual(@"Client1\Project\Sub", vm.Tabs[0].Title);
             Assert.AreEqual(@"Client2\Project\Sub", vm.Tabs[1].Title);
+        }
+
+        [TestMethod]
+        public void ShortenTitle_Handles_Non_Absolute_Path_Without_Losing_Parent()
+        {
+            var vm = CreateViewModel();
+            // 10文字制限で、15文字の親 + \ + 4文字の子 = 20文字 (短縮あり)
+            string title20 = "ParentFolderABC\\Work";
+            string result20 = (string)typeof(TabBarViewModel).GetMethod("ShortenTitle", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .Invoke(vm, new object[] { title20, 10 });
+
+            // 修正前は "\...\Work" になっていた
+            // 修正後は中央省略形式（例: "Par...Work"）になるはず
+            Assert.AreNotEqual("\\...\\Work", result20, "Should not use root-anchored shortening for non-absolute path.");
+            Assert.IsTrue(result20.StartsWith("Par"), $"Shortened title '{result20}' should preserve the start of the title.");
         }
 
         private class CustomMockExplorerService : MockExplorerService

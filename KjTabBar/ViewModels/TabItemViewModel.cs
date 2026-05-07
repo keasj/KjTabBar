@@ -1,4 +1,4 @@
-﻿using KjTabBar.Models;
+using KjTabBar.Models;
 
 namespace KjTabBar.ViewModels
 {
@@ -9,10 +9,18 @@ namespace KjTabBar.ViewModels
         private string _path;
         private bool _isActive;
 
+        private string _baseTitle;
+
         public string Title
         {
             get { return _title; }
             set { _title = value; OnPropertyChanged("Title"); }
+        }
+
+        public string BaseTitle
+        {
+            get { return _baseTitle; }
+            set { _baseTitle = value; OnPropertyChanged("BaseTitle"); }
         }
 
         public string Path
@@ -31,7 +39,8 @@ namespace KjTabBar.ViewModels
         {
             _path = path;
             _explorerService = explorerService;
-            _title = string.IsNullOrEmpty(title) ? _explorerService.GetLocalizedHomeTitle() : title;
+            _baseTitle = string.IsNullOrEmpty(title) ? _explorerService.GetLocalizedHomeTitle() : title;
+            _title = _baseTitle;
             _isActive = false;
         }
     }

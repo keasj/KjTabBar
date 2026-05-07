@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using Microsoft.Win32;
@@ -62,13 +62,13 @@ namespace KjTabBar.Models
 
         private void RunPeriodicComCleanup()
         {
-            _comCleanupCounter++;
-            if (_comCleanupCounter < ComCleanupInterval)
+            int counter = System.Threading.Interlocked.Increment(ref _comCleanupCounter);
+            if (counter < ComCleanupInterval)
             {
                 return;
             }
 
-            _comCleanupCounter = 0;
+            System.Threading.Interlocked.Exchange(ref _comCleanupCounter, 0);
             try
             {
                 Marshal.CleanupUnusedObjectsInCurrentContext();
@@ -231,6 +231,16 @@ namespace KjTabBar.Models
 
                         string locationName = "";
                         try { locationName = (string)GetComProperty(window, "LocationName"); } catch { }
+
+                        // [BUG_FIX] コントロールパネル配下の項目（電源オプション等）からコントロールパネル（ルート）に
+                        // 戻った際、folderPath が古い項目のパスを返し続けることがあるため、
+                        // locationName がコントロールパネルルートを示している場合は最優先でそのパスを返す。
+                        string mappedCPPath = MapLocationNameToKnownShellPath(locationName);
+                        if (!string.IsNullOrEmpty(mappedCPPath) && IsControlPanelRootPath(mappedCPPath))
+                        {
+                            result = mappedCPPath;
+                            break;
+                        }
 
                         string folderPath = null;
                         object document = null;
@@ -1181,6 +1191,93 @@ namespace KjTabBar.Models
             return GetFolderNameInternal(path);
         }
 
+        public string GetParentFolderName(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return null;
+
+            string displayPath = GetNavigableShellPath(path);
+            if (string.IsNullOrEmpty(displayPath))
+            {
+                displayPath = path;
+            }
+
+            // 方法1: IShellItem を使用 (最も堅牢)
+            IntPtr pidl = IntPtr.Zero;
+            NativeMethods.IShellItem item = null;
+            NativeMethods.IShellItem parent = null;
+            try
+            {
+                uint dummy;
+                if (NativeMethods.SHParseDisplayName(displayPath, IntPtr.Zero, out pidl, 0, out dummy) == 0 && pidl != IntPtr.Zero)
+                {
+                    Guid iid = typeof(NativeMethods.IShellItem).GUID;
+                    if (NativeMethods.SHCreateItemFromIDList(pidl, ref iid, out item) == 0)
+                    {
+                        if (item.GetParent(out parent) == 0 && parent != null)
+                        {
+                            IntPtr pName;
+                            if (parent.GetDisplayName(NativeMethods.SIGDN.NORMALDISPLAY, out pName) == 0 && pName != IntPtr.Zero)
+                            {
+                                string name = Marshal.PtrToStringUni(pName);
+                                Marshal.FreeCoTaskMem(pName);
+                                if (!string.IsNullOrEmpty(name)) return name;
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+            finally
+            {
+                ReleaseComObjectSafe(parent);
+                ReleaseComObjectSafe(item);
+                if (pidl != IntPtr.Zero) NativeMethods.ILFree(pidl);
+            }
+
+            // 方法2: Shell.Application COM を使用 (フォールバック)
+            object shellObject = null;
+            object folder = null;
+            object parentFolder = null;
+            try
+            {
+                if (!TryGetShellApplication(out shellObject)) return null;
+                folder = InvokeComMethod(shellObject, "NameSpace", displayPath);
+                if (folder == null) return null;
+
+                parentFolder = GetComProperty(folder, "ParentFolder");
+                if (parentFolder == null)
+                {
+                    return null;
+                }
+                
+                string title = GetComProperty(parentFolder, "Title") as string;
+                if (string.IsNullOrEmpty(title))
+                {
+                    object parentItem = null;
+                    try
+                    {
+                        parentItem = GetComProperty(parentFolder, "Self");
+                        title = GetComProperty(parentItem, "Name") as string;
+                    }
+                    finally
+                    {
+                        ReleaseComObjectSafe(parentItem);
+                    }
+                }
+
+                return title;
+            }
+            catch
+            {
+                return null;
+            }
+            finally
+            {
+                ReleaseComObjectSafe(parentFolder);
+                ReleaseComObjectSafe(folder);
+            }
+        }
+
         private string GetFolderNameInternal(string path)
         {
             if (string.IsNullOrEmpty(path)) return GetLocalizedHomeTitle();
@@ -1202,7 +1299,7 @@ namespace KjTabBar.Models
                     ns = InvokeComMethod(shell, "NameSpace", displayPath);
                     if (ns != null)
                     {
-                        string title = (string)GetComProperty(ns, "Title");
+                        string title = GetComProperty(ns, "Title") as string;
                         if (!string.IsNullOrEmpty(title))
                         {
                             return title;
@@ -1218,7 +1315,7 @@ namespace KjTabBar.Models
             }
 
             // Shell.Application が失敗した場合は COM API で直接パースして表示名を取得
-            if (displayPath.StartsWith("::{"))
+            if (displayPath.StartsWith("::{") || displayPath.StartsWith("shell:"))
             {
                 IntPtr pidl = IntPtr.Zero;
                 uint dummyOut;
@@ -1230,7 +1327,7 @@ namespace KjTabBar.Models
                         IntPtr pName;
                         if (NativeMethods.SHGetNameFromIDList(pidl, NativeMethods.SIGDN.NORMALDISPLAY, out pName) == 0 && pName != IntPtr.Zero)
                         {
-                            string title = Marshal.PtrToStringAuto(pName);
+                            string title = Marshal.PtrToStringUni(pName); // Unicode 指定
                             Marshal.FreeCoTaskMem(pName);
                             if (!string.IsNullOrEmpty(title)) return title.TrimEnd('\0');
                         }
@@ -1423,6 +1520,140 @@ namespace KjTabBar.Models
                 RunPeriodicComCleanup();
             }
         }
+
+        public void CreateSymbolicLinks(string[] sourcePaths, string destinationDirectory, IntPtr ownerHwnd)
+        {
+            if (sourcePaths == null || sourcePaths.Length == 0 || string.IsNullOrEmpty(destinationDirectory)) return;
+
+            var linksToCreate = new List<Tuple<string, string, bool>>();
+            var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            for (int i = 0; i < sourcePaths.Length; i++)
+            {
+                string sourcePath = sourcePaths[i];
+                string fileName = Path.GetFileName(sourcePath);
+                if (string.IsNullOrEmpty(fileName))
+                {
+                    fileName = GetFolderName(sourcePath);
+                }
+
+                char[] invalidChars = Path.GetInvalidFileNameChars();
+                for (int j = 0; j < invalidChars.Length; j++)
+                {
+                    fileName = fileName.Replace(invalidChars[j], '_');
+                }
+
+                bool isDirectory = Directory.Exists(sourcePath);
+                string ext = isDirectory ? "" : Path.GetExtension(sourcePath);
+                string baseName = isDirectory || string.IsNullOrEmpty(ext) ? fileName : Path.GetFileNameWithoutExtension(fileName);
+
+                string linkName = baseName + ext;
+                string linkPath = Path.Combine(destinationDirectory, linkName);
+                
+                int count = 2;
+                while (File.Exists(linkPath) || Directory.Exists(linkPath) || usedPaths.Contains(linkPath))
+                {
+                    linkName = baseName + " (" + count + ")" + ext;
+                    linkPath = Path.Combine(destinationDirectory, linkName);
+                    count++;
+                }
+
+                linksToCreate.Add(new Tuple<string, string, bool>(linkPath, sourcePath, isDirectory));
+                usedPaths.Add(linkPath);
+            }
+
+            var failedLinks = new List<Tuple<string, string, bool>>();
+            var otherErrorOccurred = false;
+
+            foreach (var link in linksToCreate)
+            {
+                string linkPath = link.Item1;
+                string sourcePath = link.Item2;
+                bool isDirectory = link.Item3;
+
+                uint flags = isDirectory ? NativeMethods.SYMBOLIC_LINK_FLAG_DIRECTORY : NativeMethods.SYMBOLIC_LINK_FLAG_FILE;
+                flags |= NativeMethods.SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE;
+
+                if (!NativeMethods.CreateSymbolicLink(linkPath, sourcePath, flags))
+                {
+                    int errorCode = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+                    // 1314 = ERROR_PRIVILEGE_NOT_HELD
+                    if (errorCode == 1314)
+                    {
+                        failedLinks.Add(link);
+                    }
+                    else
+                    {
+                        otherErrorOccurred = true;
+                    }
+                }
+            }
+
+            if (failedLinks.Count > 0)
+            {
+                var result = System.Windows.MessageBox.Show(
+                    "シンボリックリンクを作成する権限がありません。\n管理者権限を使用して作成しますか？\n\n（「いいえ」を選択した場合、Windowsの設定で「開発者モード」をオンにして権限を確保する必要があります）",
+                    "権限の確認",
+                    System.Windows.MessageBoxButton.YesNo,
+                    System.Windows.MessageBoxImage.Question);
+
+                if (result == System.Windows.MessageBoxResult.Yes)
+                {
+                    string tempBatFile = Path.Combine(Path.GetTempPath(), "KjTabBar_CreateSymlinks_" + Guid.NewGuid().ToString("N") + ".bat");
+                    try
+                    {
+                        using (StreamWriter sw = new StreamWriter(tempBatFile, false, new UTF8Encoding(false)))
+                        {
+                            sw.WriteLine("@echo off");
+                            sw.WriteLine("chcp 65001 >nul");
+                            foreach (var link in failedLinks)
+                            {
+                                string opt = link.Item3 ? "/d " : "";
+                                // バッチファイル内では%を%%にエスケープする必要がある
+                                string escapedLinkPath = link.Item1.Replace("%", "%%");
+                                string escapedSourcePath = link.Item2.Replace("%", "%%");
+                                sw.WriteLine($"mklink {opt}\"{escapedLinkPath}\" \"{escapedSourcePath}\"");
+                            }
+                        }
+
+                        var startInfo = new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = tempBatFile,
+                            UseShellExecute = true,
+                            Verb = "runas",
+                            WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
+                            CreateNoWindow = true
+                        };
+                        using (var process = System.Diagnostics.Process.Start(startInfo))
+                        {
+                            process.WaitForExit();
+                        }
+                    }
+                    catch (System.ComponentModel.Win32Exception)
+                    {
+                        // UACプロンプトでキャンセルされた場合などは何もしない
+                    }
+                    finally
+                    {
+                        if (File.Exists(tempBatFile))
+                        {
+                            try { File.Delete(tempBatFile); } catch { }
+                        }
+                    }
+                }
+            }
+            
+            if (otherErrorOccurred)
+            {
+                System.Windows.MessageBox.Show(
+                    "一部のシンボリックリンクの作成に失敗しました。",
+                    "エラー",
+                    System.Windows.MessageBoxButton.OK,
+                    System.Windows.MessageBoxImage.Error);
+            }
+
+        }
+
 
         private string BuildUniqueShortcutPath(string destinationDirectory, string baseFileName)
         {

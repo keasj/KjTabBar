@@ -1,42 +1,50 @@
 # KjTabBar
 
-Windows エクスプローラー（`explorer.exe`）を独自のタブバーで統合し、タブ型ファイラーのように操作できるようにする常駐型デスクトップアプリケーションです。
-エクスプローラー本体を直接フック・改造するのではなく、独立したツールウィンドウをエクスプローラーの上部に追従・密着させることで、安定した動作と高い互換性を実現しています。
+[Japanese README](./README_jp.md)
 
-## 特徴
+KjTabBar is a resident desktop application that integrates Windows Explorer (`explorer.exe`) with a custom tab bar so you can use it like a tabbed file manager.
+Instead of hooking into or modifying Explorer itself, it places an independent tool window tightly above Explorer, providing stable behavior and high compatibility.
 
-- **タブ化によるウィンドウ統合**
-  - 複数のエクスプローラーをシステム全体で一元管理し、1つのタブバーウィンドウに統合します。
-- **ドラッグ＆ドロップ対応**
-  - タブの並び替え（左ボタンドラッグ）
-  - タブへのファイル・フォルダ移動やコピー（外部からのドロップ）
-  - 右ドラッグドロップ時のコンテキストメニュー（「ここにコピー」「ここに移動」など）
-- **シームレスな追従・UI連携**
-  - エクスプローラーの位置・サイズ変更、DPI スケール変更にリアルタイムに追従
-  - Windows のダークモード・ライトモード設定への自動追従
-- **安定した常駐動作**
-  - システムトレイ（タスクトレイ）に常駐し、バックグラウンドでリソースを適切に管理します。
-  - プログラム自体の独立性が高いため、Windowsのアップデートなどによる影響を受けにくい設計です。
+![KjTabBar screenshot](./screenshot.png)
 
-## 動作環境
+## Features
+
+- **Tabbed window integration**
+  - Multiple Explorer windows are managed across the system and consolidated into a single tab bar window.
+- **Drag and drop support**
+  - Reorder tabs with left-button drag
+  - Move or copy files and folders onto tabs by dropping items from outside
+  - Show a context menu on right-drag drop such as "Copy here" and "Move here"
+- **Seamless tracking and UI integration**
+  - Tracks Explorer position, size, and DPI scale changes in real time
+  - Automatically follows the Windows dark/light mode setting
+- **Stable resident behavior**
+  - Stays in the system tray and manages resources appropriately in the background
+  - Because the application is highly independent from Explorer itself, it is designed to be less affected by Windows updates and similar changes
+
+## Requirements
 
 - OS: Windows 10 / Windows 11
-- ランタイム: .NET 環境 (仕様に合わせてご準備ください)
+- Runtime: .NET environment (prepare it according to the specification)
 
-## 使い方
+## Usage
 
-1. アプリケーション（`KjTabBar.exe`）を起動すると、タスクトレイに常駐します。
-2. Windows エクスプローラーを開くと、ウィンドウ上部にタブバーが自動的に表示されます。
-3. デスクトップや特定のショートカットから新しいエクスプローラーを開いた際、自動的に既存のタブバー内へ新しいタブとして吸収・統合されます。
-4. **タブの操作**:
-   - 右にある `＋` ボタンで新しいタブ（フォルダ）を開くことができます。
-   - タブを右クリックすると、`タブの複製` `別ウィンドウで開く` `パスのコピー` `タブを閉じる` などの操作が可能です。
-5. **設定**:
-   - タブバーの背景部分（空いている場所）を右クリックして `設定...` を選択すると、タブのフォントサイズなどを変更できます。
-6. 終了する場合は、タスクトレイのアイコンを右クリックして `終了` を選択してください。
+1. Launch the application (`KjTabBar.exe`). It will stay resident in the system tray.
+2. Open Windows Explorer. A tab bar will automatically appear at the top of the window.
+3. When you open a new Explorer window from the desktop or certain shortcuts, it is automatically absorbed and integrated into the existing tab bar as a new tab.
+4. **Tab operations**
+   - Use the `+` button on the right to open a new tab (folder).
+   - Right-click a tab to access actions such as `Duplicate Tab`, `Open in New Window`, `Copy Path`, and `Close Tab`.
+5. **Settings**
+   - Right-click the background area of the tab bar and choose `Settings...` to change options such as the tab font size.
+6. To exit, right-click the task tray icon and choose `Exit`.
 
+## Installation and Uninstallation
 
-## ライセンス
+- During installation, the setup custom action registers the application for startup (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`).
+- During uninstallation, the dedicated uninstaller cleans up the registry entry for auto-start. The settings file (`settings.xml`) and tab history file (`tabs.txt`) are kept under `%APPDATA%\KjTabBar` as user data.
 
-本プロジェクトは **MIT License** のもとで公開・提供されています。
-詳細については、[LICENSE](LICENSE) ファイルをご覧ください。
+## License
+
+This project is distributed under the **MIT License**.
+For details, see the [LICENSE](LICENSE) file.

@@ -8,8 +8,7 @@
 *.sln text eol=crlf
 *.slnx text eol=crlf
 *.md text eol=crlf
-*.png -text
-*.ico -text
+
 ###############################################################################
 # Set default behavior for command prompt diff.
 #
@@ -43,13 +42,29 @@
 #*.wwaproj   merge=binary
 
 ###############################################################################
-# behavior for image files
+# behavior for binary files
 #
-# image files are treated as binary by default.
+# these files are treated as binary to prevent corruption via line-ending 
+# conversion.
 ###############################################################################
-#*.jpg   binary
-#*.png   binary
-#*.gif   binary
+*.jpg   binary
+*.png   binary
+*.gif   binary
+*.ico   binary
+*.bmp   binary
+*.cur   binary
+*.pdf   binary
+*.dll   binary
+*.exe   binary
+*.pdb   binary
+*.lib   binary
+*.zip   binary
+*.7z    binary
+*.gz    binary
+*.cer   binary
+*.pfx   binary
+*.snk   binary
+
 
 ###############################################################################
 # diff behavior for common document formats
@@ -68,3 +83,5 @@
 #*.PDF   diff=astextplain
 #*.rtf   diff=astextplain
 #*.RTF   diff=astextplain
+
+

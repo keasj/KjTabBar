@@ -11,6 +11,10 @@ namespace KjTabBar
     [RunInstaller(true)]
     public class SetupCustomActions : Installer
     {
+        internal const string StartupValueName = "KjTabBar";
+        private const string StartupRunSubKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+        private const string StartupApprovedRunSubKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
+
         public SetupCustomActions()
         {
         }
@@ -25,23 +29,26 @@ namespace KjTabBar
         {
             try
             {
-                // アセンブリ自身の場所からexeパスを特定
-                string assemblyPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
-                string targetDir = Path.GetDirectoryName(assemblyPath);
-                string exePath = Path.Combine(targetDir, "KjTabBar.exe");
-
-                if (!File.Exists(exePath))
+                string exePath;
+                string targetDir;
+                if (TryGetInstalledExecutablePath(out exePath, out targetDir))
                 {
-                    // アセンブリ自体がKjTabBar.exeの場合
-                    exePath = assemblyPath;
-                }
-
-                if (File.Exists(exePath))
-                {
-                    Process installerProcess = Process.GetCurrentProcess();
-                    int installerProcessId = installerProcess.Id;
-                    int preferredSessionId = GetPreferredSessionId(installerProcess.SessionId);
-                    installerProcess.Dispose();
+                    Process installerProcess = null;
+                    int installerProcessId;
+                    int preferredSessionId;
+                    try
+                    {
+                        installerProcess = Process.GetCurrentProcess();
+                        installerProcessId = installerProcess.Id;
+                        preferredSessionId = GetPreferredSessionId(installerProcess.SessionId);
+                    }
+                    finally
+                    {
+                        if (installerProcess != null)
+                        {
+                            installerProcess.Dispose();
+                        }
+                    }
 
                     string escapedExePath = exePath.Replace("'", "''");
                     string escapedWorkingDirectory = targetDir.Replace("'", "''");
@@ -70,7 +77,7 @@ namespace KjTabBar
             }
         }
 
-        private string BuildPostInstallScript(int installerProcessId, int preferredSessionId, string escapedExePath, string escapedWorkingDirectory)
+        internal static string BuildPostInstallScript(int installerProcessId, int preferredSessionId, string escapedExePath, string escapedWorkingDirectory)
         {
             return "$installerPid = " + installerProcessId.ToString() + "; " +
                    "$sessionId = " + preferredSessionId.ToString() + "; " +
@@ -100,7 +107,47 @@ namespace KjTabBar
                    "} " +
                    "} catch {} " +
                    "finally { if ($ws -ne $null) { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($ws) | Out-Null } }; " +
+                   "$runValue = '\"" + escapedExePath + "\"'; " +
+                   "$targetSid = $null; " +
+                   "try { $explorerForSid = Get-Process explorer -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $sessionId } | Sort-Object StartTime -Descending | Select-Object -First 1; if ($explorerForSid) { $explorerCim = Get-CimInstance Win32_Process -Filter \"ProcessId=$($explorerForSid.Id)\" -ErrorAction SilentlyContinue; if ($explorerCim) { $targetSid = (Invoke-CimMethod -InputObject $explorerCim -MethodName GetOwnerSid -ErrorAction SilentlyContinue).Sid } } } catch {}; " +
+                   "try { if (-not [string]::IsNullOrEmpty($targetSid)) { $runKey = 'Registry::HKEY_USERS\\' + $targetSid + '\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' } else { $runKey = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' }; if (-not (Test-Path $runKey)) { New-Item -Path $runKey -Force | Out-Null }; Set-ItemProperty -Path $runKey -Name 'KjTabBar' -Value $runValue } catch {}; " +
                    "Start-Process -FilePath 'explorer.exe' -ArgumentList '\"" + escapedExePath + "\"'";
+        }
+
+        internal static string BuildStartupRunCommand(string exePath)
+        {
+            if (string.IsNullOrEmpty(exePath))
+            {
+                return null;
+            }
+
+            return "\"" + exePath + "\"";
+        }
+
+        private static bool TryGetInstalledExecutablePath(out string exePath, out string targetDir)
+        {
+            exePath = null;
+            targetDir = null;
+
+            string assemblyPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+            if (string.IsNullOrEmpty(assemblyPath))
+            {
+                return false;
+            }
+
+            targetDir = Path.GetDirectoryName(assemblyPath);
+            if (string.IsNullOrEmpty(targetDir))
+            {
+                return false;
+            }
+
+            exePath = Path.Combine(targetDir, "KjTabBar.exe");
+            if (!File.Exists(exePath))
+            {
+                exePath = assemblyPath;
+            }
+
+            return File.Exists(exePath);
         }
 
         private int GetPreferredSessionId(int fallbackSessionId)
@@ -194,20 +241,19 @@ namespace KjTabBar
 
         private void RemoveStartupRegistryValues()
         {
-            const string valueName = "KjTabBar";
             string[] targetSubKeyPaths = new string[]
             {
-                @"Software\Microsoft\Windows\CurrentVersion\Run",
-                @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+                StartupRunSubKeyPath,
+                StartupApprovedRunSubKeyPath
             };
 
             // HKCUに対する削除（アンインストーラがユーザー権限で動いている場合）
-            RemoveStartupRegistryValuesForHive(RegistryHive.CurrentUser, RegistryView.Registry64, valueName, targetSubKeyPaths);
-            RemoveStartupRegistryValuesForHive(RegistryHive.CurrentUser, RegistryView.Registry32, valueName, targetSubKeyPaths);
+            RemoveStartupRegistryValuesForHive(RegistryHive.CurrentUser, RegistryView.Registry64, StartupValueName, targetSubKeyPaths);
+            RemoveStartupRegistryValuesForHive(RegistryHive.CurrentUser, RegistryView.Registry32, StartupValueName, targetSubKeyPaths);
 
             // SYSTEM権限で動いている場合、HKCUはSYSTEMのものになってしまうため、
             // HKEY_USERS にロードされている全ユーザープロファイルから削除する。
-            RemoveStartupRegistryValuesFromAllUsers(targetSubKeyPaths, valueName);
+            RemoveStartupRegistryValuesFromAllUsers(targetSubKeyPaths, StartupValueName);
         }
 
         private void RemoveStartupRegistryValuesFromAllUsers(string[] targetSubKeyPaths, string valueName)

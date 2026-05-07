@@ -133,27 +133,27 @@ namespace KjTabBar.Models
 
             if (_isDarkMode)
             {
-                // ダークモード用カラー
-                resources["ThemeWindowBg"] = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
-                resources["ThemeTabHover"] = new SolidColorBrush(Color.FromArgb(0x44, 0xFF, 0xFF, 0xFF));
-                resources["ThemeFgNormal"] = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xE8));
-                resources["ThemeFgSubtle"] = new SolidColorBrush(Color.FromRgb(0xA0, 0xA0, 0xA0));
-                resources["ThemeAccent"] = new SolidColorBrush(Color.FromArgb(0xCC, 0x50, 0x50, 0x50));
-                resources["ThemeActiveTabBorder"] = new SolidColorBrush(Color.FromRgb(0x4C, 0xC2, 0xFF));
+                // ダークモード用カラー（Fluent 風）
+                resources["ThemeWindowBg"] = new SolidColorBrush(Color.FromArgb(0xE8, 0x20, 0x20, 0x20));
+                resources["ThemeTabHover"] = new SolidColorBrush(Color.FromArgb(0x4D, 0xFF, 0xFF, 0xFF));
+                resources["ThemeFgNormal"] = new SolidColorBrush(Color.FromRgb(0xF3, 0xF3, 0xF3));
+                resources["ThemeFgSubtle"] = new SolidColorBrush(Color.FromRgb(0xC8, 0xC8, 0xC8));
+                resources["ThemeAccent"] = new SolidColorBrush(Color.FromArgb(0x66, 0xFF, 0xFF, 0xFF));
+                resources["ThemeActiveTabBorder"] = new SolidColorBrush(Color.FromRgb(0x60, 0xCD, 0xFF));
                 resources["ThemeCloseHoverBg"] = new SolidColorBrush(Color.FromRgb(0xC4, 0x2B, 0x1C));
-                resources["ThemeBorderLine"] = new SolidColorBrush(Color.FromArgb(0x44, 0xFF, 0xFF, 0xFF));
+                resources["ThemeBorderLine"] = new SolidColorBrush(Color.FromArgb(0x55, 0xFF, 0xFF, 0xFF));
             }
             else
             {
-                // ライトモード用カラー（従来色）
-                resources["ThemeWindowBg"] = new SolidColorBrush(SystemColors.WindowColor);
-                resources["ThemeTabHover"] = new SolidColorBrush(Color.FromArgb(0x88, 0xFF, 0xFF, 0xFF));
-                resources["ThemeFgNormal"] = new SolidColorBrush(Color.FromRgb(0x00, 0x00, 0x00));
-                resources["ThemeFgSubtle"] = new SolidColorBrush(Color.FromRgb(0x60, 0x60, 0x60));
-                resources["ThemeAccent"] = new SolidColorBrush(Color.FromArgb(0xCC, 0xD3, 0xD3, 0xD3));
+                // ライトモード用カラー（Fluent 風）
+                resources["ThemeWindowBg"] = new SolidColorBrush(Color.FromArgb(0xED, 0xF9, 0xF9, 0xF9));
+                resources["ThemeTabHover"] = new SolidColorBrush(Color.FromRgb(0xEF, 0xEF, 0xEF));
+                resources["ThemeFgNormal"] = new SolidColorBrush(Color.FromRgb(0x1F, 0x1F, 0x1F));
+                resources["ThemeFgSubtle"] = new SolidColorBrush(Color.FromRgb(0x5E, 0x5E, 0x5E));
+                resources["ThemeAccent"] = new SolidColorBrush(Color.FromRgb(0xDF, 0xDF, 0xDF));
                 resources["ThemeActiveTabBorder"] = new SolidColorBrush(Color.FromRgb(0x00, 0x78, 0xD4));
                 resources["ThemeCloseHoverBg"] = new SolidColorBrush(Color.FromRgb(0xC4, 0x2B, 0x1C));
-                resources["ThemeBorderLine"] = new SolidColorBrush(Color.FromArgb(0x44, 0x00, 0x00, 0x00));
+                resources["ThemeBorderLine"] = new SolidColorBrush(Color.FromArgb(0x26, 0x00, 0x00, 0x00));
             }
         }
     }
