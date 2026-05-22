@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Concurrent;
+using KjTabBar.Helpers;
 
 namespace KjTabBar.Services
 {
@@ -31,8 +32,9 @@ namespace KjTabBar.Services
                 {
                     action();
                 }
-                catch
+                catch (Exception ex)
                 {
+                    AppLogger.LogError("ComThreadService", "Unhandled action failed on COM worker thread.", ex);
                 }
             }
         }

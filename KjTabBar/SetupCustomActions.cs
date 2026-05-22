@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Configuration.Install;
 using System.Diagnostics;
 using System.IO;
+using KjTabBar.Helpers;
 using Microsoft.Win32;
 
 namespace KjTabBar
@@ -50,11 +51,8 @@ namespace KjTabBar
                         }
                     }
 
-                    string escapedExePath = exePath.Replace("'", "''");
-                    string escapedWorkingDirectory = targetDir.Replace("'", "''");
-
                     // ユーザー UI 側の msiexec が閉じた後に、ショートカットを更新してからユーザーシェル経由で本体を起動する。
-                    string script = BuildPostInstallScript(installerProcessId, preferredSessionId, escapedExePath, escapedWorkingDirectory);
+                    string script = BuildPostInstallScript(installerProcessId, preferredSessionId);
 
                     string encodedCommand = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
 
@@ -63,6 +61,8 @@ namespace KjTabBar
                     psi.Arguments = "-WindowStyle Hidden -NoProfile -EncodedCommand " + encodedCommand;
                     psi.CreateNoWindow = true;
                     psi.UseShellExecute = false;
+                    psi.EnvironmentVariables["KJTB_EXE_PATH"] = exePath;
+                    psi.EnvironmentVariables["KJTB_WORKING_DIRECTORY"] = targetDir;
 
                     Process process = Process.Start(psi);
                     if (process != null)
@@ -73,14 +73,20 @@ namespace KjTabBar
             }
             catch
             {
+                AppLogger.LogInfo("SetupCustomActions", "LaunchApplicationDelayed failed.");
                 // 起動失敗してもインストール自体は成功とする
             }
         }
 
-        internal static string BuildPostInstallScript(int installerProcessId, int preferredSessionId, string escapedExePath, string escapedWorkingDirectory)
+        internal static string BuildPostInstallScript(int installerProcessId, int preferredSessionId)
         {
             return "$installerPid = " + installerProcessId.ToString() + "; " +
                    "$sessionId = " + preferredSessionId.ToString() + "; " +
+                   "$exePath = $env:KJTB_EXE_PATH; " +
+                   "$workingDirectory = $env:KJTB_WORKING_DIRECTORY; " +
+                   // Intentional: generated setup logging must never fail installation if the log path is unavailable.
+                   "function Write-KjtbSetupLog([string]$message) { try { $base = [Environment]::GetFolderPath('ApplicationData'); if ([string]::IsNullOrEmpty($base)) { $base = [System.IO.Path]::GetTempPath() }; $dir = [System.IO.Path]::Combine($base, 'KjTabBar', 'Logs'); [System.IO.Directory]::CreateDirectory($dir) | Out-Null; $line = ((Get-Date).ToUniversalTime().ToString('o') + ' [ERROR] SetupCustomActions: ' + $message + [Environment]::NewLine); [System.IO.File]::AppendAllText([System.IO.Path]::Combine($dir, 'KjTabBar.setup.log'), $line, [System.Text.Encoding]::UTF8) } catch {} }; " +
+                   "if ([string]::IsNullOrEmpty($exePath) -or [string]::IsNullOrEmpty($workingDirectory)) { Write-KjtbSetupLog 'Missing post-install environment values.'; exit 1 }; " +
                    "$ui = Get-Process msiexec -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $sessionId -and $_.MainWindowHandle -ne 0 } | Sort-Object StartTime -Descending | Select-Object -First 1; " +
                    "if ($ui) { Wait-Process -Id $ui.Id -Timeout 600 -ErrorAction SilentlyContinue } " +
                    "else { Wait-Process -Id $installerPid -Timeout 600 -ErrorAction SilentlyContinue }; " +
@@ -96,22 +102,22 @@ namespace KjTabBar
                    "$shortcut = $null; " +
                    "try { " +
                    "$shortcut = $ws.CreateShortcut($shortcutPath); " +
-                   "$shortcut.TargetPath = '" + escapedExePath + "'; " +
-                   "$shortcut.WorkingDirectory = '" + escapedWorkingDirectory + "'; " +
+                   "$shortcut.TargetPath = $exePath; " +
+                   "$shortcut.WorkingDirectory = $workingDirectory; " +
                    "$shortcut.Arguments = ''; " +
                    "$shortcut.Description = 'KjTabBar'; " +
-                   "$shortcut.IconLocation = '" + escapedExePath + ",0'; " +
+                   "$shortcut.IconLocation = ($exePath + ',0'); " +
                    "$shortcut.Save(); " +
-                   "} catch {} " +
+                   "} catch { Write-KjtbSetupLog ('Shortcut update failed: ' + $_.Exception.Message) } " +
                    "finally { if ($shortcut -ne $null) { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcut) | Out-Null } } " +
                    "} " +
-                   "} catch {} " +
+                   "} catch { Write-KjtbSetupLog ('Shortcut COM setup failed: ' + $_.Exception.Message) } " +
                    "finally { if ($ws -ne $null) { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($ws) | Out-Null } }; " +
-                   "$runValue = '\"" + escapedExePath + "\"'; " +
+                   "$runValue = ('\"' + $exePath + '\"'); " +
                    "$targetSid = $null; " +
-                   "try { $explorerForSid = Get-Process explorer -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $sessionId } | Sort-Object StartTime -Descending | Select-Object -First 1; if ($explorerForSid) { $explorerCim = Get-CimInstance Win32_Process -Filter \"ProcessId=$($explorerForSid.Id)\" -ErrorAction SilentlyContinue; if ($explorerCim) { $targetSid = (Invoke-CimMethod -InputObject $explorerCim -MethodName GetOwnerSid -ErrorAction SilentlyContinue).Sid } } } catch {}; " +
-                   "try { if (-not [string]::IsNullOrEmpty($targetSid)) { $runKey = 'Registry::HKEY_USERS\\' + $targetSid + '\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' } else { $runKey = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' }; if (-not (Test-Path $runKey)) { New-Item -Path $runKey -Force | Out-Null }; Set-ItemProperty -Path $runKey -Name 'KjTabBar' -Value $runValue } catch {}; " +
-                   "Start-Process -FilePath 'explorer.exe' -ArgumentList '\"" + escapedExePath + "\"'";
+                   "try { $explorerForSid = Get-Process explorer -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $sessionId } | Sort-Object StartTime -Descending | Select-Object -First 1; if ($explorerForSid) { $explorerCim = Get-CimInstance Win32_Process -Filter \"ProcessId=$($explorerForSid.Id)\" -ErrorAction SilentlyContinue; if ($explorerCim) { $targetSid = (Invoke-CimMethod -InputObject $explorerCim -MethodName GetOwnerSid -ErrorAction SilentlyContinue).Sid } } } catch { Write-KjtbSetupLog ('Target SID resolution failed: ' + $_.Exception.Message) }; " +
+                   "try { if (-not [string]::IsNullOrEmpty($targetSid)) { $runKey = 'Registry::HKEY_USERS\\' + $targetSid + '\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' } else { $runKey = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' }; if (-not (Test-Path $runKey)) { New-Item -Path $runKey -Force | Out-Null }; Set-ItemProperty -Path $runKey -Name 'KjTabBar' -Value $runValue } catch { Write-KjtbSetupLog ('Startup Run registration failed: ' + $_.Exception.Message) }; " +
+                   "Start-Process -FilePath 'explorer.exe' -ArgumentList ('\"' + $exePath + '\"')";
         }
 
         internal static string BuildStartupRunCommand(string exePath)
@@ -166,6 +172,7 @@ namespace KjTabBar
             }
             catch
             {
+                AppLogger.LogInfo("SetupCustomActions", "GetPreferredSessionId failed. Falling back to installer session.");
                 // 取得失敗時はインストーラー自身のセッションを使う
             }
             finally
@@ -193,16 +200,30 @@ namespace KjTabBar
         {
             try
             {
+                string installedExePath;
+                string installedTargetDir;
+                if (!TryGetInstalledExecutablePath(out installedExePath, out installedTargetDir))
+                {
+                    AppLogger.LogInfo("SetupCustomActions", "Skipping process termination because the installed executable path could not be resolved.");
+                    return;
+                }
+
                 Process[] processes = Process.GetProcessesByName("KjTabBar");
                 for (int i = 0; i < processes.Length; i++)
                 {
                     try
                     {
+                        if (!IsTargetInstalledProcess(processes[i], installedExePath))
+                        {
+                            continue;
+                        }
+
                         processes[i].Kill();
                         processes[i].WaitForExit(5000);
                     }
                     catch
                     {
+                        AppLogger.LogInfo("SetupCustomActions", "Failed to terminate a KjTabBar process during uninstall.");
                         // 個別のプロセス終了失敗は無視
                     }
                     finally
@@ -213,8 +234,46 @@ namespace KjTabBar
             }
             catch
             {
+                AppLogger.LogInfo("SetupCustomActions", "Failed to enumerate KjTabBar processes during uninstall.");
                 // プロセス取得失敗は無視して続行
             }
+        }
+
+        internal static bool IsTargetInstalledProcess(Process process, string installedExePath)
+        {
+            if (process == null || string.IsNullOrEmpty(installedExePath))
+            {
+                return false;
+            }
+
+            try
+            {
+                string processPath = process.MainModule != null ? process.MainModule.FileName : null;
+                if (string.IsNullOrEmpty(processPath))
+                {
+                    AppLogger.LogInfo("SetupCustomActions", "Skipping a KjTabBar-named process because its executable path could not be determined.");
+                    return false;
+                }
+
+                return IsInstalledExecutablePathMatch(installedExePath, processPath);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("SetupCustomActions", "Skipping a KjTabBar-named process because its executable path check failed.", ex);
+                return false;
+            }
+        }
+
+        internal static bool IsInstalledExecutablePathMatch(string installedExePath, string processPath)
+        {
+            if (string.IsNullOrEmpty(installedExePath) || string.IsNullOrEmpty(processPath))
+            {
+                return false;
+            }
+
+            string normalizedInstalledPath = Path.GetFullPath(installedExePath);
+            string normalizedProcessPath = Path.GetFullPath(processPath);
+            return string.Equals(normalizedInstalledPath, normalizedProcessPath, StringComparison.OrdinalIgnoreCase);
         }
 
         private void CleanUpOnUninstall()
@@ -268,8 +327,8 @@ namespace KjTabBar
                 for (int i = 0; i < subKeyNames.Length; i++)
                 {
                     string userSid = subKeyNames[i];
-                    // .DEFAULT や S-1-5-18(SYSTEM), _Classes などを除外せず、全てのユーザーハイブに対して試行する
                     if (userSid.EndsWith("_Classes", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!IsRegularUserSid(userSid)) continue;
 
                     for (int j = 0; j < targetSubKeyPaths.Length; j++)
                     {
@@ -280,6 +339,7 @@ namespace KjTabBar
             }
             catch
             {
+                AppLogger.LogInfo("SetupCustomActions", "Failed while enumerating user hives for startup cleanup.");
                 // エラーは無視して続行
             }
             finally
@@ -313,6 +373,7 @@ namespace KjTabBar
             }
             catch
             {
+                AppLogger.LogInfo("SetupCustomActions", "Failed while opening base registry hive for startup cleanup.");
                 // エラーは無視して続行
             }
             finally
@@ -337,6 +398,7 @@ namespace KjTabBar
             }
             catch
             {
+                AppLogger.LogInfo("SetupCustomActions", "Failed while deleting startup registry value.");
                 // エラーは無視して続行
             }
             finally
@@ -347,7 +409,15 @@ namespace KjTabBar
                 }
             }
         }
+        internal static bool IsRegularUserSid(string userSid)
+        {
+            if (string.IsNullOrEmpty(userSid))
+            {
+                return false;
+            }
 
+            return userSid.StartsWith("S-1-5-21-", StringComparison.OrdinalIgnoreCase);
+        }
 
     }
 }

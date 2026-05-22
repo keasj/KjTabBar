@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace KjTabBar.Models
 {
@@ -11,5 +11,6 @@ namespace KjTabBar.Models
 
         event EventHandler SettingsChanged;
         void Save();
+        bool TrySave(out string errorMessage);
     }
 }

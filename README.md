@@ -33,7 +33,8 @@ Instead of hooking into or modifying Explorer itself, it places an independent t
 2. Open Windows Explorer. A tab bar will automatically appear at the top of the window.
 3. When you open a new Explorer window from the desktop or certain shortcuts, it is automatically absorbed and integrated into the existing tab bar as a new tab.
 4. **Tab operations**
-   - Use the `+` button on the right to open a new tab (folder).
+   - Use the `+` button on the right to open a folder-picker dialog and add a new tab.
+   - Each tab shows a per-path icon, including shell-specific icons for special folders and Control Panel sub-items.
    - Right-click a tab to access actions such as `Duplicate Tab`, `Open in New Window`, `Copy Path`, and `Close Tab`.
 5. **Settings**
    - Right-click the background area of the tab bar and choose `Settings...` to change options such as the tab font size.

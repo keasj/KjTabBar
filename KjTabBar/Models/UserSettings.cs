@@ -1,6 +1,8 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Xml.Serialization;
+
+using KjTabBar.Helpers;
 
 namespace KjTabBar.Models
 {
@@ -99,12 +101,22 @@ namespace KjTabBar.Models
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("UserSettings", "Failed to load settings.xml.", ex);
+            }
             return new UserSettings();
         }
 
         public void Save()
         {
+            string ignoredError;
+            TrySave(out ignoredError);
+        }
+
+        public bool TrySave(out string errorMessage)
+        {
+            errorMessage = null;
             try
             {
                 FontSize = NormalizeFontSize(FontSize);
@@ -140,8 +152,15 @@ namespace KjTabBar.Models
                 {
                     handler(this, EventArgs.Empty);
                 }
+
+                return true;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("UserSettings", "Failed to save settings.xml.", ex);
+                errorMessage = ex.Message;
+                return false;
+            }
         }
     }
 }

@@ -30,6 +30,7 @@ namespace KjTabBar.Models
         {
             if (obj == null) return null;
             try { return obj.GetType().InvokeMember(propertyName, System.Reflection.BindingFlags.GetProperty, null, obj, null); }
+            // Intentional: this low-level COM helper reports failure as null; callers log context when the failure is actionable.
             catch { return null; }
         }
 
@@ -37,6 +38,7 @@ namespace KjTabBar.Models
         {
             if (obj == null) return null;
             try { return obj.GetType().InvokeMember(methodName, System.Reflection.BindingFlags.InvokeMethod, null, obj, args); }
+            // Intentional: this low-level COM helper reports failure as null; callers log context when the failure is actionable.
             catch { return null; }
         }
 
@@ -55,8 +57,9 @@ namespace KjTabBar.Models
                     Marshal.FinalReleaseComObject(comObject);
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogError("ExplorerManager", "Failed to release COM object.", ex);
             }
         }
 
@@ -73,13 +76,19 @@ namespace KjTabBar.Models
             {
                 Marshal.CleanupUnusedObjectsInCurrentContext();
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogError("ExplorerManager", "Failed to clean up unused COM objects.", ex);
             }
         }
 
         private void ResetShellApplication()
         {
+            if (_threadLocalShellApplication != null)
+            {
+                AppLogger.LogInfo("ExplorerManager", "Releasing Shell.Application COM cache on thread " + System.Threading.Thread.CurrentThread.ManagedThreadId.ToString() + ".");
+            }
+
             ReleaseComObjectSafe(_threadLocalShellApplication);
             _threadLocalShellApplication = null;
         }
@@ -110,10 +119,15 @@ namespace KjTabBar.Models
             {
                 _threadLocalShellApplication = Activator.CreateInstance(shellType);
                 shellObject = _threadLocalShellApplication;
+                if (shellObject != null)
+                {
+                    AppLogger.LogInfo("ExplorerManager", "Created Shell.Application COM cache on thread " + System.Threading.Thread.CurrentThread.ManagedThreadId.ToString() + ".");
+                }
                 return shellObject != null;
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogError("ExplorerManager", "Failed to create Shell.Application.", ex);
                 return false;
             }
         }
@@ -134,8 +148,9 @@ namespace KjTabBar.Models
                 windowsObject = InvokeComMethod(shellDynamic, "Windows");
                 return windowsObject != null;
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogError("ExplorerManager", "Failed to create Shell Windows collection.", ex);
                 ResetShellApplication();
                 return false;
             }
@@ -190,7 +205,7 @@ namespace KjTabBar.Models
                 object countObj = GetComProperty(windows, "Count");
                 if (countObj == null) return null;
                 int count = 0;
-                try { count = Convert.ToInt32(countObj); } catch { return null; }
+                try { count = Convert.ToInt32(countObj); } catch (Exception ex) { AppLogger.LogErrorThrottled("ExplorerManager", "GetCurrentPathCountConvert", "Failed to convert Shell Windows count while getting current path.", ex, TimeSpan.FromMinutes(5)); return null; }
                 for (int i = 0; i < count; i++)
                 {
                     object window = null;
@@ -199,7 +214,7 @@ namespace KjTabBar.Models
                         window = InvokeComMethod(windows, "Item", i);
                         if (window == null) continue;
                         string fullName = "";
-                        try { fullName = (string)GetComProperty(window, "FullName"); } catch { }
+                        try { fullName = (string)GetComProperty(window, "FullName"); } catch (Exception ex) { AppLogger.LogErrorThrottled("ExplorerManager", "GetCurrentPathFullName", "Failed to read FullName while getting current path.", ex, TimeSpan.FromMinutes(5)); }
                         if (string.IsNullOrEmpty(fullName)) continue;
                         if (!fullName.ToLowerInvariant().EndsWith("explorer.exe")) continue;
 
@@ -212,8 +227,9 @@ namespace KjTabBar.Models
                             long hwndVal = Convert.ToInt64(hwndObj);
                             hwnd = (IntPtr)hwndVal;
                         }
-                        catch
+                        catch (Exception ex)
                         {
+                            AppLogger.LogError("ExplorerManager", "Failed to convert HWND while navigating explorer.", ex);
                             continue;
                         }
 
@@ -227,10 +243,10 @@ namespace KjTabBar.Models
                         }
 
                         string locationUrl = "";
-                        try { locationUrl = (string)GetComProperty(window, "LocationURL"); } catch { }
+                        try { locationUrl = (string)GetComProperty(window, "LocationURL"); } catch (Exception ex) { AppLogger.LogErrorThrottled("ExplorerManager", "GetCurrentPathLocationUrl", "Failed to read LocationURL while getting current path.", ex, TimeSpan.FromMinutes(5)); }
 
                         string locationName = "";
-                        try { locationName = (string)GetComProperty(window, "LocationName"); } catch { }
+                        try { locationName = (string)GetComProperty(window, "LocationName"); } catch (Exception ex) { AppLogger.LogErrorThrottled("ExplorerManager", "GetCurrentPathLocationName", "Failed to read LocationName while getting current path.", ex, TimeSpan.FromMinutes(5)); }
 
                         // [BUG_FIX] コントロールパネル配下の項目（電源オプション等）からコントロールパネル（ルート）に
                         // 戻った際、folderPath が古い項目のパスを返し続けることがあるため、
@@ -266,7 +282,10 @@ namespace KjTabBar.Models
                                 }
                             }
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            AppLogger.LogErrorThrottled("ExplorerManager", "GetCurrentPathDocumentPath", "Failed to read folder path from explorer document.", ex, TimeSpan.FromMinutes(5));
+                        }
                         finally
                         {
                             ReleaseComObjectSafe(folderSelf);
@@ -324,15 +343,19 @@ namespace KjTabBar.Models
                         }
                         break;
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        AppLogger.LogErrorThrottled("ExplorerManager", "NavigateWindowEnumerate", "Failed while enumerating a Shell window during navigation.", ex, TimeSpan.FromMinutes(5));
+                    }
                     finally
                     {
                         ReleaseComObjectSafe(window);
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogError("ExplorerManager", "Navigate failed and Shell.Application cache will be reset.", ex);
                 ResetShellApplication();
             }
             finally
@@ -358,7 +381,7 @@ namespace KjTabBar.Models
                 object countObj = GetComProperty(windows, "Count");
                 if (countObj == null) return selectedItems;
                 int count = 0;
-                try { count = Convert.ToInt32(countObj); } catch { return selectedItems; }
+                try { count = Convert.ToInt32(countObj); } catch (Exception ex) { AppLogger.LogErrorThrottled("ExplorerManager", "GetSelectedItemsCountConvert", "Failed to convert Shell Windows count while getting selected items.", ex, TimeSpan.FromMinutes(5)); return selectedItems; }
                 for (int i = 0; i < count; i++)
                 {
                     object window = null;
@@ -367,7 +390,7 @@ namespace KjTabBar.Models
                         window = InvokeComMethod(windows, "Item", i);
                         if (window == null) continue;
                         string fullName = "";
-                        try { fullName = (string)GetComProperty(window, "FullName"); } catch { }
+                        try { fullName = (string)GetComProperty(window, "FullName"); } catch (Exception ex) { AppLogger.LogErrorThrottled("ExplorerManager", "GetSelectedItemsFullName", "Failed to read FullName while getting selected items.", ex, TimeSpan.FromMinutes(5)); }
                         if (string.IsNullOrEmpty(fullName)) continue;
                         if (!fullName.ToLowerInvariant().EndsWith("explorer.exe")) continue;
 
@@ -380,8 +403,9 @@ namespace KjTabBar.Models
                             long hwndVal = Convert.ToInt64(hwndObj);
                             hwnd = (IntPtr)hwndVal;
                         }
-                        catch
+                        catch (Exception ex)
                         {
+                            AppLogger.LogErrorThrottled("ExplorerManager", "GetSelectedItemsHwndConvert", "Failed to convert HWND while getting selected items.", ex, TimeSpan.FromMinutes(5));
                             continue;
                         }
 
@@ -404,7 +428,7 @@ namespace KjTabBar.Models
                             int selCount = 0;
                             if (selCountObj != null)
                             {
-                                try { selCount = Convert.ToInt32(selCountObj); } catch { }
+                                try { selCount = Convert.ToInt32(selCountObj); } catch (Exception ex) { AppLogger.LogErrorThrottled("ExplorerManager", "GetSelectedItemsSelectionCount", "Failed to convert selected item count.", ex, TimeSpan.FromMinutes(5)); }
                             }
                             for (int j = 0; j < selCount; j++)
                             {
@@ -418,14 +442,20 @@ namespace KjTabBar.Models
                                         selectedItems.Add(selectedItemPath);
                                     }
                                 }
-                                catch { }
+                                catch (Exception ex)
+                                {
+                                    AppLogger.LogErrorThrottled("ExplorerManager", "GetSelectedItemsEnumerate", "Failed to enumerate a selected item.", ex, TimeSpan.FromMinutes(5));
+                                }
                                 finally
                                 {
                                     ReleaseComObjectSafe(item);
                                 }
                             }
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            AppLogger.LogErrorThrottled("ExplorerManager", "GetSelectedItemsDocument", "Failed while reading selected items from explorer document.", ex, TimeSpan.FromMinutes(5));
+                        }
                         finally
                         {
                             ReleaseComObjectSafe(selected);
@@ -433,15 +463,19 @@ namespace KjTabBar.Models
                         }
                         break;
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        AppLogger.LogErrorThrottled("ExplorerManager", "GetSelectedItemsWindowEnumerate", "Failed while enumerating a Shell window for selected items.", ex, TimeSpan.FromMinutes(5));
+                    }
                     finally
                     {
                         ReleaseComObjectSafe(window);
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogError("ExplorerManager", "GetSelectedItems failed and Shell.Application cache will be reset.", ex);
                 ResetShellApplication();
             }
             finally
@@ -475,8 +509,9 @@ namespace KjTabBar.Models
                 {
                     count = Convert.ToInt32(countObj);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    AppLogger.LogErrorThrottled("ExplorerManager", "SelectItemsCountConvert", "Failed to convert Shell Windows count while selecting items.", ex, TimeSpan.FromMinutes(5));
                     return;
                 }
                 for (int i = 0; i < count; i++)
@@ -487,7 +522,7 @@ namespace KjTabBar.Models
                         window = InvokeComMethod(windows, "Item", i);
                         if (window == null) continue;
                         string fullName = "";
-                        try { fullName = (string)GetComProperty(window, "FullName"); } catch { }
+                        try { fullName = (string)GetComProperty(window, "FullName"); } catch (Exception ex) { AppLogger.LogErrorThrottled("ExplorerManager", "SelectItemsFullName", "Failed to read FullName while selecting items.", ex, TimeSpan.FromMinutes(5)); }
                         if (string.IsNullOrEmpty(fullName)) continue;
                         if (!fullName.ToLowerInvariant().EndsWith("explorer.exe")) continue;
 
@@ -499,8 +534,9 @@ namespace KjTabBar.Models
                             long hwndValue = Convert.ToInt64(hwndObj);
                             hwnd = (IntPtr)hwndValue;
                         }
-                        catch
+                        catch (Exception ex)
                         {
+                            AppLogger.LogErrorThrottled("ExplorerManager", "SelectItemsHwndConvert", "Failed to convert HWND while selecting items.", ex, TimeSpan.FromMinutes(5));
                             continue;
                         }
                         if (hwnd != explorerHwnd)
@@ -534,14 +570,20 @@ namespace KjTabBar.Models
                                         hasSelectedItem = true;
                                     }
                                 }
-                                catch { }
+                                catch (Exception ex)
+                                {
+                                    AppLogger.LogErrorThrottled("ExplorerManager", "SelectItemsInvoke", "Failed to select an individual explorer item.", ex, TimeSpan.FromMinutes(5));
+                                }
                                 finally
                                 {
                                     ReleaseComObjectSafe(item);
                                 }
                             }
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            AppLogger.LogErrorThrottled("ExplorerManager", "SelectItemsDocument", "Failed while preparing explorer item selection.", ex, TimeSpan.FromMinutes(5));
+                        }
                         finally
                         {
                             ReleaseComObjectSafe(folderItems);
@@ -550,15 +592,19 @@ namespace KjTabBar.Models
                         }
                         break;
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        AppLogger.LogErrorThrottled("ExplorerManager", "SelectItemsWindowEnumerate", "Failed while enumerating a Shell window for selection.", ex, TimeSpan.FromMinutes(5));
+                    }
                     finally
                     {
                         ReleaseComObjectSafe(window);
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogError("ExplorerManager", "SelectItems failed and Shell.Application cache will be reset.", ex);
                 ResetShellApplication();
             }
             finally
@@ -585,8 +631,9 @@ namespace KjTabBar.Models
             {
                 return Convert.ToInt32(countObject);
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogErrorThrottled("ExplorerManager", "GetComCollectionCount", "Failed to convert COM collection count.", ex, TimeSpan.FromMinutes(5));
                 return 0;
             }
         }
@@ -610,8 +657,9 @@ namespace KjTabBar.Models
                         return item;
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
+                    AppLogger.LogErrorThrottled("ExplorerManager", "FindFolderItemByPathEnumerate", "Failed while enumerating folder items.", ex, TimeSpan.FromMinutes(5));
                 }
 
                 ReleaseComObjectSafe(item);
@@ -1062,7 +1110,7 @@ namespace KjTabBar.Models
                 object countObj = GetComProperty(windows, "Count");
                 if (countObj == null) return false;
                 int count = 0;
-                try { count = Convert.ToInt32(countObj); } catch { return false; }
+                try { count = Convert.ToInt32(countObj); } catch (Exception ex) { AppLogger.LogErrorThrottled("ExplorerManager", "NavigateCountConvert", "Failed to convert Shell Windows count while navigating.", ex, TimeSpan.FromMinutes(5)); return false; }
                 for (int i = 0; i < count; i++)
                 {
                     object window = null;
@@ -1071,7 +1119,7 @@ namespace KjTabBar.Models
                         window = InvokeComMethod(windows, "Item", i);
                         if (window == null) continue;
                         string fullName = "";
-                        try { fullName = (string)GetComProperty(window, "FullName"); } catch { }
+                        try { fullName = (string)GetComProperty(window, "FullName"); } catch (Exception ex) { AppLogger.LogErrorThrottled("ExplorerManager", "NavigateFullName", "Failed to read FullName while navigating.", ex, TimeSpan.FromMinutes(5)); }
                         if (string.IsNullOrEmpty(fullName)) continue;
                         if (!fullName.ToLowerInvariant().EndsWith("explorer.exe")) continue;
 
@@ -1139,7 +1187,10 @@ namespace KjTabBar.Models
                         navigated = true;
                         break;
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        AppLogger.LogErrorThrottled("ExplorerManager", "NavigateWindowFailed", "Failed to navigate an Explorer window.", ex, TimeSpan.FromMinutes(5));
+                    }
                     finally
                     {
                         ReleaseComObjectSafe(window);
@@ -1226,7 +1277,10 @@ namespace KjTabBar.Models
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.LogErrorThrottled("ExplorerManager", "GetParentFolderNameShellItemFailed", "Failed to get parent folder name by IShellItem.", ex, TimeSpan.FromMinutes(5));
+            }
             finally
             {
                 ReleaseComObjectSafe(parent);
@@ -1267,8 +1321,9 @@ namespace KjTabBar.Models
 
                 return title;
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogError("ExplorerManager", "Failed to get parent folder name.", ex);
                 return null;
             }
             finally
@@ -1307,7 +1362,10 @@ namespace KjTabBar.Models
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("ExplorerManager", "Shell.Application title lookup failed.", ex);
+            }
             finally
             {
                 ReleaseComObjectSafe(ns);
@@ -1349,8 +1407,9 @@ namespace KjTabBar.Models
                 }
                 return name;
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogError("ExplorerManager", "Failed to derive folder name from path.", ex);
                 return path;
             }
         }
@@ -1379,13 +1438,19 @@ namespace KjTabBar.Models
                         {
                             targetPath = (string)shortcut.GetType().InvokeMember("TargetPath", System.Reflection.BindingFlags.GetProperty, null, shortcut, null);
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            AppLogger.LogErrorThrottled("ExplorerManager", "ResolveShortcutTargetPathRead", "Failed to read shortcut TargetPath.", ex, TimeSpan.FromMinutes(5));
+                        }
 
                         try
                         {
                             arguments = (string)shortcut.GetType().InvokeMember("Arguments", System.Reflection.BindingFlags.GetProperty, null, shortcut, null);
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            AppLogger.LogErrorThrottled("ExplorerManager", "ResolveShortcutArgumentsRead", "Failed to read shortcut Arguments.", ex, TimeSpan.FromMinutes(5));
+                        }
 
                         string shellPathFromArguments = ExtractShellPathFromShortcutArguments(arguments);
                         if (!string.IsNullOrEmpty(shellPathFromArguments))
@@ -1410,8 +1475,9 @@ namespace KjTabBar.Models
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogError("ExplorerManager", "Failed to resolve shortcut target.", ex);
                 // エラー時は入力パスを返す
             }
             finally
@@ -1446,10 +1512,15 @@ namespace KjTabBar.Models
             object shell = null;
             List<string> tempShortcutPaths = new List<string>();
             string tempDirectory = null;
+            bool anyShortcutCreated = false;
             try
             {
                 Type shellType = Type.GetTypeFromProgID("WScript.Shell");
-                if (shellType == null) return;
+                if (shellType == null)
+                {
+                    ShowOperationError("ショートカットを作成できませんでした。");
+                    return;
+                }
 
                 shell = Activator.CreateInstance(shellType);
 
@@ -1473,6 +1544,7 @@ namespace KjTabBar.Models
                     string shortcutPath = BuildUniqueShortcutPath(destinationDirectory, fileName);
                     if (TryCreateShortcutFile(shellType, shell, sourcePath, shortcutPath))
                     {
+                        anyShortcutCreated = true;
                         continue;
                     }
 
@@ -1486,6 +1558,7 @@ namespace KjTabBar.Models
                     if (TryCreateShortcutFile(shellType, shell, sourcePath, tempShortcutPath))
                     {
                         tempShortcutPaths.Add(tempShortcutPath);
+                        anyShortcutCreated = true;
                     }
                 }
 
@@ -1497,11 +1570,23 @@ namespace KjTabBar.Models
                     shf.pFrom = string.Join("\0", tempShortcutPaths.ToArray()) + "\0\0";
                     shf.pTo = destinationDirectory + "\0\0";
                     shf.fFlags = NativeMethods.FOF_ALLOWUNDO;
-                    NativeMethods.SHFileOperation(ref shf);
+                    int result = NativeMethods.SHFileOperation(ref shf);
+                    if (result != 0 || shf.fAnyOperationsAborted)
+                    {
+                        AppLogger.LogInfo("ExplorerManager", "SHFileOperation failed while moving temporary shortcuts.");
+                        ShowOperationError("ショートカットの配置に失敗しました。");
+                    }
+                }
+
+                if (!anyShortcutCreated)
+                {
+                    ShowOperationError("ショートカットを作成できませんでした。");
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogError("ExplorerManager", "Failed to create shortcut file.", ex);
+                ShowOperationError("ショートカットの作成に失敗しました。");
             }
             finally
             {
@@ -1599,46 +1684,27 @@ namespace KjTabBar.Models
 
                 if (result == System.Windows.MessageBoxResult.Yes)
                 {
-                    string tempBatFile = Path.Combine(Path.GetTempPath(), "KjTabBar_CreateSymlinks_" + Guid.NewGuid().ToString("N") + ".bat");
                     try
                     {
-                        using (StreamWriter sw = new StreamWriter(tempBatFile, false, new UTF8Encoding(false)))
+                        foreach (var link in failedLinks)
                         {
-                            sw.WriteLine("@echo off");
-                            sw.WriteLine("chcp 65001 >nul");
-                            foreach (var link in failedLinks)
+                            using (System.Diagnostics.Process process = StartElevatedSymbolicLinkCreator(link.Item1, link.Item2, link.Item3))
                             {
-                                string opt = link.Item3 ? "/d " : "";
-                                // バッチファイル内では%を%%にエスケープする必要がある
-                                string escapedLinkPath = link.Item1.Replace("%", "%%");
-                                string escapedSourcePath = link.Item2.Replace("%", "%%");
-                                sw.WriteLine($"mklink {opt}\"{escapedLinkPath}\" \"{escapedSourcePath}\"");
+                                if (process != null)
+                                {
+                                    process.WaitForExit();
+                                }
                             }
-                        }
-
-                        var startInfo = new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = tempBatFile,
-                            UseShellExecute = true,
-                            Verb = "runas",
-                            WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
-                            CreateNoWindow = true
-                        };
-                        using (var process = System.Diagnostics.Process.Start(startInfo))
-                        {
-                            process.WaitForExit();
                         }
                     }
                     catch (System.ComponentModel.Win32Exception)
                     {
                         // UACプロンプトでキャンセルされた場合などは何もしない
+                        AppLogger.LogInfo("ExplorerManager", "Elevated symbolic link creation was canceled or failed to start.");
                     }
-                    finally
+                    catch (Exception ex)
                     {
-                        if (File.Exists(tempBatFile))
-                        {
-                            try { File.Delete(tempBatFile); } catch { }
-                        }
+                        AppLogger.LogError("ExplorerManager", "Elevated symbolic link creation failed.", ex);
                     }
                 }
             }
@@ -1652,6 +1718,60 @@ namespace KjTabBar.Models
                     System.Windows.MessageBoxImage.Error);
             }
 
+        }
+
+        private System.Diagnostics.Process StartElevatedSymbolicLinkCreator(string linkPath, string sourcePath, bool isDirectory)
+        {
+            string exePath = GetCurrentExecutablePath();
+            if (string.IsNullOrEmpty(exePath))
+            {
+                return null;
+            }
+
+            System.Diagnostics.ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo();
+            startInfo.FileName = exePath;
+            startInfo.Arguments = "--kjtb-create-symlink --link " + EncodeBase64Argument(linkPath) + " --target " + EncodeBase64Argument(sourcePath) + " --directory " + (isDirectory ? "true" : "false");
+            startInfo.UseShellExecute = true;
+            startInfo.Verb = "runas";
+            startInfo.WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden;
+            startInfo.CreateNoWindow = true;
+            return System.Diagnostics.Process.Start(startInfo);
+        }
+
+        private string GetCurrentExecutablePath()
+        {
+            System.Diagnostics.Process currentProcess = null;
+            try
+            {
+                currentProcess = System.Diagnostics.Process.GetCurrentProcess();
+                return currentProcess.MainModule.FileName;
+            }
+            finally
+            {
+                if (currentProcess != null)
+                {
+                    currentProcess.Dispose();
+                }
+            }
+        }
+
+        private string EncodeBase64Argument(string value)
+        {
+            if (value == null)
+            {
+                value = string.Empty;
+            }
+
+            return Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
+        }
+
+        private void ShowOperationError(string message)
+        {
+            System.Windows.MessageBox.Show(
+                message,
+                "操作エラー",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Error);
         }
 
 
@@ -1698,8 +1818,9 @@ namespace KjTabBar.Models
                     return true;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogError("ExplorerManager", "Failed to delete partially created shortcut file.", ex);
             }
             finally
             {
@@ -1767,7 +1888,10 @@ namespace KjTabBar.Models
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.LogErrorThrottled("ExplorerManager", "ResolveVirtualShortcutTargetFailed", "Failed to resolve virtual shortcut target.", ex, TimeSpan.FromMinutes(5));
+            }
             finally
             {
                 ReleaseComObjectSafe(target);
@@ -2215,8 +2339,9 @@ namespace KjTabBar.Models
                                     AddControlPanelItemTitleMapEntry(titleMap, defaultTitle, shellPath);
                                 }
                             }
-                            catch
+                            catch (Exception ex)
                             {
+                                AppLogger.LogError("ExplorerManager", "Failed to read CLSID title while building control panel title map.", ex);
                             }
                             finally
                             {
@@ -2235,8 +2360,9 @@ namespace KjTabBar.Models
                     AddControlPanelItemPathEntry(itemPaths, ProgramsAndFeaturesPath);
                     AddControlPanelItemPathEntry(itemPaths, PowerOptionsPath);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    AppLogger.LogError("ExplorerManager", "Failed to build control panel item title map.", ex);
                 }
                 finally
                 {
@@ -2412,7 +2538,15 @@ namespace KjTabBar.Models
                     process.Dispose();
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("ExplorerManager", "Failed to open explorer in new window.", ex);
+                System.Windows.MessageBox.Show(
+                    "別ウィンドウで開く操作に失敗しました。",
+                    "起動エラー",
+                    System.Windows.MessageBoxButton.OK,
+                    System.Windows.MessageBoxImage.Error);
+            }
         }
     }
 }

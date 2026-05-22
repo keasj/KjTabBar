@@ -18,6 +18,13 @@ namespace UnitTestProject
             SettingsChanged?.Invoke(this, EventArgs.Empty);
         }
 
+        public bool TrySave(out string errorMessage)
+        {
+            errorMessage = null;
+            Save();
+            return true;
+        }
+
         // Helper to trigger from tests without calling Save if needed
         public void TriggerChange()
         {

@@ -37,7 +37,7 @@ namespace UnitTestProject
         public void CreateShortcuts(string[] sourceFiles, string destinationFolder, IntPtr targetWindowHandle) { }
         public void CreateSymbolicLinks(string[] sourceFiles, string destinationFolder, IntPtr targetWindowHandle) { }
         public void ReleaseCachedComObjects() { }
-        public string ResolveShortcutTarget(string path) => path;
+        public virtual string ResolveShortcutTarget(string path) => path;
         public void SelectItems(IntPtr explorerHwnd, List<string> itemPaths) { }
 
         public KjTabBar.Helpers.NativeMethods.RECT GetExplorerWindowRect(IntPtr hwnd)

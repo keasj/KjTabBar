@@ -52,6 +52,10 @@ namespace KjTabBar
         private System.Drawing.Icon _trayIconObj;
         private IntPtr _trayIconHandle = IntPtr.Zero;
         private const string ShellRelaunchArgument = "--kjtb-shell";
+        private const string ElevatedSymlinkArgument = "--kjtb-create-symlink";
+        private const string SymlinkLinkPathArgument = "--link";
+        private const string SymlinkTargetPathArgument = "--target";
+        private const string SymlinkDirectoryArgument = "--directory";
 
 
 
@@ -67,6 +71,7 @@ namespace KjTabBar
             }
             catch
             {
+                Helpers.AppLogger.LogInfo("App", "Failed to save tabs during application exit.");
             }
 
             if (_monitorTimer != null)
@@ -82,7 +87,7 @@ namespace KjTabBar
 
             foreach (KeyValuePair<IntPtr, TabBarWindow> kvp in _tabBars)
             {
-                try { kvp.Value.Close(); } catch { }
+                try { kvp.Value.Close(); } catch (Exception ex) { Helpers.AppLogger.LogError("App", "Failed to close a tab bar window during exit.", ex); }
             }
             _tabBars.Clear();
 
@@ -113,7 +118,7 @@ namespace KjTabBar
 
             if (_showEventHook != IntPtr.Zero)
             {
-                try { NativeMethods.UnhookWinEvent(_showEventHook); } catch { }
+                try { NativeMethods.UnhookWinEvent(_showEventHook); } catch (Exception ex) { Helpers.AppLogger.LogError("App", "Failed to unhook show event.", ex); }
                 _showEventHook = IntPtr.Zero;
                 _showEventProc = null;
             }
@@ -132,14 +137,17 @@ namespace KjTabBar
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Helpers.AppLogger.LogError("App", "Failed to restore hidden explorer window during exit.", ex);
+                }
             }
             _hiddenPendingAbsorb.Clear();
             _hiddenOriginalRects.Clear();
 
             if (_foregroundEventHook != IntPtr.Zero)
             {
-                try { NativeMethods.UnhookWinEvent(_foregroundEventHook); } catch { }
+                try { NativeMethods.UnhookWinEvent(_foregroundEventHook); } catch (Exception ex) { Helpers.AppLogger.LogError("App", "Failed to unhook foreground event.", ex); }
                 _foregroundEventHook = IntPtr.Zero;
                 _foregroundEventProc = null;
             }
@@ -147,7 +155,7 @@ namespace KjTabBar
 
             if (_mutex != null)
             {
-                try { _mutex.ReleaseMutex(); } catch { }
+                try { _mutex.ReleaseMutex(); } catch (Exception ex) { Helpers.AppLogger.LogError("App", "Failed to release application mutex.", ex); }
                 _mutex.Dispose();
                 _mutex = null;
             }
@@ -156,6 +164,12 @@ namespace KjTabBar
         private void Application_Startup(object sender, StartupEventArgs e)
         {
             ApplyLanguageResource();
+
+            if (TryHandleElevatedSymbolicLinkRequest(e))
+            {
+                Shutdown();
+                return;
+            }
 
             if (!HasStartupArgument(e, ShellRelaunchArgument) && IsRunningAsAdministrator())
             {
@@ -219,6 +233,70 @@ namespace KjTabBar
             return false;
         }
 
+        private bool TryHandleElevatedSymbolicLinkRequest(StartupEventArgs e)
+        {
+            if (!HasStartupArgument(e, ElevatedSymlinkArgument))
+            {
+                return false;
+            }
+
+            try
+            {
+                string linkPath = DecodeBase64Argument(GetArgumentValue(e.Args, SymlinkLinkPathArgument));
+                string targetPath = DecodeBase64Argument(GetArgumentValue(e.Args, SymlinkTargetPathArgument));
+                string directoryValue = GetArgumentValue(e.Args, SymlinkDirectoryArgument);
+                bool isDirectory = string.Equals(directoryValue, "true", StringComparison.OrdinalIgnoreCase);
+
+                if (string.IsNullOrEmpty(linkPath) || string.IsNullOrEmpty(targetPath))
+                {
+                    Helpers.AppLogger.LogInfo("App", "Elevated symbolic link request was missing a required path.");
+                    return true;
+                }
+
+                uint flags = isDirectory ? NativeMethods.SYMBOLIC_LINK_FLAG_DIRECTORY : NativeMethods.SYMBOLIC_LINK_FLAG_FILE;
+                if (!NativeMethods.CreateSymbolicLink(linkPath, targetPath, flags))
+                {
+                    int errorCode = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+                    Helpers.AppLogger.LogInfo("App", "Elevated symbolic link creation failed. ErrorCode=" + errorCode.ToString());
+                }
+            }
+            catch (Exception ex)
+            {
+                Helpers.AppLogger.LogError("App", "Elevated symbolic link request failed.", ex);
+            }
+
+            return true;
+        }
+
+        private string GetArgumentValue(string[] args, string name)
+        {
+            if (args == null || string.IsNullOrEmpty(name))
+            {
+                return null;
+            }
+
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (string.Equals(args[i], name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return args[i + 1];
+                }
+            }
+
+            return null;
+        }
+
+        private string DecodeBase64Argument(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return null;
+            }
+
+            byte[] bytes = Convert.FromBase64String(value);
+            return Encoding.UTF8.GetString(bytes);
+        }
+
         private void ApplyLanguageResource()
         {
             try
@@ -234,7 +312,10 @@ namespace KjTabBar
                 dict.Source = new Uri($"/KjTabBar;component/Assets/Strings/{dictName}", UriKind.Relative);
                 this.Resources.MergedDictionaries.Add(dict);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Helpers.AppLogger.LogError("App", "Failed to apply language resources.", ex);
+            }
         }
 
         private bool IsRunningAsAdministrator()
@@ -252,8 +333,9 @@ namespace KjTabBar
                     new System.Security.Principal.WindowsPrincipal(identity);
                 return principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
             }
-            catch
+            catch (Exception ex)
             {
+                Helpers.AppLogger.LogError("App", "Failed to determine administrator role.", ex);
                 return false;
             }
             finally
@@ -291,8 +373,9 @@ namespace KjTabBar
 
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                Helpers.AppLogger.LogError("App", "Failed to relaunch as standard user.", ex);
                 return false;
             }
             finally
@@ -318,7 +401,10 @@ namespace KjTabBar
                     programName = titleAttr.Title;
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Helpers.AppLogger.LogError("App", "Failed to load assembly title for tray icon.", ex);
+            }
 
             _trayIcon.Text = programName;
             
@@ -351,8 +437,9 @@ namespace KjTabBar
                     _trayIcon.Icon = System.Drawing.SystemIcons.Application;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Helpers.AppLogger.LogError("App", "Failed to create tray icon from PNG resource. Falling back to default icon.", ex);
                 _trayIcon.Icon = System.Drawing.SystemIcons.Application;
             }
             
@@ -383,8 +470,9 @@ namespace KjTabBar
                     0,
                     NativeMethods.WINEVENT_OUTOFCONTEXT);
             }
-            catch
+            catch (Exception ex)
             {
+                Helpers.AppLogger.LogError("App", "Failed to set up foreground hook. Falling back to polling.", ex);
                 // フック設定に失敗してもポーリングでの前景判定にフォールバックする
                 _foregroundEventHook = IntPtr.Zero;
             }
@@ -403,8 +491,9 @@ namespace KjTabBar
                     0, 0,
                     NativeMethods.WINEVENT_OUTOFCONTEXT);
             }
-            catch
+            catch (Exception ex)
             {
+                Helpers.AppLogger.LogError("App", "Failed to set up show hook.", ex);
                 _showEventHook = IntPtr.Zero;
             }
         }
@@ -464,7 +553,10 @@ namespace KjTabBar
 
                 _hiddenPendingAbsorb[hwnd] = DateTime.UtcNow;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Helpers.AppLogger.LogError("App", "Failed while hiding a pending explorer window.", ex);
+            }
         }
 
         private void ForegroundEventCallback(
@@ -480,7 +572,10 @@ namespace KjTabBar
                 NativeMethods.GetClassName(hwnd, className, className.Capacity);
                 UpdateForegroundClassState(hwnd, className.ToString());
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Helpers.AppLogger.LogError("App", "ForegroundEventCallback failed.", ex);
+            }
         }
 
         private void MonitorTimer_Tick(object sender, EventArgs e)
@@ -489,8 +584,9 @@ namespace KjTabBar
             {
                 MonitorTimer_TickCore();
             }
-            catch
+            catch (Exception ex)
             {
+                Helpers.AppLogger.LogErrorThrottled("App", "MonitorTimerTick", "MonitorTimer_Tick failed.", ex, TimeSpan.FromMinutes(5));
                 // 例外が発生してもタイマーは継続
             }
         }
@@ -547,8 +643,9 @@ namespace KjTabBar
                         shouldRemove = true;
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Helpers.AppLogger.LogError("App", "Detected invalid tab bar window during cleanup.", ex);
                     // タブバーに問題があれば除去
                     shouldRemove = true;
                 }
@@ -563,7 +660,7 @@ namespace KjTabBar
                 TabBarWindow window;
                 if (_tabBars.TryGetValue(toRemove[i], out window))
                 {
-                    try { window.Close(); } catch { }
+                    try { window.Close(); } catch (Exception ex) { Helpers.AppLogger.LogError("App", "Failed to close invalid tab bar window during cleanup.", ex); }
                     _tabBars.Remove(toRemove[i]);
                 }
             }
@@ -604,8 +701,9 @@ namespace KjTabBar
                     _processingExplorerWindows.Add(hwnd);
                     _ = ProcessNewExplorerWindowAsync(hwnd, validTarget);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Helpers.AppLogger.LogError("App", "Failed to queue explorer window processing.", ex);
                     _processingExplorerWindows.Remove(hwnd);
                 }
             }
@@ -704,7 +802,10 @@ namespace KjTabBar
                 GC.WaitForPendingFinalizers();
                 GC.Collect();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Helpers.AppLogger.LogError("App", "Failed to save tabs.txt.", ex);
+            }
         }
 
         private void RemoveClosedWindows(HashSet<IntPtr> collection, List<IntPtr> explorerWindows)
@@ -769,7 +870,10 @@ namespace KjTabBar
                     _lastSavedTabs = paths.Length > 0 ? string.Join("|", paths) + "|" : "";
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Helpers.AppLogger.LogError("App", "Failed to load tabs.txt.", ex);
+            }
         }
 
         private void SaveTabsIfChanged(TabBarViewModel vm)
@@ -811,7 +915,10 @@ namespace KjTabBar
                     System.IO.File.WriteAllLines(file, paths.ToArray());
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Helpers.AppLogger.LogError("App", "Failed to save tabs.txt.", ex);
+            }
         }
 
         /// <summary>
@@ -860,8 +967,9 @@ namespace KjTabBar
 
                 return NativeMethods.IsWindow(viewModel.ExplorerHwnd);
             }
-            catch
+            catch (Exception ex)
             {
+                Helpers.AppLogger.LogError("App", "TryGetAliveTabBarViewModel failed.", ex);
                 viewModel = null;
                 return false;
             }
@@ -1257,8 +1365,9 @@ namespace KjTabBar
                         break;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Helpers.AppLogger.LogError("App", "ProcessNewExplorerWindowAsync failed.", ex);
             }
             finally
             {
@@ -1284,8 +1393,9 @@ namespace KjTabBar
                 tabBarWindow.Show();
                 _tabBars[hwnd] = tabBarWindow;
             }
-            catch
+            catch (Exception ex)
             {
+                Helpers.AppLogger.LogError("App", "CreateNewTabBar failed.", ex);
             }
         }
 
@@ -1543,7 +1653,7 @@ namespace KjTabBar
                             if (countObj != null)
                             {
                                 int count = 0;
-                                try { count = Convert.ToInt32(countObj); } catch { }
+                                try { count = Convert.ToInt32(countObj); } catch (Exception ex) { Helpers.AppLogger.LogErrorThrottled("App", "DesktopShellItemCountConvert", "Failed to convert desktop item count.", ex, TimeSpan.FromMinutes(5)); }
 
                                 for (int i = 0; i < count; i++)
                                 {
@@ -1571,7 +1681,10 @@ namespace KjTabBar
                                             }
                                         }
                                     }
-                                    catch { }
+                                    catch (Exception ex)
+                                    {
+                                        Helpers.AppLogger.LogErrorThrottled("App", "DesktopShellItemEnumerate", "Failed to enumerate a desktop shell item.", ex, TimeSpan.FromMinutes(5));
+                                    }
                                     finally
                                     {
                                         Models.ExplorerManager.ReleaseComObjectSafe(item);
@@ -1582,7 +1695,10 @@ namespace KjTabBar
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Helpers.AppLogger.LogErrorThrottled("App", "DesktopShellItemCacheRefresh", "Failed to refresh desktop shell item cache.", ex, TimeSpan.FromMinutes(5));
+                }
                 finally
                 {
                     Models.ExplorerManager.ReleaseComObjectSafe(desktopItems);
@@ -1691,8 +1807,9 @@ namespace KjTabBar
                 _ignoredWindows.Add(newExplorerHwnd);
                 NativeMethods.PostMessage(newExplorerHwnd, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
             }
-            catch
+            catch (Exception ex)
             {
+                Helpers.AppLogger.LogError("App", "AbsorbExplorerWindow failed.", ex);
                 // 吸収に失敗した場合: 非表示状態（画面外）から元の位置に戻す
                 if (_hiddenPendingAbsorb.Remove(newExplorerHwnd))
                 {

@@ -1,10 +1,14 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
 using System.IO;
 
 namespace KjTabBar.Models
 {
     public static class ExplorerAbsorptionLogic
     {
+        private static readonly object ShortcutTargetCacheSync = new object();
+        private static readonly Dictionary<string, ShortcutTargetCacheEntry> ShortcutTargetCache = new Dictionary<string, ShortcutTargetCacheEntry>(StringComparer.OrdinalIgnoreCase);
+
         public static bool IsDesktopShortcutTargetPath(IExplorerService explorerService, string path)
         {
             if (string.IsNullOrEmpty(path)) return false;
@@ -38,7 +42,7 @@ namespace KjTabBar.Models
 
             for (int i = 0; i < shortcutFiles.Length; i++)
             {
-                string resolvedPath = explorerService.ResolveShortcutTarget(shortcutFiles[i]);
+                string resolvedPath = ResolveShortcutTargetCached(explorerService, shortcutFiles[i]);
                 string normalizedResolvedShellPath = explorerService.NormalizeShellNamespacePath(resolvedPath);
 
                 if (!string.IsNullOrEmpty(normalizedTargetShellPath) &&
@@ -55,6 +59,54 @@ namespace KjTabBar.Models
             }
 
             return false;
+        }
+
+        internal static void ClearShortcutTargetCacheForTests()
+        {
+            lock (ShortcutTargetCacheSync)
+            {
+                ShortcutTargetCache.Clear();
+            }
+        }
+
+        private static string ResolveShortcutTargetCached(IExplorerService explorerService, string shortcutPath)
+        {
+            if (explorerService == null || string.IsNullOrEmpty(shortcutPath))
+            {
+                return shortcutPath;
+            }
+
+            FileInfo fileInfo;
+            try
+            {
+                fileInfo = new FileInfo(shortcutPath);
+            }
+            catch
+            {
+                return explorerService.ResolveShortcutTarget(shortcutPath);
+            }
+
+            DateTime lastWriteTimeUtc = fileInfo.Exists ? fileInfo.LastWriteTimeUtc : DateTime.MinValue;
+            long length = fileInfo.Exists ? fileInfo.Length : -1;
+
+            lock (ShortcutTargetCacheSync)
+            {
+                ShortcutTargetCacheEntry entry;
+                if (ShortcutTargetCache.TryGetValue(shortcutPath, out entry) &&
+                    entry.LastWriteTimeUtc == lastWriteTimeUtc &&
+                    entry.Length == length)
+                {
+                    return entry.ResolvedPath;
+                }
+            }
+
+            string resolvedPath = explorerService.ResolveShortcutTarget(shortcutPath);
+            lock (ShortcutTargetCacheSync)
+            {
+                ShortcutTargetCache[shortcutPath] = new ShortcutTargetCacheEntry(lastWriteTimeUtc, length, resolvedPath);
+            }
+
+            return resolvedPath;
         }
 
         public static bool TryNormalizePath(string path, out string normalizedPath)
@@ -143,6 +195,20 @@ namespace KjTabBar.Models
             }
 
             return false;
+        }
+
+        private sealed class ShortcutTargetCacheEntry
+        {
+            public ShortcutTargetCacheEntry(DateTime lastWriteTimeUtc, long length, string resolvedPath)
+            {
+                LastWriteTimeUtc = lastWriteTimeUtc;
+                Length = length;
+                ResolvedPath = resolvedPath;
+            }
+
+            public DateTime LastWriteTimeUtc { get; private set; }
+            public long Length { get; private set; }
+            public string ResolvedPath { get; private set; }
         }
 
         public static bool IsSameOrChildPath(string path, string rootPath)

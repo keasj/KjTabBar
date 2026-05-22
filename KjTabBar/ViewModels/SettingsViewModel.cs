@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Collections.ObjectModel;
 using System.Windows.Media;
+using KjTabBar.Helpers;
 using KjTabBar.Models;
 
 namespace KjTabBar.ViewModels
@@ -77,22 +78,24 @@ namespace KjTabBar.ViewModels
                 ProgramName = titleAttr != null ? titleAttr.Title : "KjTabBar";
                 Version = "v" + asm.GetName().Version.ToString();
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogError("SettingsViewModel", "Failed to read assembly metadata for settings window.", ex);
                 ProgramName = "KjTabBar";
                 Version = "v1.0.0.0";
             }
         }
 
-        public void SaveSettings()
+        public bool SaveSettings(out string errorMessage)
         {
+            errorMessage = null;
             _settings.FontFamily = _fontFamily;
             _settings.FontSize = UserSettings.NormalizeFontSize(_fontSize);
             _settings.IsBold = _isBold;
             _settings.IsItalic = _isItalic;
             _fontSize = _settings.FontSize;
 
-            _settings.Save();
+            return _settings.TrySave(out errorMessage);
         }
     }
 }

@@ -123,9 +123,9 @@ namespace KjTabBar.Views
                 NativeMethods.ChangeWindowMessageFilterEx(helper.Handle,
                     NativeMethods.WM_COPYDATA, NativeMethods.MSGFLT_ALLOW, IntPtr.Zero);
             }
-            catch
+            catch (Exception ex)
             {
-                // 無視
+                AppLogger.LogError("TabBarWindow", "Failed to enable drag-and-drop related window messages.", ex);
             }
         }
 
@@ -298,28 +298,121 @@ namespace KjTabBar.Views
         {
             TabBarViewModel vm = GetVM();
             if (vm == null) return;
-
-            System.Windows.Forms.FolderBrowserDialog dialog = new System.Windows.Forms.FolderBrowserDialog();
-            string desc = TryFindResource("AddTabDialogDescription") as string;
-            dialog.Description = desc != null ? desc : "タブに追加するフォルダを選択してください";
-            dialog.ShowNewFolderButton = false;
-
-            if (vm.ActiveTab != null && !string.IsNullOrEmpty(vm.ActiveTab.Path))
+            object shellApp = null;
+            object folderObj = null;
+            object selfObj = null;
+            try
             {
-                dialog.SelectedPath = vm.ActiveTab.Path;
-            }
+                Type shellType = Type.GetTypeFromProgID("Shell.Application");
+                if (shellType == null) return;
 
-            System.Windows.Forms.DialogResult result = dialog.ShowDialog();
-            if (result == System.Windows.Forms.DialogResult.OK)
-            {
-                string selectedPath = dialog.SelectedPath;
-                if (!string.IsNullOrEmpty(selectedPath))
+                shellApp = Activator.CreateInstance(shellType);
+                string title = TryFindResource("AddTabDialogDescription") as string;
+                if (string.IsNullOrEmpty(title))
                 {
-                    vm.InsertTabWithPath(selectedPath, vm.Tabs.Count);
+                    title = "タブに追加するフォルダを選択してください";
+                }
+
+                // BrowseForFolder: 0x0040(BIF_NEWDIALOGSTYLE) | 0x0200(BIF_NONEWFOLDERBUTTON)
+                folderObj = shellType.InvokeMember(
+                    "BrowseForFolder",
+                    System.Reflection.BindingFlags.InvokeMethod,
+                    null,
+                    shellApp,
+                    new object[] { 0, title, 0x0040 | 0x0200, 0 });
+                if (folderObj != null)
+                {
+                    selfObj = folderObj.GetType().InvokeMember(
+                        "Self",
+                        System.Reflection.BindingFlags.GetProperty,
+                        null,
+                        folderObj,
+                        null);
+                    if (selfObj != null)
+                    {
+                        string selectedPath = selfObj.GetType().InvokeMember(
+                            "Path",
+                            System.Reflection.BindingFlags.GetProperty,
+                            null,
+                            selfObj,
+                            null) as string;
+                        if (string.IsNullOrEmpty(selectedPath))
+                        {
+                            try
+                            {
+                                selectedPath = selfObj.GetType().InvokeMember(
+                                    "ExtendedProperty",
+                                    System.Reflection.BindingFlags.InvokeMethod,
+                                    null,
+                                    selfObj,
+                                    new object[] { "System.ParsingPath" }) as string;
+                            }
+                            catch
+                            {
+                            }
+                        }
+                        if (string.IsNullOrEmpty(selectedPath))
+                        {
+                            try
+                            {
+                                selectedPath = selfObj.GetType().InvokeMember(
+                                    "ExtendedProperty",
+                                    System.Reflection.BindingFlags.InvokeMethod,
+                                    null,
+                                    selfObj,
+                                    new object[] { "System.ItemPathDisplay" }) as string;
+                            }
+                            catch
+                            {
+                            }
+                        }
+                        if (string.IsNullOrEmpty(selectedPath))
+                        {
+                            try
+                            {
+                                string name = selfObj.GetType().InvokeMember(
+                                    "Name",
+                                    System.Reflection.BindingFlags.GetProperty,
+                                    null,
+                                    selfObj,
+                                    null) as string;
+                                selectedPath = _explorerService.MapLocationNameToKnownShellPath(name);
+                            }
+                            catch
+                            {
+                            }
+                        }
+
+                        if (!string.IsNullOrEmpty(selectedPath))
+                        {
+                            selectedPath = _explorerService.NormalizeKnownPath(selectedPath);
+                        }
+                        if (!string.IsNullOrEmpty(selectedPath))
+                        {
+                            vm.InsertTabWithPath(selectedPath, vm.Tabs.Count, true);
+                        }
+                    }
                 }
             }
-
-            dialog.Dispose();
+            catch (Exception ex)
+            {
+                AppLogger.LogError("TabBarWindow", "Failed to open folder picker for add tab.", ex);
+            }
+            finally
+            {
+                if (selfObj != null && System.Runtime.InteropServices.Marshal.IsComObject(selfObj))
+                {
+                    System.Runtime.InteropServices.Marshal.ReleaseComObject(selfObj);
+                }
+                if (folderObj != null && System.Runtime.InteropServices.Marshal.IsComObject(folderObj))
+                {
+                    System.Runtime.InteropServices.Marshal.ReleaseComObject(folderObj);
+                }
+                if (shellApp != null && System.Runtime.InteropServices.Marshal.IsComObject(shellApp))
+                {
+                    System.Runtime.InteropServices.Marshal.ReleaseComObject(shellApp);
+                }
+            }
             ReturnFocusToExplorer();
         }
 
@@ -369,6 +462,7 @@ namespace KjTabBar.Views
 
             this.Activate();
             ContextMenu menu = new ContextMenu();
+            ApplyFluentMenuStyle(menu);
             
             MenuItem duplicateItem = new MenuItem() { Header = TryFindResource("MenuDuplicateTab") as string ?? "タブの複製(&D)" };
             duplicateItem.Click += (s, ev) =>
@@ -391,7 +485,7 @@ namespace KjTabBar.Views
                 MenuItem copyPathItem = new MenuItem() { Header = TryFindResource("MenuCopyPath") as string ?? "パスのコピー(&P)" };
                 copyPathItem.Click += (s, ev) =>
                 {
-                    try { Clipboard.SetText(tabVM.Path); } catch { }
+                    try { Clipboard.SetText(tabVM.Path); } catch (Exception ex) { AppLogger.LogError("TabBarWindow", "Failed to copy tab path to clipboard.", ex); }
                 };
                 menu.Items.Add(copyPathItem);
             }
@@ -449,6 +543,7 @@ namespace KjTabBar.Views
             this.Activate();
 
             ContextMenu menu = new ContextMenu();
+            ApplyFluentMenuStyle(menu);
 
             TabBarViewModel vm = GetVM();
             MenuItem reopenItem = new MenuItem() { Header = TryFindResource("MenuReopenClosedTab") as string ?? "閉じたタブを開く(&T)" };
@@ -642,7 +737,10 @@ namespace KjTabBar.Views
                         return ParseCIDA(bytes);
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    AppLogger.LogError("TabBarWindow", "Failed to parse Shell IDList Array from data object.", ex);
+                }
                 finally
                 {
                     if (ms != null) ms.Dispose();
@@ -794,15 +892,36 @@ namespace KjTabBar.Views
                     shf.pTo = destPath;
                     shf.fFlags = NativeMethods.FOF_ALLOWUNDO;
 
-                    NativeMethods.SHFileOperation(ref shf);
+                    int result = NativeMethods.SHFileOperation(ref shf);
+                    if (result != 0 || shf.fAnyOperationsAborted)
+                    {
+                        AppLogger.LogInfo("TabBarWindow", "SHFileOperation reported failure or cancellation.");
+                        this.Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            MessageBox.Show(
+                                "ファイル操作を完了できませんでした。",
+                                "操作エラー",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Error);
+                        }));
+                    }
 
                     // 完了後に UI スレッドでフォーカス復帰を行う
                     this.Dispatcher.BeginInvoke(new Action(() => {
                         ReturnFocusToExplorer();
                     }));
                 }
-                catch
+                catch (Exception ex)
                 {
+                    AppLogger.LogError("TabBarWindow", "ExecuteFileOperation failed.", ex);
+                    this.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        MessageBox.Show(
+                            "ファイル操作の開始に失敗しました。",
+                            "操作エラー",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Error);
+                    }));
                 }
             });
             thread.SetApartmentState(ApartmentState.STA);
@@ -867,6 +986,7 @@ namespace KjTabBar.Views
                         if (isRightDrag)
                         {
                             ContextMenu menu = new ContextMenu();
+                            ApplyFluentMenuStyle(menu);
                             MenuItem copyItem = new MenuItem() { Header = TryFindResource("MenuCopyHere") as string ?? "ここにコピー(&C)" };
                             copyItem.Click += (s, ev) => ExecuteFileOperation(paths, targetTab.Path, NativeMethods.FO_COPY);
                             menu.Items.Add(copyItem);
@@ -916,7 +1036,10 @@ namespace KjTabBar.Views
                                         op = NativeMethods.FO_MOVE;
                                     }
                                 }
-                                catch { }
+                                catch (Exception ex)
+                                {
+                                    AppLogger.LogError("TabBarWindow", "Failed to determine source/destination drive roots for drag-drop operation.", ex);
+                                }
                             }
                             ExecuteFileOperation(paths, targetTab.Path, op);
                         }
@@ -970,6 +1093,47 @@ namespace KjTabBar.Views
         private void ApplyTheme()
         {
             ThemeManager.Instance.ApplyThemeToResources(this.Resources);
+        }
+
+        private void ApplyFluentMenuStyle(ContextMenu menu)
+        {
+            if (menu == null) return;
+
+            try
+            {
+                menu.Background = TryFindResource("ThemeWindowBg") as Brush;
+                menu.Foreground = TryFindResource("ThemeFgNormal") as Brush;
+                menu.BorderBrush = TryFindResource("ThemeBorderLine") as Brush;
+                menu.BorderThickness = new Thickness(1);
+                menu.Padding = new Thickness(4);
+                menu.MinWidth = 220;
+
+                Style itemStyle = new Style(typeof(MenuItem));
+                itemStyle.Setters.Add(new Setter(MenuItem.BackgroundProperty, Brushes.Transparent));
+                itemStyle.Setters.Add(new Setter(MenuItem.ForegroundProperty, TryFindResource("ThemeFgNormal")));
+                itemStyle.Setters.Add(new Setter(MenuItem.PaddingProperty, new Thickness(10, 6, 10, 6)));
+                itemStyle.Setters.Add(new Setter(MenuItem.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
+
+                Trigger itemHoverTrigger = new Trigger();
+                itemHoverTrigger.Property = MenuItem.IsHighlightedProperty;
+                itemHoverTrigger.Value = true;
+                itemHoverTrigger.Setters.Add(new Setter(MenuItem.BackgroundProperty, TryFindResource("ThemeTabHover")));
+                itemHoverTrigger.Setters.Add(new Setter(MenuItem.ForegroundProperty, TryFindResource("ThemeFgNormal")));
+                itemStyle.Triggers.Add(itemHoverTrigger);
+
+                Trigger disabledTrigger = new Trigger();
+                disabledTrigger.Property = MenuItem.IsEnabledProperty;
+                disabledTrigger.Value = false;
+                disabledTrigger.Setters.Add(new Setter(MenuItem.OpacityProperty, 0.55));
+                itemStyle.Triggers.Add(disabledTrigger);
+
+                menu.Resources[typeof(MenuItem)] = itemStyle;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("TabBarWindow", "ApplyFluentMenuStyle failed. Falling back to default menu style.", ex);
+                // スタイル適用で例外が発生しても、右クリックメニュー機能自体は維持する。
+            }
         }
 
         private void ThemeManager_ThemeChanged(object sender, EventArgs e)

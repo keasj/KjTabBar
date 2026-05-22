@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
+using KjTabBar.Helpers;
 using KjTabBar.Models;
 
 namespace KjTabBar.ViewModels
@@ -214,7 +215,15 @@ namespace KjTabBar.ViewModels
 
         public void AddTab()
         {
-            string currentPath = _explorerService.GetCurrentPath(_explorerHwnd);
+            string currentPath = null;
+            if (_activeTab != null && !string.IsNullOrEmpty(_activeTab.Path))
+            {
+                currentPath = NormalizeTabPath(_activeTab.Path);
+            }
+            if (string.IsNullOrEmpty(currentPath))
+            {
+                currentPath = _explorerService.GetCurrentPath(_explorerHwnd);
+            }
             if (string.IsNullOrEmpty(currentPath))
             {
                 currentPath = _explorerService.GetResolvedHomeFolderPath();
@@ -511,7 +520,7 @@ namespace KjTabBar.ViewModels
         private bool IsPotentialFileSystemTabPath(string path)
         {
             if (string.IsNullOrEmpty(path)) return false;
-            if (path.StartsWith("\\\\", StringComparison.OrdinalIgnoreCase)) return true;
+            if (path.StartsWith("\\\\", StringComparison.OrdinalIgnoreCase)) return false;
             if (path.Length >= 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) return true;
             return System.IO.Directory.Exists(path);
         }
@@ -866,8 +875,9 @@ namespace KjTabBar.ViewModels
                 _activeTab.Title = _activeTab.BaseTitle;
                 shouldUpdateTitles = true;
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogError("TabBarViewModel", "SyncWithExplorer failed.", ex);
             }
             finally
             {

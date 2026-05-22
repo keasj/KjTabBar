@@ -1,5 +1,7 @@
-﻿using System;
+using System;
 using System.Reflection;
+
+using KjTabBar.Helpers;
 
 namespace KjTabBar.Services
 {
@@ -22,7 +24,10 @@ namespace KjTabBar.Services
                     programName = titleAttr.Title;
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("TrayIconService", "Failed to read assembly title for tray icon.", ex);
+            }
 
             _trayIcon.Text = programName;
             _trayIcon.Icon = System.Drawing.SystemIcons.Application;

@@ -1,4 +1,9 @@
 using KjTabBar.Models;
+using KjTabBar.Helpers;
+using System;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Interop;
 
 namespace KjTabBar.ViewModels
 {
@@ -8,6 +13,7 @@ namespace KjTabBar.ViewModels
         private Models.IExplorerService _explorerService;
         private string _path;
         private bool _isActive;
+        private ImageSource _iconSource;
 
         private string _baseTitle;
 
@@ -26,13 +32,24 @@ namespace KjTabBar.ViewModels
         public string Path
         {
             get { return _path; }
-            set { _path = value; OnPropertyChanged("Path"); }
+            set
+            {
+                _path = value;
+                OnPropertyChanged("Path");
+                UpdateIconSource();
+            }
         }
 
         public bool IsActive
         {
             get { return _isActive; }
             set { _isActive = value; OnPropertyChanged("IsActive"); }
+        }
+
+        public ImageSource IconSource
+        {
+            get { return _iconSource; }
+            set { _iconSource = value; OnPropertyChanged("IconSource"); }
         }
 
         public TabItemViewModel(string path, string title, Models.IExplorerService explorerService)
@@ -42,6 +59,106 @@ namespace KjTabBar.ViewModels
             _baseTitle = string.IsNullOrEmpty(title) ? _explorerService.GetLocalizedHomeTitle() : title;
             _title = _baseTitle;
             _isActive = false;
+            UpdateIconSource();
+        }
+
+        private void UpdateIconSource()
+        {
+            IntPtr pidl = IntPtr.Zero;
+            IntPtr fallbackPidl = IntPtr.Zero;
+            try
+            {
+                string normalizedPath = _explorerService != null ? _explorerService.NormalizeKnownPath(_path) : _path;
+                if (string.IsNullOrEmpty(normalizedPath))
+                {
+                    IconSource = null;
+                    return;
+                }
+
+                NativeMethods.SHFILEINFO fileInfo = new NativeMethods.SHFILEINFO();
+                uint flags = NativeMethods.SHGFI_ICON | NativeMethods.SHGFI_SMALLICON;
+                IntPtr result = IntPtr.Zero;
+                if (normalizedPath.StartsWith("::{", StringComparison.OrdinalIgnoreCase) ||
+                    normalizedPath.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
+                {
+                    uint dummy;
+                    int hr = NativeMethods.SHParseDisplayName(normalizedPath, IntPtr.Zero, out pidl, 0, out dummy);
+                    if (hr == 0 && pidl != IntPtr.Zero)
+                    {
+                        result = NativeMethods.SHGetFileInfo(
+                            pidl,
+                            0,
+                            out fileInfo,
+                            (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.SHFILEINFO)),
+                            flags | NativeMethods.SHGFI_PIDL);
+                    }
+                    // コントロールパネル配下項目は単独 GUID 解決だと親アイコンになる場合があるため、
+                    // 一次取得が失敗したときのみ配下コンテキスト付きパスでも再取得する。
+                    if ((result == IntPtr.Zero || fileInfo.hIcon == IntPtr.Zero) &&
+                        _explorerService != null &&
+                        _explorerService.IsControlPanelPath(normalizedPath) &&
+                        !string.Equals(normalizedPath, _explorerService.AllControlPanelPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        string controlPanelCompositePath = "::{26EE0668-A00A-44D7-9371-BEB064C98683}\\0\\" + normalizedPath;
+                        uint fallbackDummy;
+                        int fallbackHr = NativeMethods.SHParseDisplayName(controlPanelCompositePath, IntPtr.Zero, out fallbackPidl, 0, out fallbackDummy);
+                        if (fallbackHr == 0 && fallbackPidl != IntPtr.Zero)
+                        {
+                            result = NativeMethods.SHGetFileInfo(
+                                fallbackPidl,
+                                0,
+                                out fileInfo,
+                                (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.SHFILEINFO)),
+                                flags | NativeMethods.SHGFI_PIDL);
+                        }
+                    }
+                }
+                else
+                {
+                    uint attrs = NativeMethods.FILE_ATTRIBUTE_DIRECTORY;
+                    result = NativeMethods.SHGetFileInfo(
+                        normalizedPath,
+                        attrs,
+                        out fileInfo,
+                        (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.SHFILEINFO)),
+                        flags | NativeMethods.SHGFI_USEFILEATTRIBUTES);
+                }
+
+                if (result == IntPtr.Zero || fileInfo.hIcon == System.IntPtr.Zero)
+                {
+                    IconSource = null;
+                    return;
+                }
+
+                try
+                {
+                    BitmapSource bitmap = Imaging.CreateBitmapSourceFromHIcon(
+                        fileInfo.hIcon,
+                        System.Windows.Int32Rect.Empty,
+                        BitmapSizeOptions.FromEmptyOptions());
+                    bitmap.Freeze();
+                    IconSource = bitmap;
+                }
+                finally
+                {
+                    NativeMethods.DestroyIcon(fileInfo.hIcon);
+                }
+            }
+            catch
+            {
+                IconSource = null;
+            }
+            finally
+            {
+                if (pidl != IntPtr.Zero)
+                {
+                    NativeMethods.ILFree(pidl);
+                }
+                if (fallbackPidl != IntPtr.Zero)
+                {
+                    NativeMethods.ILFree(fallbackPidl);
+                }
+            }
         }
     }
 }

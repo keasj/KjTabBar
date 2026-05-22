@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using KjTabBar.Helpers;
 
 namespace KjTabBar.Services
@@ -35,6 +35,7 @@ namespace KjTabBar.Services
             }
             catch
             {
+                AppLogger.LogInfo("WindowHookService", "Failed to register foreground event hook.");
                 _foregroundEventHook = IntPtr.Zero;
             }
 
@@ -51,6 +52,7 @@ namespace KjTabBar.Services
             }
             catch
             {
+                AppLogger.LogInfo("WindowHookService", "Failed to register show event hook.");
                 _showEventHook = IntPtr.Zero;
             }
         }
@@ -66,7 +68,10 @@ namespace KjTabBar.Services
                     ForegroundWindowChanged?.Invoke(hwnd);
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("WindowHookService", "ForegroundEventCallback failed.", ex);
+            }
         }
 
         private void ShowEventCallback(
@@ -80,21 +85,24 @@ namespace KjTabBar.Services
                     WindowShown?.Invoke(hwnd);
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("WindowHookService", "ShowEventCallback failed.", ex);
+            }
         }
 
         public void Dispose()
         {
             if (_showEventHook != IntPtr.Zero)
             {
-                try { NativeMethods.UnhookWinEvent(_showEventHook); } catch { }
+                try { NativeMethods.UnhookWinEvent(_showEventHook); } catch (Exception ex) { AppLogger.LogError("WindowHookService", "Failed to unhook show event.", ex); }
                 _showEventHook = IntPtr.Zero;
                 _showEventProc = null;
             }
 
             if (_foregroundEventHook != IntPtr.Zero)
             {
-                try { NativeMethods.UnhookWinEvent(_foregroundEventHook); } catch { }
+                try { NativeMethods.UnhookWinEvent(_foregroundEventHook); } catch (Exception ex) { AppLogger.LogError("WindowHookService", "Failed to unhook foreground event.", ex); }
                 _foregroundEventHook = IntPtr.Zero;
                 _foregroundEventProc = null;
             }

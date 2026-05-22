@@ -1,5 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using KjTabBar.Models;
+using System;
 using System.IO;
 
 namespace UnitTestProject
@@ -89,6 +90,77 @@ namespace UnitTestProject
         {
             bool result = ExplorerAbsorptionLogic.ShouldAbsorbDesktopOriginPath(false, false, true, true);
             Assert.IsTrue(result);
+        }
+
+        [TestMethod]
+        public void HasShortcutToPathInDesktop_Reuses_Cached_Shortcut_Target()
+        {
+            string desktopPath = CreateTemporaryDesktopWithShortcut("cached.lnk");
+            try
+            {
+                ExplorerAbsorptionLogic.ClearShortcutTargetCacheForTests();
+                CountingExplorerService explorerService = new CountingExplorerService(@"C:\Target");
+
+                Assert.IsTrue(ExplorerAbsorptionLogic.HasShortcutToPathInDesktop(explorerService, desktopPath, @"C:\Target"));
+                Assert.IsTrue(ExplorerAbsorptionLogic.HasShortcutToPathInDesktop(explorerService, desktopPath, @"C:\Target"));
+
+                Assert.AreEqual(1, explorerService.ResolveShortcutTargetCallCount);
+            }
+            finally
+            {
+                Directory.Delete(desktopPath, true);
+                ExplorerAbsorptionLogic.ClearShortcutTargetCacheForTests();
+            }
+        }
+
+        [TestMethod]
+        public void HasShortcutToPathInDesktop_Invalidates_Cache_When_Shortcut_Changes()
+        {
+            string desktopPath = CreateTemporaryDesktopWithShortcut("changed.lnk");
+            string shortcutPath = Path.Combine(desktopPath, "changed.lnk");
+            try
+            {
+                ExplorerAbsorptionLogic.ClearShortcutTargetCacheForTests();
+                CountingExplorerService explorerService = new CountingExplorerService(@"C:\Target");
+
+                Assert.IsTrue(ExplorerAbsorptionLogic.HasShortcutToPathInDesktop(explorerService, desktopPath, @"C:\Target"));
+                File.AppendAllText(shortcutPath, "updated");
+                File.SetLastWriteTimeUtc(shortcutPath, DateTime.UtcNow.AddMinutes(1));
+                Assert.IsTrue(ExplorerAbsorptionLogic.HasShortcutToPathInDesktop(explorerService, desktopPath, @"C:\Target"));
+
+                Assert.AreEqual(2, explorerService.ResolveShortcutTargetCallCount);
+            }
+            finally
+            {
+                Directory.Delete(desktopPath, true);
+                ExplorerAbsorptionLogic.ClearShortcutTargetCacheForTests();
+            }
+        }
+
+        private static string CreateTemporaryDesktopWithShortcut(string shortcutFileName)
+        {
+            string desktopPath = Path.Combine(Path.GetTempPath(), "KjTabBarTests_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(desktopPath);
+            File.WriteAllText(Path.Combine(desktopPath, shortcutFileName), "shortcut");
+            return desktopPath;
+        }
+
+        private sealed class CountingExplorerService : MockExplorerService
+        {
+            private readonly string _resolvedPath;
+
+            public CountingExplorerService(string resolvedPath)
+            {
+                _resolvedPath = resolvedPath;
+            }
+
+            public int ResolveShortcutTargetCallCount { get; private set; }
+
+            public override string ResolveShortcutTarget(string path)
+            {
+                ResolveShortcutTargetCallCount++;
+                return _resolvedPath;
+            }
         }
     }
 }

@@ -48,8 +48,11 @@ namespace UnitTestProject
             vm.IsBold = true;
             vm.IsItalic = true;
 
-            vm.SaveSettings();
+            string errorMessage;
+            bool saved = vm.SaveSettings(out errorMessage);
 
+            Assert.IsTrue(saved);
+            Assert.IsNull(errorMessage);
             Assert.AreEqual("Times New Roman", mockSettings.FontFamily);
             Assert.AreEqual(16.0, mockSettings.FontSize);
             Assert.IsTrue(mockSettings.IsBold);

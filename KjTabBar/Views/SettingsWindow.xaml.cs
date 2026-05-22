@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Windows;
 using System.Windows.Media;
 using KjTabBar.Models;
@@ -34,19 +34,19 @@ namespace KjTabBar.Views
 
             if (isDark)
             {
-                Resources["SettingsBg"] = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
-                Resources["SettingsFg"] = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xE8));
-                Resources["SettingsControlBg"] = new SolidColorBrush(Color.FromRgb(0x3C, 0x3C, 0x3C));
-                Resources["SettingsControlFg"] = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xE8));
-                Resources["SettingsBorderBrush"] = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55));
+                Resources["SettingsBg"] = new SolidColorBrush(Color.FromRgb(0x24, 0x24, 0x26));
+                Resources["SettingsFg"] = new SolidColorBrush(Color.FromRgb(0xF2, 0xF2, 0xF2));
+                Resources["SettingsControlBg"] = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x30));
+                Resources["SettingsControlFg"] = new SolidColorBrush(Color.FromRgb(0xF2, 0xF2, 0xF2));
+                Resources["SettingsBorderBrush"] = new SolidColorBrush(Color.FromRgb(0x5F, 0x5F, 0x5F));
             }
             else
             {
-                Resources["SettingsBg"] = new SolidColorBrush(SystemColors.WindowColor);
-                Resources["SettingsFg"] = new SolidColorBrush(Colors.Black);
+                Resources["SettingsBg"] = new SolidColorBrush(Color.FromRgb(0xF9, 0xF9, 0xF9));
+                Resources["SettingsFg"] = new SolidColorBrush(Color.FromRgb(0x22, 0x22, 0x22));
                 Resources["SettingsControlBg"] = new SolidColorBrush(Colors.White);
-                Resources["SettingsControlFg"] = new SolidColorBrush(Colors.Black);
-                Resources["SettingsBorderBrush"] = new SolidColorBrush(Color.FromRgb(0xCC, 0xCC, 0xCC));
+                Resources["SettingsControlFg"] = new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x20));
+                Resources["SettingsBorderBrush"] = new SolidColorBrush(Color.FromRgb(0xC8, 0xC8, 0xC8));
             }
         }
 
@@ -55,7 +55,16 @@ namespace KjTabBar.Views
             SettingsViewModel vm = DataContext as SettingsViewModel;
             if (vm != null)
             {
-                vm.SaveSettings();
+                string errorMessage;
+                if (!vm.SaveSettings(out errorMessage))
+                {
+                    MessageBox.Show(
+                        string.IsNullOrEmpty(errorMessage) ? "設定の保存に失敗しました。" : "設定の保存に失敗しました。\n\n" + errorMessage,
+                        "保存エラー",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                    return;
+                }
             }
             Close();
         }

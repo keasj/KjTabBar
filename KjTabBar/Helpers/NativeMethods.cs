@@ -243,6 +243,40 @@ namespace KjTabBar.Helpers
         [DllImport("shell32.dll", CharSet = CharSet.Auto)]
         public static extern int SHFileOperation(ref SHFILEOPSTRUCT FileOp);
 
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        public struct SHFILEINFO
+        {
+            public IntPtr hIcon;
+            public int iIcon;
+            public uint dwAttributes;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+            public string szDisplayName;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)]
+            public string szTypeName;
+        }
+
+        [DllImport("shell32.dll", CharSet = CharSet.Auto)]
+        public static extern IntPtr SHGetFileInfo(
+            string pszPath,
+            uint dwFileAttributes,
+            out SHFILEINFO psfi,
+            uint cbFileInfo,
+            uint uFlags);
+
+        [DllImport("shell32.dll", CharSet = CharSet.Auto)]
+        public static extern IntPtr SHGetFileInfo(
+            IntPtr pszPath,
+            uint dwFileAttributes,
+            out SHFILEINFO psfi,
+            uint cbFileInfo,
+            uint uFlags);
+
+        public const uint SHGFI_ICON = 0x000000100;
+        public const uint SHGFI_SMALLICON = 0x000000001;
+        public const uint SHGFI_PIDL = 0x000000008;
+        public const uint SHGFI_USEFILEATTRIBUTES = 0x000000010;
+        public const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
+
         public const uint FO_MOVE = 0x0001;
         public const uint FO_COPY = 0x0002;
         public const uint FO_DELETE = 0x0003;
