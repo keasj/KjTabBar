@@ -44,7 +44,7 @@ Instead of hooking into or modifying Explorer itself, it places an independent t
 ## Installation and Uninstallation
 
 - During installation, the setup custom action registers the application for startup (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`).
-- During uninstallation, the dedicated uninstaller cleans up the registry entry for auto-start. The settings file (`settings.xml`) and tab history file (`tabs.txt`) are kept under `%APPDATA%\KjTabBar` as user data.
+- During uninstallation, the dedicated uninstaller cleans up only the matching auto-start registry entry. The settings file (`settings.xml`) and DPAPI-protected tab history file (`tabs.txt`) are kept under `%APPDATA%\KjTabBar` as user data.
 
 ## License
 
@@ -56,4 +56,3 @@ For details, see the [LICENSE](LICENSE) file.
 Latest version:
 
 https://github.com/keasj/KjTabBar/releases/latest
-

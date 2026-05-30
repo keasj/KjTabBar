@@ -108,15 +108,15 @@ namespace KjTabBar
                    "$shortcut.Description = 'KjTabBar'; " +
                    "$shortcut.IconLocation = ($exePath + ',0'); " +
                    "$shortcut.Save(); " +
-                   "} catch { Write-KjtbSetupLog ('Shortcut update failed: ' + $_.Exception.Message) } " +
+                   "} catch { Write-KjtbSetupLog 'Shortcut update failed.' } " +
                    "finally { if ($shortcut -ne $null) { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcut) | Out-Null } } " +
                    "} " +
-                   "} catch { Write-KjtbSetupLog ('Shortcut COM setup failed: ' + $_.Exception.Message) } " +
+                   "} catch { Write-KjtbSetupLog 'Shortcut COM setup failed.' } " +
                    "finally { if ($ws -ne $null) { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($ws) | Out-Null } }; " +
                    "$runValue = ('\"' + $exePath + '\"'); " +
                    "$targetSid = $null; " +
-                   "try { $explorerForSid = Get-Process explorer -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $sessionId } | Sort-Object StartTime -Descending | Select-Object -First 1; if ($explorerForSid) { $explorerCim = Get-CimInstance Win32_Process -Filter \"ProcessId=$($explorerForSid.Id)\" -ErrorAction SilentlyContinue; if ($explorerCim) { $targetSid = (Invoke-CimMethod -InputObject $explorerCim -MethodName GetOwnerSid -ErrorAction SilentlyContinue).Sid } } } catch { Write-KjtbSetupLog ('Target SID resolution failed: ' + $_.Exception.Message) }; " +
-                   "try { if (-not [string]::IsNullOrEmpty($targetSid)) { $runKey = 'Registry::HKEY_USERS\\' + $targetSid + '\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' } else { $runKey = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' }; if (-not (Test-Path $runKey)) { New-Item -Path $runKey -Force | Out-Null }; Set-ItemProperty -Path $runKey -Name 'KjTabBar' -Value $runValue } catch { Write-KjtbSetupLog ('Startup Run registration failed: ' + $_.Exception.Message) }; " +
+                   "try { $explorerForSid = Get-Process explorer -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $sessionId } | Sort-Object StartTime -Descending | Select-Object -First 1; if ($explorerForSid) { $explorerCim = Get-CimInstance Win32_Process -Filter \"ProcessId=$($explorerForSid.Id)\" -ErrorAction SilentlyContinue; if ($explorerCim) { $targetSid = (Invoke-CimMethod -InputObject $explorerCim -MethodName GetOwnerSid -ErrorAction SilentlyContinue).Sid } } } catch { Write-KjtbSetupLog 'Target SID resolution failed.' }; " +
+                   "try { if (-not [string]::IsNullOrEmpty($targetSid)) { $runKey = 'Registry::HKEY_USERS\\' + $targetSid + '\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' } else { $runKey = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' }; if (-not (Test-Path $runKey)) { New-Item -Path $runKey -Force | Out-Null }; Set-ItemProperty -Path $runKey -Name 'KjTabBar' -Value $runValue } catch { Write-KjtbSetupLog 'Startup Run registration failed.' }; " +
                    "Start-Process -FilePath 'explorer.exe' -ArgumentList ('\"' + $exePath + '\"')";
         }
 
@@ -128,6 +128,49 @@ namespace KjTabBar
             }
 
             return "\"" + exePath + "\"";
+        }
+
+        internal static bool IsStartupRunCommandForExecutable(string runCommand, string installedExePath)
+        {
+            if (string.IsNullOrEmpty(runCommand) || string.IsNullOrEmpty(installedExePath))
+            {
+                return false;
+            }
+
+            string expandedCommand = Environment.ExpandEnvironmentVariables(runCommand.Trim());
+            string executablePath = ExtractExecutablePathFromCommand(expandedCommand);
+            return IsInstalledExecutablePathMatch(installedExePath, executablePath);
+        }
+
+        internal static string ExtractExecutablePathFromCommand(string command)
+        {
+            if (string.IsNullOrEmpty(command))
+            {
+                return null;
+            }
+
+            string trimmed = command.Trim();
+            if (trimmed.Length == 0)
+            {
+                return null;
+            }
+
+            if (trimmed[0] == '"')
+            {
+                int closingQuoteIndex = trimmed.IndexOf('"', 1);
+                if (closingQuoteIndex > 1)
+                {
+                    return trimmed.Substring(1, closingQuoteIndex - 1);
+                }
+            }
+
+            int exeIndex = trimmed.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
+            if (exeIndex >= 0)
+            {
+                return trimmed.Substring(0, exeIndex + 4);
+            }
+
+            return trimmed;
         }
 
         private static bool TryGetInstalledExecutablePath(out string exePath, out string targetDir)
@@ -300,22 +343,24 @@ namespace KjTabBar
 
         private void RemoveStartupRegistryValues()
         {
-            string[] targetSubKeyPaths = new string[]
+            string installedExePath;
+            string installedTargetDir;
+            if (!TryGetInstalledExecutablePath(out installedExePath, out installedTargetDir))
             {
-                StartupRunSubKeyPath,
-                StartupApprovedRunSubKeyPath
-            };
+                AppLogger.LogInfo("SetupCustomActions", "Skipping startup cleanup because the installed executable path could not be resolved.");
+                return;
+            }
 
-            // HKCUに対する削除（アンインストーラがユーザー権限で動いている場合）
-            RemoveStartupRegistryValuesForHive(RegistryHive.CurrentUser, RegistryView.Registry64, StartupValueName, targetSubKeyPaths);
-            RemoveStartupRegistryValuesForHive(RegistryHive.CurrentUser, RegistryView.Registry32, StartupValueName, targetSubKeyPaths);
+            // HKCU縺ｫ蟇ｾ縺吶ｋ蜑企勁・医い繝ｳ繧､繝ｳ繧ｹ繝医・繝ｩ縺後Θ繝ｼ繧ｶ繝ｼ讓ｩ髯舌〒蜍輔＞縺ｦ縺・ｋ蝣ｴ蜷茨ｼ・
+            RemoveStartupRegistryValuesForHive(RegistryHive.CurrentUser, RegistryView.Registry64, StartupValueName, installedExePath);
+            RemoveStartupRegistryValuesForHive(RegistryHive.CurrentUser, RegistryView.Registry32, StartupValueName, installedExePath);
 
-            // SYSTEM権限で動いている場合、HKCUはSYSTEMのものになってしまうため、
-            // HKEY_USERS にロードされている全ユーザープロファイルから削除する。
-            RemoveStartupRegistryValuesFromAllUsers(targetSubKeyPaths, StartupValueName);
+            // SYSTEM讓ｩ髯舌〒蜍輔＞縺ｦ縺・ｋ蝣ｴ蜷医？KCU縺ｯSYSTEM縺ｮ繧ゅ・縺ｫ縺ｪ縺｣縺ｦ縺励∪縺・◆繧√・
+            // HKEY_USERS 縺ｫ繝ｭ繝ｼ繝峨＆繧後※縺・ｋ蜈ｨ繝ｦ繝ｼ繧ｶ繝ｼ繝励Ο繝輔ぃ繧､繝ｫ縺九ｉ蜑企勁縺吶ｋ縲・
+            RemoveStartupRegistryValuesFromAllUsers(installedExePath, StartupValueName);
         }
 
-        private void RemoveStartupRegistryValuesFromAllUsers(string[] targetSubKeyPaths, string valueName)
+        private void RemoveStartupRegistryValuesFromAllUsers(string installedExePath, string valueName)
         {
             RegistryKey usersKey = null;
             try
@@ -330,17 +375,20 @@ namespace KjTabBar
                     if (userSid.EndsWith("_Classes", StringComparison.OrdinalIgnoreCase)) continue;
                     if (!IsRegularUserSid(userSid)) continue;
 
-                    for (int j = 0; j < targetSubKeyPaths.Length; j++)
+                    string runPath = userSid + @"\" + StartupRunSubKeyPath;
+                    if (!ShouldDeleteStartupEntry(usersKey, runPath, valueName, installedExePath))
                     {
-                        string fullPath = userSid + @"\" + targetSubKeyPaths[j];
-                        DeleteRegistryValue(usersKey, fullPath, valueName);
+                        continue;
                     }
+
+                    DeleteRegistryValue(usersKey, runPath, valueName);
+                    DeleteRegistryValue(usersKey, userSid + @"\" + StartupApprovedRunSubKeyPath, valueName);
                 }
             }
             catch
             {
                 AppLogger.LogInfo("SetupCustomActions", "Failed while enumerating user hives for startup cleanup.");
-                // エラーは無視して続行
+                // 繧ｨ繝ｩ繝ｼ縺ｯ辟｡隕悶＠縺ｦ邯夊｡・
             }
             finally
             {
@@ -355,7 +403,7 @@ namespace KjTabBar
             RegistryHive hive,
             RegistryView view,
             string valueName,
-            string[] targetSubKeyPaths)
+            string installedExePath)
         {
             RegistryKey baseKey = null;
             try
@@ -366,21 +414,52 @@ namespace KjTabBar
                     return;
                 }
 
-                for (int i = 0; i < targetSubKeyPaths.Length; i++)
+                if (!ShouldDeleteStartupEntry(baseKey, StartupRunSubKeyPath, valueName, installedExePath))
                 {
-                    DeleteRegistryValue(baseKey, targetSubKeyPaths[i], valueName);
+                    return;
                 }
+
+                DeleteRegistryValue(baseKey, StartupRunSubKeyPath, valueName);
+                DeleteRegistryValue(baseKey, StartupApprovedRunSubKeyPath, valueName);
             }
             catch
             {
                 AppLogger.LogInfo("SetupCustomActions", "Failed while opening base registry hive for startup cleanup.");
-                // エラーは無視して続行
+                // 繧ｨ繝ｩ繝ｼ縺ｯ辟｡隕悶＠縺ｦ邯夊｡・
             }
             finally
             {
                 if (baseKey != null)
                 {
                     baseKey.Dispose();
+                }
+            }
+        }
+
+        private bool ShouldDeleteStartupEntry(RegistryKey rootKey, string subKeyPath, string valueName, string installedExePath)
+        {
+            RegistryKey key = null;
+            try
+            {
+                key = rootKey.OpenSubKey(subKeyPath, false);
+                if (key == null)
+                {
+                    return false;
+                }
+
+                string runCommand = key.GetValue(valueName) as string;
+                return IsStartupRunCommandForExecutable(runCommand, installedExePath);
+            }
+            catch
+            {
+                AppLogger.LogInfo("SetupCustomActions", "Failed while reading startup registry value.");
+                return false;
+            }
+            finally
+            {
+                if (key != null)
+                {
+                    key.Dispose();
                 }
             }
         }
@@ -399,7 +478,7 @@ namespace KjTabBar
             catch
             {
                 AppLogger.LogInfo("SetupCustomActions", "Failed while deleting startup registry value.");
-                // エラーは無視して続行
+                // 繧ｨ繝ｩ繝ｼ縺ｯ辟｡隕悶＠縺ｦ邯夊｡・
             }
             finally
             {
@@ -408,8 +487,7 @@ namespace KjTabBar
                     key.Dispose();
                 }
             }
-        }
-        internal static bool IsRegularUserSid(string userSid)
+        }        internal static bool IsRegularUserSid(string userSid)
         {
             if (string.IsNullOrEmpty(userSid))
             {

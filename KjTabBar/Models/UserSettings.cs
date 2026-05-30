@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Xml;
 using System.Xml.Serialization;
 
 using KjTabBar.Helpers;
@@ -47,6 +48,68 @@ namespace KjTabBar.Models
             return Path.Combine(appData, "KjTabBar", "settings.xml");
         }
 
+        internal static XmlReaderSettings CreateSafeXmlReaderSettings()
+        {
+            XmlReaderSettings settings = new XmlReaderSettings();
+            settings.DtdProcessing = DtdProcessing.Prohibit;
+            settings.XmlResolver = null;
+            settings.MaxCharactersInDocument = 1024 * 1024;
+            return settings;
+        }
+
+        private static UserSettings NormalizeLoadedSettings(UserSettings settings)
+        {
+            if (settings == null)
+            {
+                return new UserSettings();
+            }
+
+            settings.FontSize = NormalizeFontSize(settings.FontSize);
+            if (string.IsNullOrEmpty(settings.FontFamily))
+            {
+                settings.FontFamily = "Segoe UI";
+            }
+
+            return settings;
+        }
+
+        internal static UserSettings LoadFromPath(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    XmlSerializer serializer = _serializer;
+                    StreamReader reader = null;
+                    XmlReader xmlReader = null;
+                    try
+                    {
+                        reader = new StreamReader(path);
+                        xmlReader = XmlReader.Create(reader, CreateSafeXmlReaderSettings());
+                        UserSettings settings = serializer.Deserialize(xmlReader) as UserSettings;
+                        return NormalizeLoadedSettings(settings);
+                    }
+                    finally
+                    {
+                        if (xmlReader != null)
+                        {
+                            xmlReader.Dispose();
+                        }
+
+                        if (reader != null)
+                        {
+                            reader.Dispose();
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("UserSettings", "Failed to load settings.xml.", ex);
+            }
+            return new UserSettings();
+        }
+
         public static double NormalizeFontSize(double fontSize)
         {
             if (double.IsNaN(fontSize) || double.IsInfinity(fontSize))
@@ -69,43 +132,7 @@ namespace KjTabBar.Models
 
         public static UserSettings Load()
         {
-            try
-            {
-                string path = GetConfigPath();
-                if (File.Exists(path))
-                {
-                    XmlSerializer serializer = _serializer;
-                    StreamReader reader = null;
-                    try
-                    {
-                        reader = new StreamReader(path);
-                        UserSettings settings = (UserSettings)serializer.Deserialize(reader);
-                        if (settings == null)
-                        {
-                            return new UserSettings();
-                        }
-
-                        settings.FontSize = NormalizeFontSize(settings.FontSize);
-                        if (string.IsNullOrEmpty(settings.FontFamily))
-                        {
-                            settings.FontFamily = "Segoe UI";
-                        }
-                        return settings;
-                    }
-                    finally
-                    {
-                        if (reader != null)
-                        {
-                            reader.Dispose();
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                AppLogger.LogError("UserSettings", "Failed to load settings.xml.", ex);
-            }
-            return new UserSettings();
+            return LoadFromPath(GetConfigPath());
         }
 
         public void Save()

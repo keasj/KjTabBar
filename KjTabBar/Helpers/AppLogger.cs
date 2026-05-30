@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace KjTabBar.Helpers
 {
@@ -9,6 +10,9 @@ namespace KjTabBar.Helpers
     {
         private static readonly object SyncRoot = new object();
         private static readonly Dictionary<string, DateTime> ThrottledLogTimes = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+        private static readonly Regex WindowsPathRegex = new Regex("(?i)(?:[a-z]:\\\\|\\\\\\\\)[^\\r\\n\\\"'<>|]+", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        private static readonly Regex SidRegex = new Regex(@"\bS-\d-(?:\d+-){1,14}\d+\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        private const int MaxLoggedTextLength = 2048;
 
         public static void LogInfo(string source, string message)
         {
@@ -45,6 +49,59 @@ namespace KjTabBar.Helpers
             Write("ERROR", source, message, exception);
         }
 
+        internal static string SanitizeForLog(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                string sanitized = text;
+                sanitized = ReplaceKnownPath(sanitized, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "<user-profile>");
+                sanitized = ReplaceKnownPath(sanitized, Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "<appdata>");
+                sanitized = ReplaceKnownPath(sanitized, Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "<localappdata>");
+                sanitized = ReplaceKnownPath(sanitized, Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "<desktop>");
+                sanitized = ReplaceKnownPath(sanitized, Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory), "<common-desktop>");
+                sanitized = ReplaceKnownPath(sanitized, Path.GetTempPath(), "<temp>");
+                sanitized = SidRegex.Replace(sanitized, "<sid>");
+                sanitized = WindowsPathRegex.Replace(sanitized, "<path>");
+
+                if (sanitized.Length > MaxLoggedTextLength)
+                {
+                    sanitized = sanitized.Substring(0, MaxLoggedTextLength) + "...";
+                }
+
+                return sanitized;
+            }
+            catch
+            {
+                if (text.Length > MaxLoggedTextLength)
+                {
+                    return text.Substring(0, MaxLoggedTextLength) + "...";
+                }
+
+                return text;
+            }
+        }
+
+        private static string ReplaceKnownPath(string text, string knownPath, string replacement)
+        {
+            if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(knownPath))
+            {
+                return text;
+            }
+
+            string trimmedPath = knownPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.IsNullOrEmpty(trimmedPath))
+            {
+                return text;
+            }
+
+            return Regex.Replace(text, Regex.Escape(trimmedPath), replacement, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
         private static void Write(string level, string source, string message, Exception exception)
         {
             try
@@ -64,16 +121,21 @@ namespace KjTabBar.Helpers
                 builder.Append("] ");
                 builder.Append(source ?? "Unknown");
                 builder.Append(": ");
-                builder.Append(message ?? string.Empty);
+                builder.Append(SanitizeForLog(message ?? string.Empty));
 
                 if (exception != null)
                 {
                     builder.Append(" | ");
                     builder.Append(exception.GetType().FullName);
                     builder.Append(": ");
-                    builder.Append(exception.Message);
-                    builder.AppendLine();
-                    builder.Append(exception.StackTrace ?? string.Empty);
+                    builder.Append(SanitizeForLog(exception.Message));
+
+                    string stackTrace = SanitizeForLog(exception.StackTrace ?? string.Empty);
+                    if (!string.IsNullOrEmpty(stackTrace))
+                    {
+                        builder.AppendLine();
+                        builder.Append(stackTrace);
+                    }
                 }
 
                 lock (SyncRoot)

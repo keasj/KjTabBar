@@ -791,7 +791,7 @@ namespace KjTabBar
                 string file = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "KjTabBar", "tabs.txt");
                 if (System.IO.File.Exists(file))
                 {
-                    string[] paths = System.IO.File.ReadAllLines(file);
+                    string[] paths = ProtectedTextStorage.LoadLines(file);
                     vm.RestoreTabs(paths);
                     _lastSavedTabs = paths.Length > 0 ? string.Join("|", paths) + "|" : "";
                 }
@@ -838,7 +838,7 @@ namespace KjTabBar
                     {
                         System.IO.Directory.CreateDirectory(dir);
                     }
-                    System.IO.File.WriteAllLines(file, paths.ToArray());
+                    ProtectedTextStorage.SaveLines(file, paths);
                 }
             }
             catch (Exception ex)

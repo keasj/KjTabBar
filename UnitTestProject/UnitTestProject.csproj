@@ -35,8 +35,20 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
+  <PropertyGroup>
+    <QualityToolsUnitTestFrameworkPath Condition="'$(QualityToolsUnitTestFrameworkPath)' == '' and '$(DevEnvDir)' != '' and Exists('$(DevEnvDir)PublicAssemblies\Microsoft.VisualStudio.QualityTools.UnitTestFramework.dll')">$(DevEnvDir)PublicAssemblies\Microsoft.VisualStudio.QualityTools.UnitTestFramework.dll</QualityToolsUnitTestFrameworkPath>
+    <QualityToolsUnitTestFrameworkPath Condition="'$(QualityToolsUnitTestFrameworkPath)' == '' and '$(VSINSTALLDIR)' != '' and Exists('$(VSINSTALLDIR)Common7\IDE\PublicAssemblies\Microsoft.VisualStudio.QualityTools.UnitTestFramework.dll')">$(VSINSTALLDIR)Common7\IDE\PublicAssemblies\Microsoft.VisualStudio.QualityTools.UnitTestFramework.dll</QualityToolsUnitTestFrameworkPath>
+    <QualityToolsUnitTestFrameworkPath Condition="'$(QualityToolsUnitTestFrameworkPath)' == '' and Exists('C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\PublicAssemblies\Microsoft.VisualStudio.QualityTools.UnitTestFramework.dll')">C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\PublicAssemblies\Microsoft.VisualStudio.QualityTools.UnitTestFramework.dll</QualityToolsUnitTestFrameworkPath>
+    <QualityToolsUnitTestFrameworkPath Condition="'$(QualityToolsUnitTestFrameworkPath)' == '' and Exists('C:\Program Files\Microsoft Visual Studio\18\Professional\Common7\IDE\PublicAssemblies\Microsoft.VisualStudio.QualityTools.UnitTestFramework.dll')">C:\Program Files\Microsoft Visual Studio\18\Professional\Common7\IDE\PublicAssemblies\Microsoft.VisualStudio.QualityTools.UnitTestFramework.dll</QualityToolsUnitTestFrameworkPath>
+    <QualityToolsUnitTestFrameworkPath Condition="'$(QualityToolsUnitTestFrameworkPath)' == '' and Exists('C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\IDE\PublicAssemblies\Microsoft.VisualStudio.QualityTools.UnitTestFramework.dll')">C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\IDE\PublicAssemblies\Microsoft.VisualStudio.QualityTools.UnitTestFramework.dll</QualityToolsUnitTestFrameworkPath>
+    <QualityToolsUnitTestFrameworkPath Condition="'$(QualityToolsUnitTestFrameworkPath)' == '' and Exists('C:\Program Files\Microsoft Visual Studio\17\Community\Common7\IDE\PublicAssemblies\Microsoft.VisualStudio.QualityTools.UnitTestFramework.dll')">C:\Program Files\Microsoft Visual Studio\17\Community\Common7\IDE\PublicAssemblies\Microsoft.VisualStudio.QualityTools.UnitTestFramework.dll</QualityToolsUnitTestFrameworkPath>
+    <QualityToolsUnitTestFrameworkPath Condition="'$(QualityToolsUnitTestFrameworkPath)' == '' and Exists('C:\Program Files\Microsoft Visual Studio\17\Professional\Common7\IDE\PublicAssemblies\Microsoft.VisualStudio.QualityTools.UnitTestFramework.dll')">C:\Program Files\Microsoft Visual Studio\17\Professional\Common7\IDE\PublicAssemblies\Microsoft.VisualStudio.QualityTools.UnitTestFramework.dll</QualityToolsUnitTestFrameworkPath>
+    <QualityToolsUnitTestFrameworkPath Condition="'$(QualityToolsUnitTestFrameworkPath)' == '' and Exists('C:\Program Files\Microsoft Visual Studio\17\Enterprise\Common7\IDE\PublicAssemblies\Microsoft.VisualStudio.QualityTools.UnitTestFramework.dll')">C:\Program Files\Microsoft Visual Studio\17\Enterprise\Common7\IDE\PublicAssemblies\Microsoft.VisualStudio.QualityTools.UnitTestFramework.dll</QualityToolsUnitTestFrameworkPath>
+  </PropertyGroup>
   <ItemGroup>
-    <Reference Include="Microsoft.VisualStudio.QualityTools.UnitTestFramework, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL" />
+    <Reference Include="Microsoft.VisualStudio.QualityTools.UnitTestFramework, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
+      <HintPath>$(QualityToolsUnitTestFrameworkPath)</HintPath>
+    </Reference>
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System" />
     <Reference Include="System.ComponentModel.DataAnnotations" />
