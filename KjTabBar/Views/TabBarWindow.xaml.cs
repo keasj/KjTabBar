@@ -819,11 +819,15 @@ namespace KjTabBar.Views
             uint cidl = BitConverter.ToUInt32(bytes, 0);
             if (cidl == 0) return null;
 
+            uint maxCidl = (uint)((bytes.Length - 4) / 4 - 1);
+            if (cidl > maxCidl) return null;
+
             // cidl + 1 個のオフセットが必要 (親1つ + 子cidl個)
-            int headerSize = (int)(4 + (cidl + 1) * 4);
+            int headerSize = 4 + ((int)cidl + 1) * 4;
             if (bytes.Length < headerSize) return null;
 
             uint parentOffset = BitConverter.ToUInt32(bytes, 4);
+            if (!IsValidCidaOffset(bytes, parentOffset)) return null;
 
             System.Collections.Generic.List<string> paths = new System.Collections.Generic.List<string>();
             System.Runtime.InteropServices.GCHandle handle = System.Runtime.InteropServices.GCHandle.Alloc(bytes, System.Runtime.InteropServices.GCHandleType.Pinned);
@@ -831,11 +835,24 @@ namespace KjTabBar.Views
             {
                 IntPtr pData = handle.AddrOfPinnedObject();
                 IntPtr parentPidl = IntPtr.Add(pData, (int)parentOffset);
+                if (!IsPidlWithinCidaBuffer(bytes, pData, parentPidl))
+                {
+                    return null;
+                }
 
                 for (uint i = 0; i < cidl; i++)
                 {
                     uint childOffset = BitConverter.ToUInt32(bytes, (int)(8 + i * 4));
+                    if (!IsValidCidaOffset(bytes, childOffset))
+                    {
+                        continue;
+                    }
+
                     IntPtr childPidl = IntPtr.Add(pData, (int)childOffset);
+                    if (!IsPidlWithinCidaBuffer(bytes, pData, childPidl))
+                    {
+                        continue;
+                    }
 
                     // 親PIDLと子PIDLを結合して絶対PIDLを作成
                     IntPtr absolutePidl = NativeMethods.ILCombine(parentPidl, childPidl);
@@ -870,6 +887,32 @@ namespace KjTabBar.Views
             return paths.Count > 0 ? paths.ToArray() : null;
         }
 
+        private bool IsValidCidaOffset(byte[] bytes, uint offset)
+        {
+            if (bytes == null)
+            {
+                return false;
+            }
+
+            return offset < bytes.Length && bytes.Length - offset >= 2;
+        }
+
+        private bool IsPidlWithinCidaBuffer(byte[] bytes, IntPtr bufferStart, IntPtr pidl)
+        {
+            if (bytes == null || bufferStart == IntPtr.Zero || pidl == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            long offset = pidl.ToInt64() - bufferStart.ToInt64();
+            if (offset < 0 || offset >= bytes.Length)
+            {
+                return false;
+            }
+
+            uint size = NativeMethods.ILGetSize(pidl);
+            return size > 0 && size <= bytes.Length - offset;
+        }
         private void ExecuteFileOperation(string[] sources, string destination, uint wFunc)
         {
             if (sources == null || sources.Length == 0 || string.IsNullOrEmpty(destination)) return;

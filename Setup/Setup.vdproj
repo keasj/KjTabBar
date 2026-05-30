@@ -249,7 +249,7 @@
         {
         "Name" = "8:Microsoft Visual Studio"
         "ProductName" = "8:KjTabBar"
-        "ProductCode" = "8:{B52D9E25-60C4-46F6-BAE5-3B3BF4FE3D30}"
+        "ProductCode" = "8:{A23393E3-FE87-47C2-9F4F-13591DD842A0}"
         "PackageCode" = "8:{50400AD7-92E5-47FE-831D-9A8A0AB71FFF}"
         "UpgradeCode" = "8:{C3A4D5D7-A7B5-4DBF-8DD4-65050E7326C9}"
         "AspNetVersion" = "8:4.0.30319.0"
@@ -257,7 +257,7 @@
         "RemovePreviousVersions" = "11:TRUE"
         "DetectNewerInstalledVersion" = "11:TRUE"
         "InstallAllUsers" = "11:FALSE"
-        "ProductVersion" = "8:1.1.0"
+        "ProductVersion" = "8:1.1.1"
         "Manufacturer" = "8:KjTabBar"
         "ARPHELPTELEPHONE" = "8:"
         "ARPHELPLINK" = "8:"

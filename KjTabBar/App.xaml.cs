@@ -52,10 +52,6 @@ namespace KjTabBar
         private System.Drawing.Icon _trayIconObj;
         private IntPtr _trayIconHandle = IntPtr.Zero;
         private const string ShellRelaunchArgument = "--kjtb-shell";
-        private const string ElevatedSymlinkArgument = "--kjtb-create-symlink";
-        private const string SymlinkLinkPathArgument = "--link";
-        private const string SymlinkTargetPathArgument = "--target";
-        private const string SymlinkDirectoryArgument = "--directory";
 
 
 
@@ -165,12 +161,6 @@ namespace KjTabBar
         {
             ApplyLanguageResource();
 
-            if (TryHandleElevatedSymbolicLinkRequest(e))
-            {
-                Shutdown();
-                return;
-            }
-
             if (!HasStartupArgument(e, ShellRelaunchArgument) && IsRunningAsAdministrator())
             {
                 if (TryRelaunchAsStandardUser())
@@ -231,70 +221,6 @@ namespace KjTabBar
             }
 
             return false;
-        }
-
-        private bool TryHandleElevatedSymbolicLinkRequest(StartupEventArgs e)
-        {
-            if (!HasStartupArgument(e, ElevatedSymlinkArgument))
-            {
-                return false;
-            }
-
-            try
-            {
-                string linkPath = DecodeBase64Argument(GetArgumentValue(e.Args, SymlinkLinkPathArgument));
-                string targetPath = DecodeBase64Argument(GetArgumentValue(e.Args, SymlinkTargetPathArgument));
-                string directoryValue = GetArgumentValue(e.Args, SymlinkDirectoryArgument);
-                bool isDirectory = string.Equals(directoryValue, "true", StringComparison.OrdinalIgnoreCase);
-
-                if (string.IsNullOrEmpty(linkPath) || string.IsNullOrEmpty(targetPath))
-                {
-                    Helpers.AppLogger.LogInfo("App", "Elevated symbolic link request was missing a required path.");
-                    return true;
-                }
-
-                uint flags = isDirectory ? NativeMethods.SYMBOLIC_LINK_FLAG_DIRECTORY : NativeMethods.SYMBOLIC_LINK_FLAG_FILE;
-                if (!NativeMethods.CreateSymbolicLink(linkPath, targetPath, flags))
-                {
-                    int errorCode = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
-                    Helpers.AppLogger.LogInfo("App", "Elevated symbolic link creation failed. ErrorCode=" + errorCode.ToString());
-                }
-            }
-            catch (Exception ex)
-            {
-                Helpers.AppLogger.LogError("App", "Elevated symbolic link request failed.", ex);
-            }
-
-            return true;
-        }
-
-        private string GetArgumentValue(string[] args, string name)
-        {
-            if (args == null || string.IsNullOrEmpty(name))
-            {
-                return null;
-            }
-
-            for (int i = 0; i < args.Length - 1; i++)
-            {
-                if (string.Equals(args[i], name, StringComparison.OrdinalIgnoreCase))
-                {
-                    return args[i + 1];
-                }
-            }
-
-            return null;
-        }
-
-        private string DecodeBase64Argument(string value)
-        {
-            if (string.IsNullOrEmpty(value))
-            {
-                return null;
-            }
-
-            byte[] bytes = Convert.FromBase64String(value);
-            return Encoding.UTF8.GetString(bytes);
         }
 
         private void ApplyLanguageResource()

@@ -1612,6 +1612,7 @@ namespace KjTabBar.Models
 
             var linksToCreate = new List<Tuple<string, string, bool>>();
             var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var otherErrorOccurred = false;
 
             for (int i = 0; i < sourcePaths.Length; i++)
             {
@@ -1628,7 +1629,13 @@ namespace KjTabBar.Models
                     fileName = fileName.Replace(invalidChars[j], '_');
                 }
 
-                bool isDirectory = Directory.Exists(sourcePath);
+                bool isDirectory;
+                if (!TryGetSymbolicLinkTargetType(sourcePath, out isDirectory))
+                {
+                    otherErrorOccurred = true;
+                    continue;
+                }
+
                 string ext = isDirectory ? "" : Path.GetExtension(sourcePath);
                 string baseName = isDirectory || string.IsNullOrEmpty(ext) ? fileName : Path.GetFileNameWithoutExtension(fileName);
 
@@ -1648,7 +1655,6 @@ namespace KjTabBar.Models
             }
 
             var failedLinks = new List<Tuple<string, string, bool>>();
-            var otherErrorOccurred = false;
 
             foreach (var link in linksToCreate)
             {
@@ -1676,37 +1682,11 @@ namespace KjTabBar.Models
 
             if (failedLinks.Count > 0)
             {
-                var result = System.Windows.MessageBox.Show(
-                    "シンボリックリンクを作成する権限がありません。\n管理者権限を使用して作成しますか？\n\n（「いいえ」を選択した場合、Windowsの設定で「開発者モード」をオンにして権限を確保する必要があります）",
+                System.Windows.MessageBox.Show(
+                    "シンボリックリンクを作成する権限がありません。Windowsの設定で開発者モードをオンにするか、権限のある場所を指定してください。",
                     "権限の確認",
-                    System.Windows.MessageBoxButton.YesNo,
-                    System.Windows.MessageBoxImage.Question);
-
-                if (result == System.Windows.MessageBoxResult.Yes)
-                {
-                    try
-                    {
-                        foreach (var link in failedLinks)
-                        {
-                            using (System.Diagnostics.Process process = StartElevatedSymbolicLinkCreator(link.Item1, link.Item2, link.Item3))
-                            {
-                                if (process != null)
-                                {
-                                    process.WaitForExit();
-                                }
-                            }
-                        }
-                    }
-                    catch (System.ComponentModel.Win32Exception)
-                    {
-                        // UACプロンプトでキャンセルされた場合などは何もしない
-                        AppLogger.LogInfo("ExplorerManager", "Elevated symbolic link creation was canceled or failed to start.");
-                    }
-                    catch (Exception ex)
-                    {
-                        AppLogger.LogError("ExplorerManager", "Elevated symbolic link creation failed.", ex);
-                    }
-                }
+                    System.Windows.MessageBoxButton.OK,
+                    System.Windows.MessageBoxImage.Warning);
             }
             
             if (otherErrorOccurred)
@@ -1720,51 +1700,28 @@ namespace KjTabBar.Models
 
         }
 
-        private System.Diagnostics.Process StartElevatedSymbolicLinkCreator(string linkPath, string sourcePath, bool isDirectory)
+        private bool TryGetSymbolicLinkTargetType(string sourcePath, out bool isDirectory)
         {
-            string exePath = GetCurrentExecutablePath();
-            if (string.IsNullOrEmpty(exePath))
+            isDirectory = false;
+            if (string.IsNullOrEmpty(sourcePath))
             {
-                return null;
+                return false;
             }
 
-            System.Diagnostics.ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo();
-            startInfo.FileName = exePath;
-            startInfo.Arguments = "--kjtb-create-symlink --link " + EncodeBase64Argument(linkPath) + " --target " + EncodeBase64Argument(sourcePath) + " --directory " + (isDirectory ? "true" : "false");
-            startInfo.UseShellExecute = true;
-            startInfo.Verb = "runas";
-            startInfo.WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden;
-            startInfo.CreateNoWindow = true;
-            return System.Diagnostics.Process.Start(startInfo);
+            if (Directory.Exists(sourcePath))
+            {
+                isDirectory = true;
+                return true;
+            }
+
+            if (File.Exists(sourcePath))
+            {
+                isDirectory = false;
+                return true;
+            }
+
+            return false;
         }
-
-        private string GetCurrentExecutablePath()
-        {
-            System.Diagnostics.Process currentProcess = null;
-            try
-            {
-                currentProcess = System.Diagnostics.Process.GetCurrentProcess();
-                return currentProcess.MainModule.FileName;
-            }
-            finally
-            {
-                if (currentProcess != null)
-                {
-                    currentProcess.Dispose();
-                }
-            }
-        }
-
-        private string EncodeBase64Argument(string value)
-        {
-            if (value == null)
-            {
-                value = string.Empty;
-            }
-
-            return Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
-        }
-
         private void ShowOperationError(string message)
         {
             System.Windows.MessageBox.Show(

@@ -14,7 +14,8 @@ Instead of hooking into or modifying Explorer itself, it places an independent t
 - **Drag and drop support**
   - Reorder tabs with left-button drag
   - Move or copy files and folders onto tabs by dropping items from outside
-  - Show a context menu on right-drag drop such as "Copy here" and "Move here"
+  - Show a context menu on right-drag drop such as "Copy here", "Move here", and "Create symbolic link here"
+  - Symbolic links are created with the current standard-user privileges; if privileges are insufficient, the app shows guidance instead of retrying as administrator.
 - **Seamless tracking and UI integration**
   - Tracks Explorer position, size, and DPI scale changes in real time
   - Automatically follows the Windows dark/light mode setting
