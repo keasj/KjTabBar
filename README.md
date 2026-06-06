@@ -26,7 +26,7 @@ Instead of hooking into or modifying Explorer itself, it places an independent t
 ## Requirements
 
 - OS: Windows 10 / Windows 11
-- Runtime: .NET environment (prepare it according to the specification)
+- Runtime: .NET Framework 4.8.1
 
 ## Usage
 
@@ -56,3 +56,8 @@ For details, see the [LICENSE](LICENSE) file.
 Latest version:
 
 https://github.com/keasj/KjTabBar/releases/latest
+
+## Development Notes
+
+- Text files managed by this repository use CRLF. To enable the repository hook, run `git config core.hooksPath .githooks`.
+- The pre-commit hook runs `tools/Check-LineEndings.ps1` and blocks commits that introduce LF-only lines into CRLF-managed files.

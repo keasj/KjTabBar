@@ -4,6 +4,8 @@ using System.ComponentModel;
 using System.Configuration.Install;
 using System.Diagnostics;
 using System.IO;
+using System.Management;
+using System.Runtime.InteropServices;
 using KjTabBar.Helpers;
 using Microsoft.Win32;
 
@@ -13,6 +15,9 @@ namespace KjTabBar
     public class SetupCustomActions : Installer
     {
         internal const string StartupValueName = "KjTabBar";
+        internal const string PostInstallHelperArgument = "--kjtb-post-install";
+        private const string SetupExePathEnvironmentName = "KJTB_EXE_PATH";
+        private const string SetupWorkingDirectoryEnvironmentName = "KJTB_WORKING_DIRECTORY";
         private const string StartupRunSubKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
         private const string StartupApprovedRunSubKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
 
@@ -41,7 +46,7 @@ namespace KjTabBar
                     {
                         installerProcess = Process.GetCurrentProcess();
                         installerProcessId = installerProcess.Id;
-                        preferredSessionId = GetPreferredSessionId(installerProcess.SessionId);
+                        preferredSessionId = SetupEnvironmentResolver.GetPreferredSessionId(installerProcess.SessionId);
                     }
                     finally
                     {
@@ -52,17 +57,14 @@ namespace KjTabBar
                     }
 
                     // ユーザー UI 側の msiexec が閉じた後に、ショートカットを更新してからユーザーシェル経由で本体を起動する。
-                    string script = BuildPostInstallScript(installerProcessId, preferredSessionId);
-
-                    string encodedCommand = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
-
                     ProcessStartInfo psi = new ProcessStartInfo();
-                    psi.FileName = "powershell.exe";
-                    psi.Arguments = "-WindowStyle Hidden -NoProfile -EncodedCommand " + encodedCommand;
+                    psi.FileName = exePath;
+                    psi.Arguments = BuildPostInstallHelperArguments(installerProcessId, preferredSessionId);
+                    psi.WorkingDirectory = targetDir;
                     psi.CreateNoWindow = true;
                     psi.UseShellExecute = false;
-                    psi.EnvironmentVariables["KJTB_EXE_PATH"] = exePath;
-                    psi.EnvironmentVariables["KJTB_WORKING_DIRECTORY"] = targetDir;
+                    psi.EnvironmentVariables[SetupExePathEnvironmentName] = exePath;
+                    psi.EnvironmentVariables[SetupWorkingDirectoryEnvironmentName] = targetDir;
 
                     Process process = Process.Start(psi);
                     if (process != null)
@@ -78,46 +80,215 @@ namespace KjTabBar
             }
         }
 
-        internal static string BuildPostInstallScript(int installerProcessId, int preferredSessionId)
+        internal static string BuildPostInstallHelperArguments(int installerProcessId, int preferredSessionId)
         {
-            return "$installerPid = " + installerProcessId.ToString() + "; " +
-                   "$sessionId = " + preferredSessionId.ToString() + "; " +
-                   "$exePath = $env:KJTB_EXE_PATH; " +
-                   "$workingDirectory = $env:KJTB_WORKING_DIRECTORY; " +
-                   // Intentional: generated setup logging must never fail installation if the log path is unavailable.
-                   "function Write-KjtbSetupLog([string]$message) { try { $base = [Environment]::GetFolderPath('ApplicationData'); if ([string]::IsNullOrEmpty($base)) { $base = [System.IO.Path]::GetTempPath() }; $dir = [System.IO.Path]::Combine($base, 'KjTabBar', 'Logs'); [System.IO.Directory]::CreateDirectory($dir) | Out-Null; $line = ((Get-Date).ToUniversalTime().ToString('o') + ' [ERROR] SetupCustomActions: ' + $message + [Environment]::NewLine); [System.IO.File]::AppendAllText([System.IO.Path]::Combine($dir, 'KjTabBar.setup.log'), $line, [System.Text.Encoding]::UTF8) } catch {} }; " +
-                   "if ([string]::IsNullOrEmpty($exePath) -or [string]::IsNullOrEmpty($workingDirectory)) { Write-KjtbSetupLog 'Missing post-install environment values.'; exit 1 }; " +
-                   "$ui = Get-Process msiexec -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $sessionId -and $_.MainWindowHandle -ne 0 } | Sort-Object StartTime -Descending | Select-Object -First 1; " +
-                   "if ($ui) { Wait-Process -Id $ui.Id -Timeout 600 -ErrorAction SilentlyContinue } " +
-                   "else { Wait-Process -Id $installerPid -Timeout 600 -ErrorAction SilentlyContinue }; " +
-                   "$desktopShortcut = [System.IO.Path]::Combine([Environment]::GetFolderPath('Desktop'), 'KjTabBar.lnk'); " +
-                   "$programsShortcutDir = [System.IO.Path]::Combine([Environment]::GetFolderPath('Programs'), 'KjTabBar'); " +
-                   "$programsShortcut = [System.IO.Path]::Combine($programsShortcutDir, 'KjTabBar.lnk'); " +
-                   "$ws = $null; " +
-                   "try { " +
-                   "$ws = New-Object -ComObject WScript.Shell; " +
-                   "foreach ($shortcutPath in @($desktopShortcut, $programsShortcut)) { " +
-                   "$shortcutDir = Split-Path $shortcutPath -Parent; " +
-                   "if (-not [string]::IsNullOrEmpty($shortcutDir) -and -not (Test-Path $shortcutDir)) { New-Item -ItemType Directory -Path $shortcutDir -Force | Out-Null }; " +
-                   "$shortcut = $null; " +
-                   "try { " +
-                   "$shortcut = $ws.CreateShortcut($shortcutPath); " +
-                   "$shortcut.TargetPath = $exePath; " +
-                   "$shortcut.WorkingDirectory = $workingDirectory; " +
-                   "$shortcut.Arguments = ''; " +
-                   "$shortcut.Description = 'KjTabBar'; " +
-                   "$shortcut.IconLocation = ($exePath + ',0'); " +
-                   "$shortcut.Save(); " +
-                   "} catch { Write-KjtbSetupLog 'Shortcut update failed.' } " +
-                   "finally { if ($shortcut -ne $null) { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcut) | Out-Null } } " +
-                   "} " +
-                   "} catch { Write-KjtbSetupLog 'Shortcut COM setup failed.' } " +
-                   "finally { if ($ws -ne $null) { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($ws) | Out-Null } }; " +
-                   "$runValue = ('\"' + $exePath + '\"'); " +
-                   "$targetSid = $null; " +
-                   "try { $explorerForSid = Get-Process explorer -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $sessionId } | Sort-Object StartTime -Descending | Select-Object -First 1; if ($explorerForSid) { $explorerCim = Get-CimInstance Win32_Process -Filter \"ProcessId=$($explorerForSid.Id)\" -ErrorAction SilentlyContinue; if ($explorerCim) { $targetSid = (Invoke-CimMethod -InputObject $explorerCim -MethodName GetOwnerSid -ErrorAction SilentlyContinue).Sid } } } catch { Write-KjtbSetupLog 'Target SID resolution failed.' }; " +
-                   "try { if (-not [string]::IsNullOrEmpty($targetSid)) { $runKey = 'Registry::HKEY_USERS\\' + $targetSid + '\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' } else { $runKey = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' }; if (-not (Test-Path $runKey)) { New-Item -Path $runKey -Force | Out-Null }; Set-ItemProperty -Path $runKey -Name 'KjTabBar' -Value $runValue } catch { Write-KjtbSetupLog 'Startup Run registration failed.' }; " +
-                   "Start-Process -FilePath 'explorer.exe' -ArgumentList ('\"' + $exePath + '\"')";
+            return PostInstallHelperArgument + " " + installerProcessId.ToString() + " " + preferredSessionId.ToString();
+        }
+
+        internal static bool IsPostInstallHelperRequest(string[] args)
+        {
+            return args != null && args.Length > 0 && string.Equals(args[0], PostInstallHelperArgument, StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static void RunPostInstallHelper(string[] args)
+        {
+            try
+            {
+                int installerProcessId;
+                int preferredSessionId;
+                if (!TryParsePostInstallHelperArguments(args, out installerProcessId, out preferredSessionId))
+                {
+                    AppLogger.LogInfo("SetupCustomActions", "Skipping post-install helper because arguments are invalid.");
+                    return;
+                }
+
+                string exePath = Environment.GetEnvironmentVariable(SetupExePathEnvironmentName);
+                string workingDirectory = Environment.GetEnvironmentVariable(SetupWorkingDirectoryEnvironmentName);
+                if (!IsPostInstallHelperEnvironmentTrusted(exePath, workingDirectory))
+                {
+                    AppLogger.LogInfo("SetupCustomActions", "Skipping post-install helper because environment values are not trusted.");
+                    return;
+                }
+
+                WaitForInstallerExit(installerProcessId, preferredSessionId);
+                SetupShortcutUpdater.UpdatePostInstallShortcuts(exePath, workingDirectory);
+                string targetSid = SetupEnvironmentResolver.TryGetExplorerOwnerSid(preferredSessionId);
+                SetupRegistryManager.RegisterStartupRunValue(exePath, preferredSessionId, targetSid);
+                StartInstalledApplicationThroughExplorer(exePath);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("SetupCustomActions", "Post-install helper failed.", ex);
+            }
+        }
+
+        private static bool TryParsePostInstallHelperArguments(string[] args, out int installerProcessId, out int preferredSessionId)
+        {
+            installerProcessId = 0;
+            preferredSessionId = 0;
+            if (!IsPostInstallHelperRequest(args) || args.Length != 3)
+            {
+                return false;
+            }
+
+            return int.TryParse(args[1], out installerProcessId) && int.TryParse(args[2], out preferredSessionId);
+        }
+
+        internal static bool IsPostInstallHelperEnvironmentTrusted(string exePath, string workingDirectory)
+        {
+            if (string.IsNullOrEmpty(exePath) || string.IsNullOrEmpty(workingDirectory))
+            {
+                return false;
+            }
+
+            try
+            {
+                string installedExePath;
+                string installedTargetDir;
+                if (!TryGetInstalledExecutablePath(out installedExePath, out installedTargetDir))
+                {
+                    return false;
+                }
+
+                if (!File.Exists(exePath) || !Directory.Exists(workingDirectory))
+                {
+                    return false;
+                }
+
+                string normalizedExePath = Path.GetFullPath(exePath);
+                string normalizedInstalledExePath = Path.GetFullPath(installedExePath);
+                string normalizedWorkingDirectory = Path.GetFullPath(workingDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string normalizedInstalledTargetDir = Path.GetFullPath(installedTargetDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                return string.Equals(normalizedExePath, normalizedInstalledExePath, StringComparison.OrdinalIgnoreCase) &&
+                       string.Equals(normalizedWorkingDirectory, normalizedInstalledTargetDir, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("SetupCustomActions", "Post-install helper environment validation failed.", ex);
+                return false;
+            }
+        }
+
+        private static void WaitForInstallerExit(int installerProcessId, int preferredSessionId)
+        {
+            Process process = SetupEnvironmentResolver.FindInstallerUiProcess(preferredSessionId);
+            if (process == null)
+            {
+                try
+                {
+                    process = Process.GetProcessById(installerProcessId);
+                }
+                catch
+                {
+                    return;
+                }
+            }
+
+            try
+            {
+                process.WaitForExit(600000);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("SetupCustomActions", "Waiting for installer process failed.", ex);
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+
+        private static Process FindInstallerUiProcess(int preferredSessionId)
+        {
+            Process[] processes = null;
+            Process result = null;
+            try
+            {
+                processes = Process.GetProcessesByName("msiexec");
+                for (int i = 0; i < processes.Length; i++)
+                {
+                    Process process = processes[i];
+                    if (process.SessionId != preferredSessionId || process.MainWindowHandle == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    if (result == null || IsStartedAfter(process, result))
+                    {
+                        if (result != null)
+                        {
+                            result.Dispose();
+                        }
+
+                        result = process;
+                        processes[i] = null;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("SetupCustomActions", "Failed to find installer UI process.", ex);
+            }
+            finally
+            {
+                if (processes != null)
+                {
+                    for (int i = 0; i < processes.Length; i++)
+                    {
+                        if (processes[i] != null)
+                        {
+                            processes[i].Dispose();
+                        }
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        private static bool IsStartedAfter(Process process, Process other)
+        {
+            try
+            {
+                return process.StartTime > other.StartTime;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+
+
+        private static void StartInstalledApplicationThroughExplorer(string exePath)
+        {
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo();
+                psi.FileName = "explorer.exe";
+                psi.Arguments = QuoteCommandLineArgument(exePath);
+                psi.UseShellExecute = false;
+                Process process = Process.Start(psi);
+                if (process != null)
+                {
+                    process.Dispose();
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("SetupCustomActions", "Starting installed application through Explorer failed.", ex);
+            }
+        }
+
+        private static string QuoteCommandLineArgument(string value)
+        {
+            if (value == null)
+            {
+                return "\"\"";
+            }
+
+            return "\"" + value.Replace("\"", "\\\"") + "\"";
         }
 
         internal static string BuildStartupRunCommand(string exePath)
@@ -199,38 +370,7 @@ namespace KjTabBar
             return File.Exists(exePath);
         }
 
-        private int GetPreferredSessionId(int fallbackSessionId)
-        {
-            Process[] explorerProcesses = null;
-            try
-            {
-                explorerProcesses = Process.GetProcessesByName("explorer");
-                for (int i = 0; i < explorerProcesses.Length; i++)
-                {
-                    if (explorerProcesses[i].MainWindowHandle != IntPtr.Zero)
-                    {
-                        return explorerProcesses[i].SessionId;
-                    }
-                }
-            }
-            catch
-            {
-                AppLogger.LogInfo("SetupCustomActions", "GetPreferredSessionId failed. Falling back to installer session.");
-                // 取得失敗時はインストーラー自身のセッションを使う
-            }
-            finally
-            {
-                if (explorerProcesses != null)
-                {
-                    for (int i = 0; i < explorerProcesses.Length; i++)
-                    {
-                        explorerProcesses[i].Dispose();
-                    }
-                }
-            }
 
-            return fallbackSessionId;
-        }
 
         public override void Uninstall(IDictionary savedState)
         {
@@ -321,28 +461,6 @@ namespace KjTabBar
 
         private void CleanUpOnUninstall()
         {
-            RemoveStartupRegistryValues();
-
-            /*
-            // 2. ユーザー設定 (.xml, tabs.txt) の削除
-            try
-            {
-                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                string qttabDir = Path.Combine(appData, "KjTabBar");
-                if (Directory.Exists(qttabDir))
-                {
-                    Directory.Delete(qttabDir, true);
-                }
-            }
-            catch
-            {
-                // エラーは無視して続行
-            }
-            */
-        }
-
-        private void RemoveStartupRegistryValues()
-        {
             string installedExePath;
             string installedTargetDir;
             if (!TryGetInstalledExecutablePath(out installedExePath, out installedTargetDir))
@@ -351,152 +469,8 @@ namespace KjTabBar
                 return;
             }
 
-            // HKCU縺ｫ蟇ｾ縺吶ｋ蜑企勁・医い繝ｳ繧､繝ｳ繧ｹ繝医・繝ｩ縺後Θ繝ｼ繧ｶ繝ｼ讓ｩ髯舌〒蜍輔＞縺ｦ縺・ｋ蝣ｴ蜷茨ｼ・
-            RemoveStartupRegistryValuesForHive(RegistryHive.CurrentUser, RegistryView.Registry64, StartupValueName, installedExePath);
-            RemoveStartupRegistryValuesForHive(RegistryHive.CurrentUser, RegistryView.Registry32, StartupValueName, installedExePath);
-
-            // SYSTEM讓ｩ髯舌〒蜍輔＞縺ｦ縺・ｋ蝣ｴ蜷医？KCU縺ｯSYSTEM縺ｮ繧ゅ・縺ｫ縺ｪ縺｣縺ｦ縺励∪縺・◆繧√・
-            // HKEY_USERS 縺ｫ繝ｭ繝ｼ繝峨＆繧後※縺・ｋ蜈ｨ繝ｦ繝ｼ繧ｶ繝ｼ繝励Ο繝輔ぃ繧､繝ｫ縺九ｉ蜑企勁縺吶ｋ縲・
-            RemoveStartupRegistryValuesFromAllUsers(installedExePath, StartupValueName);
+            SetupRegistryManager.RemoveStartupRegistryValues(installedExePath);
         }
-
-        private void RemoveStartupRegistryValuesFromAllUsers(string installedExePath, string valueName)
-        {
-            RegistryKey usersKey = null;
-            try
-            {
-                usersKey = RegistryKey.OpenBaseKey(RegistryHive.Users, RegistryView.Default);
-                if (usersKey == null) return;
-                
-                string[] subKeyNames = usersKey.GetSubKeyNames();
-                for (int i = 0; i < subKeyNames.Length; i++)
-                {
-                    string userSid = subKeyNames[i];
-                    if (userSid.EndsWith("_Classes", StringComparison.OrdinalIgnoreCase)) continue;
-                    if (!IsRegularUserSid(userSid)) continue;
-
-                    string runPath = userSid + @"\" + StartupRunSubKeyPath;
-                    if (!ShouldDeleteStartupEntry(usersKey, runPath, valueName, installedExePath))
-                    {
-                        continue;
-                    }
-
-                    DeleteRegistryValue(usersKey, runPath, valueName);
-                    DeleteRegistryValue(usersKey, userSid + @"\" + StartupApprovedRunSubKeyPath, valueName);
-                }
-            }
-            catch
-            {
-                AppLogger.LogInfo("SetupCustomActions", "Failed while enumerating user hives for startup cleanup.");
-                // 繧ｨ繝ｩ繝ｼ縺ｯ辟｡隕悶＠縺ｦ邯夊｡・
-            }
-            finally
-            {
-                if (usersKey != null)
-                {
-                    usersKey.Dispose();
-                }
-            }
-        }
-
-        private void RemoveStartupRegistryValuesForHive(
-            RegistryHive hive,
-            RegistryView view,
-            string valueName,
-            string installedExePath)
-        {
-            RegistryKey baseKey = null;
-            try
-            {
-                baseKey = RegistryKey.OpenBaseKey(hive, view);
-                if (baseKey == null)
-                {
-                    return;
-                }
-
-                if (!ShouldDeleteStartupEntry(baseKey, StartupRunSubKeyPath, valueName, installedExePath))
-                {
-                    return;
-                }
-
-                DeleteRegistryValue(baseKey, StartupRunSubKeyPath, valueName);
-                DeleteRegistryValue(baseKey, StartupApprovedRunSubKeyPath, valueName);
-            }
-            catch
-            {
-                AppLogger.LogInfo("SetupCustomActions", "Failed while opening base registry hive for startup cleanup.");
-                // 繧ｨ繝ｩ繝ｼ縺ｯ辟｡隕悶＠縺ｦ邯夊｡・
-            }
-            finally
-            {
-                if (baseKey != null)
-                {
-                    baseKey.Dispose();
-                }
-            }
-        }
-
-        private bool ShouldDeleteStartupEntry(RegistryKey rootKey, string subKeyPath, string valueName, string installedExePath)
-        {
-            RegistryKey key = null;
-            try
-            {
-                key = rootKey.OpenSubKey(subKeyPath, false);
-                if (key == null)
-                {
-                    return false;
-                }
-
-                string runCommand = key.GetValue(valueName) as string;
-                return IsStartupRunCommandForExecutable(runCommand, installedExePath);
-            }
-            catch
-            {
-                AppLogger.LogInfo("SetupCustomActions", "Failed while reading startup registry value.");
-                return false;
-            }
-            finally
-            {
-                if (key != null)
-                {
-                    key.Dispose();
-                }
-            }
-        }
-
-        private void DeleteRegistryValue(RegistryKey rootKey, string subKeyPath, string valueName)
-        {
-            RegistryKey key = null;
-            try
-            {
-                key = rootKey.OpenSubKey(subKeyPath, true);
-                if (key != null && key.GetValue(valueName) != null)
-                {
-                    key.DeleteValue(valueName, false);
-                }
-            }
-            catch
-            {
-                AppLogger.LogInfo("SetupCustomActions", "Failed while deleting startup registry value.");
-                // 繧ｨ繝ｩ繝ｼ縺ｯ辟｡隕悶＠縺ｦ邯夊｡・
-            }
-            finally
-            {
-                if (key != null)
-                {
-                    key.Dispose();
-                }
-            }
-        }        internal static bool IsRegularUserSid(string userSid)
-        {
-            if (string.IsNullOrEmpty(userSid))
-            {
-                return false;
-            }
-
-            return userSid.StartsWith("S-1-5-21-", StringComparison.OrdinalIgnoreCase);
-        }
-
     }
 }
 

@@ -14,7 +14,7 @@ namespace KjTabBar.Helpers
         [DllImport("user32.dll")]
         public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
-        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
         [DllImport("user32.dll")]
@@ -47,7 +47,7 @@ namespace KjTabBar.Helpers
         [DllImport("user32.dll")]
         public static extern bool ScreenToClient(IntPtr hWnd, ref POINT lpPoint);
 
-        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
 
         [DllImport("user32.dll", EntryPoint = "GetWindowLongPtr")]
@@ -217,7 +217,7 @@ namespace KjTabBar.Helpers
         [DllImport("shell32.dll")]
         public static extern void DragAcceptFiles(IntPtr hWnd, bool fAccept);
 
-        [DllImport("shell32.dll", CharSet = CharSet.Auto)]
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
         public static extern uint DragQueryFile(IntPtr hDrop, uint iFile,
             StringBuilder lpszFile, uint cch);
 
@@ -227,7 +227,7 @@ namespace KjTabBar.Helpers
         [DllImport("ole32.dll")]
         public static extern int RevokeDragDrop(IntPtr hwnd);
 
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         public struct SHFILEOPSTRUCT
         {
             public IntPtr hwnd;
@@ -240,10 +240,10 @@ namespace KjTabBar.Helpers
             public string lpszProgressTitle;
         }
 
-        [DllImport("shell32.dll", CharSet = CharSet.Auto)]
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
         public static extern int SHFileOperation(ref SHFILEOPSTRUCT FileOp);
 
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         public struct SHFILEINFO
         {
             public IntPtr hIcon;
@@ -255,7 +255,7 @@ namespace KjTabBar.Helpers
             public string szTypeName;
         }
 
-        [DllImport("shell32.dll", CharSet = CharSet.Auto)]
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
         public static extern IntPtr SHGetFileInfo(
             string pszPath,
             uint dwFileAttributes,
@@ -263,7 +263,7 @@ namespace KjTabBar.Helpers
             uint cbFileInfo,
             uint uFlags);
 
-        [DllImport("shell32.dll", CharSet = CharSet.Auto)]
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
         public static extern IntPtr SHGetFileInfo(
             IntPtr pszPath,
             uint dwFileAttributes,

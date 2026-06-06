@@ -10,9 +10,11 @@ namespace KjTabBar.Services
     {
         private static readonly Lazy<ComThreadService> _instance = new Lazy<ComThreadService>(() => new ComThreadService());
         public static ComThreadService Instance => _instance.Value;
+        public static bool IsCreated { get { return _instance.IsValueCreated; } }
 
         private readonly Thread _thread;
         private readonly BlockingCollection<Action> _queue;
+        private int _disposed;
 
         private ComThreadService()
         {
@@ -42,30 +44,21 @@ namespace KjTabBar.Services
         public Task<T> InvokeAsync<T>(Func<T> func)
         {
             TaskCompletionSource<T> tcs = new TaskCompletionSource<T>();
-            if (_queue.IsAddingCompleted)
-            {
-                tcs.SetCanceled();
-                return tcs.Task;
-            }
-
-            _queue.Add(() =>
+            if (!TryAdd(() =>
             {
                 try { tcs.SetResult(func()); }
                 catch (Exception ex) { tcs.SetException(ex); }
-            });
+            }))
+            {
+                tcs.SetCanceled();
+            }
             return tcs.Task;
         }
 
         public Task InvokeAsync(Action action)
         {
             TaskCompletionSource<bool> tcs = new TaskCompletionSource<bool>();
-            if (_queue.IsAddingCompleted)
-            {
-                tcs.SetCanceled();
-                return tcs.Task;
-            }
-
-            _queue.Add(() =>
+            if (!TryAdd(() =>
             {
                 try
                 {
@@ -76,13 +69,37 @@ namespace KjTabBar.Services
                 {
                     tcs.SetException(ex);
                 }
-            });
+            }))
+            {
+                tcs.SetCanceled();
+            }
             return tcs.Task;
+        }
+
+        private bool TryAdd(Action action)
+        {
+            if (_queue.IsAddingCompleted)
+            {
+                return false;
+            }
+
+            try
+            {
+                _queue.Add(action);
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
         }
 
         public void Dispose()
         {
-            _queue.CompleteAdding();
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                _queue.CompleteAdding();
+            }
         }
     }
 }

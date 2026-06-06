@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using System.Xml;
 using System.Xml.Serialization;
 
@@ -158,18 +159,39 @@ namespace KjTabBar.Models
                 {
                     Directory.CreateDirectory(dir);
                 }
-                XmlSerializer serializer = _serializer;
-                StreamWriter writer = null;
+
+                string tempPath = Path.Combine(dir, Path.GetFileName(path) + "." + Guid.NewGuid().ToString("N") + ".tmp");
                 try
                 {
-                    writer = new StreamWriter(path);
-                    serializer.Serialize(writer, this);
+                    XmlSerializer serializer = _serializer;
+                    StreamWriter writer = null;
+                    try
+                    {
+                        writer = new StreamWriter(tempPath, false, new UTF8Encoding(false));
+                        serializer.Serialize(writer, this);
+                    }
+                    finally
+                    {
+                        if (writer != null)
+                        {
+                            writer.Dispose();
+                        }
+                    }
+
+                    if (File.Exists(path))
+                    {
+                        File.Replace(tempPath, path, null);
+                    }
+                    else
+                    {
+                        File.Move(tempPath, path);
+                    }
                 }
                 finally
                 {
-                    if (writer != null)
+                    if (File.Exists(tempPath))
                     {
-                        writer.Dispose();
+                        File.Delete(tempPath);
                     }
                 }
 

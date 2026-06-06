@@ -72,11 +72,28 @@
     <Compile Include="MockUserSettings.cs" />
     <Compile Include="ExplorerAbsorptionLogicTests.cs" />
     <Compile Include="ExplorerAbsorptionDecisionMakerTests.cs" />
+    <Compile Include="ExplorerLaunchTrackerTests.cs" />
+    <Compile Include="ExplorerWindowInteractionServiceTests.cs" />
+    <Compile Include="ExplorerWindowMonitorCoordinatorTests.cs" />
+    <Compile Include="ExplorerWindowOutcomeCoordinatorTests.cs" />
+    <Compile Include="ExplorerWindowProcessingCoordinatorTests.cs" />
+    <Compile Include="ExplorerTabTargetResolverTests.cs" />
+    <Compile Include="AppMonitorCycleCoordinatorTests.cs" />
+    <Compile Include="LineEndingPolicyTests.cs" />
+    <Compile Include="LanguageResourceServiceTests.cs" />
+    <Compile Include="ShellLocationNameResolverTests.cs" />
+    <Compile Include="ShellKnownLocationCacheTests.cs" />
+    <Compile Include="ShellItemPathResolverTests.cs" />
+    <Compile Include="ShellShortcutManagerTests.cs" />
+    <Compile Include="ShellFolderNameResolverTests.cs" />
+    <Compile Include="ShellPathNormalizerTests.cs" />
+    <Compile Include="ExplorerWindowEvaluationServiceTests.cs" />
     <Compile Include="ExplorerManagerTests.cs" />
     <Compile Include="MockExplorerService.cs" />
     <Compile Include="SetupCustomActionsTests.cs" />
     <Compile Include="SettingsViewModelTests.cs" />
     <Compile Include="TabBarViewModelTests.cs" />
+    <Compile Include="TestTabPersistenceFactory.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
@@ -87,4 +104,16 @@
   </ItemGroup>
   <Import Project="$(VSToolsPath)\TeamTest\Microsoft.TestTools.targets" Condition="Exists('$(VSToolsPath)\TeamTest\Microsoft.TestTools.targets')" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <PropertyGroup>
+    <KjtbVSTestConsoleExe Condition="'$(KjtbVSTestConsoleExe)' == '' and Exists('C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe')">C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe</KjtbVSTestConsoleExe>
+    <KjtbVSTestConsoleExe Condition="'$(KjtbVSTestConsoleExe)' == '' and Exists('C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe')">C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe</KjtbVSTestConsoleExe>
+    <KjtbVSTestConsoleExe Condition="'$(KjtbVSTestConsoleExe)' == '' and Exists('C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe')">C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe</KjtbVSTestConsoleExe>
+    <KjtbVSTestConsoleExe Condition="'$(KjtbVSTestConsoleExe)' == '' and Exists('C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe')">C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe</KjtbVSTestConsoleExe>
+    <KjtbVSTestConsoleExe Condition="'$(KjtbVSTestConsoleExe)' == '' and Exists('C:\Program Files\Microsoft Visual Studio\18\Professional\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe')">C:\Program Files\Microsoft Visual Studio\18\Professional\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe</KjtbVSTestConsoleExe>
+    <KjtbVSTestConsoleExe Condition="'$(KjtbVSTestConsoleExe)' == '' and Exists('C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe')">C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe</KjtbVSTestConsoleExe>
+  </PropertyGroup>
+  <Target Name="VSTest" DependsOnTargets="Build">
+    <Error Condition="'$(KjtbVSTestConsoleExe)' == ''" Text="vstest.console.exe was not found. Install Visual Studio Test Platform or set KjtbVSTestConsoleExe." />
+    <Exec Command="&quot;$(KjtbVSTestConsoleExe)&quot; &quot;$(TargetPath)&quot;" EnvironmentVariables="VSLANG=1033" />
+  </Target>
 </Project>

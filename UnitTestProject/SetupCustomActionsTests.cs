@@ -23,47 +23,44 @@ namespace UnitTestProject
         }
 
         [TestMethod]
-        public void BuildPostInstallScript_Registers_Startup_Run_Value()
+        public void BuildPostInstallHelperArguments_Uses_Helper_Mode()
         {
-            string script = SetupCustomActions.BuildPostInstallScript(
+            string arguments = SetupCustomActions.BuildPostInstallHelperArguments(
                 123,
                 1);
 
-            StringAssert.Contains(script, "$env:KJTB_EXE_PATH");
-            StringAssert.Contains(script, "$env:KJTB_WORKING_DIRECTORY");
-            StringAssert.Contains(script, @"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run");
-            StringAssert.Contains(script, @"Registry::HKEY_USERS\");
-            StringAssert.Contains(script, "Invoke-CimMethod");
-            StringAssert.Contains(script, "GetOwnerSid");
-            StringAssert.Contains(script, "Set-ItemProperty");
-            StringAssert.Contains(script, "KjTabBar");
-            StringAssert.Contains(script, "Write-KjtbSetupLog");
-            StringAssert.Contains(script, "Shortcut update failed");
-            StringAssert.Contains(script, "Shortcut COM setup failed");
-            StringAssert.Contains(script, "Target SID resolution failed");
-            StringAssert.Contains(script, "Startup Run registration failed");
+            StringAssert.Contains(arguments, SetupCustomActions.PostInstallHelperArgument);
+            StringAssert.Contains(arguments, "123");
+            StringAssert.Contains(arguments, "1");
+            Assert.IsFalse(arguments.Contains("powershell"));
+            Assert.IsFalse(arguments.Contains("EncodedCommand"));
         }
 
         [TestMethod]
-        public void BuildPostInstallScript_Starts_App_Through_Explorer_Without_Install_Argument()
+        public void IsPostInstallHelperRequest_Returns_True_For_Helper_Argument()
         {
-            string script = SetupCustomActions.BuildPostInstallScript(
-                123,
-                1);
+            Assert.IsTrue(SetupCustomActions.IsPostInstallHelperRequest(new string[] { SetupCustomActions.PostInstallHelperArgument, "123", "1" }));
+            Assert.IsFalse(SetupCustomActions.IsPostInstallHelperRequest(new string[] { "--other" }));
+            Assert.IsFalse(SetupCustomActions.IsPostInstallHelperRequest(null));
+        }
 
-            StringAssert.Contains(script, "Start-Process -FilePath 'explorer.exe'");
-            Assert.IsFalse(script.Contains("--kjtb-install-startup"));
+        [TestMethod]
+        public void IsPostInstallHelperEnvironmentTrusted_Returns_False_For_Unrelated_Path()
+        {
+            Assert.IsFalse(SetupCustomActions.IsPostInstallHelperEnvironmentTrusted(
+                @"C:\Temp\Other.exe",
+                @"C:\Temp"));
         }
 
         [TestMethod]
         public void IsRegularUserSid_Returns_True_Only_For_Interactive_User_Sids()
         {
-            Assert.IsTrue(SetupCustomActions.IsRegularUserSid("S-1-5-21-1000-2000-3000-4000"));
-            Assert.IsFalse(SetupCustomActions.IsRegularUserSid("S-1-5-18"));
-            Assert.IsFalse(SetupCustomActions.IsRegularUserSid("S-1-5-19"));
-            Assert.IsFalse(SetupCustomActions.IsRegularUserSid("S-1-5-20"));
-            Assert.IsFalse(SetupCustomActions.IsRegularUserSid(".DEFAULT"));
-            Assert.IsFalse(SetupCustomActions.IsRegularUserSid(string.Empty));
+            Assert.IsTrue(SetupEnvironmentResolver.IsRegularUserSid("S-1-5-21-1000-2000-3000-4000"));
+            Assert.IsFalse(SetupEnvironmentResolver.IsRegularUserSid("S-1-5-18"));
+            Assert.IsFalse(SetupEnvironmentResolver.IsRegularUserSid("S-1-5-19"));
+            Assert.IsFalse(SetupEnvironmentResolver.IsRegularUserSid("S-1-5-20"));
+            Assert.IsFalse(SetupEnvironmentResolver.IsRegularUserSid(".DEFAULT"));
+            Assert.IsFalse(SetupEnvironmentResolver.IsRegularUserSid(string.Empty));
         }
 
         [TestMethod]

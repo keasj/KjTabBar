@@ -1,7 +1,6 @@
 using System;
 using System.Windows;
 using System.Windows.Media;
-using System.Windows.Threading;
 using KjTabBar.Helpers;
 using Microsoft.Win32;
 
@@ -10,7 +9,7 @@ namespace KjTabBar.Models
     /// <summary>
     /// Windows のアプリダークモード設定を監視し、テーマカラーを提供する。
     /// レジストリ HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize の
-    /// AppsUseLightTheme 値（0=ダーク、1=ライト）を定期ポーリングで検出する。
+    /// AppsUseLightTheme 値（0=ダーク、1=ライト）をイベント通知時に再検出する。
     /// </summary>
     public sealed class ThemeManager
     {
@@ -18,7 +17,7 @@ namespace KjTabBar.Models
         private static readonly object _lock = new object();
 
         private bool _isDarkMode;
-        private DispatcherTimer _pollTimer;
+        private bool _isMonitoring;
 
         /// <summary>テーマが変更されたときに発火する。</summary>
         public event EventHandler ThemeChanged;
@@ -53,31 +52,37 @@ namespace KjTabBar.Models
         }
 
         /// <summary>
-        /// 定期ポーリングを開始する。UIスレッドから呼び出すこと。
+        /// Windows のユーザー設定変更監視を開始する。UIスレッドから呼び出すこと。
         /// </summary>
         public void StartMonitoring()
         {
-            if (_pollTimer != null) return;
-            _pollTimer = new DispatcherTimer();
-            _pollTimer.Interval = TimeSpan.FromSeconds(2);
-            _pollTimer.Tick += PollTimer_Tick;
-            _pollTimer.Start();
+            if (_isMonitoring) return;
+            SystemEvents.UserPreferenceChanged += SystemEvents_UserPreferenceChanged;
+            _isMonitoring = true;
         }
 
         /// <summary>
-        /// 定期ポーリングを停止する。
+        /// Windows のユーザー設定変更監視を停止する。
         /// </summary>
         public void StopMonitoring()
         {
-            if (_pollTimer != null)
-            {
-                _pollTimer.Tick -= PollTimer_Tick;
-                _pollTimer.Stop();
-                _pollTimer = null;
-            }
+            if (!_isMonitoring) return;
+            SystemEvents.UserPreferenceChanged -= SystemEvents_UserPreferenceChanged;
+            _isMonitoring = false;
         }
 
-        private void PollTimer_Tick(object sender, EventArgs e)
+        private void SystemEvents_UserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
+        {
+            if (Application.Current != null && !Application.Current.Dispatcher.CheckAccess())
+            {
+                Application.Current.Dispatcher.BeginInvoke(new Action(RefreshTheme));
+                return;
+            }
+
+            RefreshTheme();
+        }
+
+        private void RefreshTheme()
         {
             bool newDark = DetectDarkMode();
             if (newDark != _isDarkMode)

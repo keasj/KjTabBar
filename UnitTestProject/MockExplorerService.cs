@@ -12,7 +12,7 @@ namespace UnitTestProject
         public string PowerOptionsPath { get; set; } = @"PowerOptionsPath";
 
         public List<IntPtr> FindExplorerWindows() => new List<IntPtr>();
-        public string GetCurrentPath(IntPtr explorerHwnd) => @"C:\MockPath";
+        public virtual string GetCurrentPath(IntPtr explorerHwnd) => @"C:\MockPath";
         public virtual string GetFolderName(string path) => "MockFolder";
         public string GetLocalizedControlPanelTitle() => "Control Panel";
         public string GetLocalizedHomeTitle() => "Home";
@@ -30,7 +30,7 @@ namespace UnitTestProject
         public bool IsTabPathCurrentlyAvailable(string path) => true;
         public bool IsTransientShellPlaceholderPath(string path) => IsTransientShellPlaceholderPathFunc != null ? IsTransientShellPlaceholderPathFunc(path) : false;
         public string MapLocationNameToKnownShellPath(string locationName) => locationName;
-        public bool Navigate(IntPtr explorerHwnd, string path) => true;
+        public virtual bool Navigate(IntPtr explorerHwnd, string path) => true;
         public string NormalizeKnownPath(string path) => path;
         public string NormalizeShellNamespacePath(string path) => path;
         public void OpenInNewWindow(string path) { }

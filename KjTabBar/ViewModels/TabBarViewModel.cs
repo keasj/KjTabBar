@@ -1,9 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Threading.Tasks;
 using KjTabBar.Helpers;
 using KjTabBar.Models;
+using KjTabBar.Services;
 
 namespace KjTabBar.ViewModels
 {
@@ -13,18 +15,7 @@ namespace KjTabBar.ViewModels
         private ObservableCollection<TabItemViewModel> _tabs;
         private TabItemViewModel _activeTab;
         private int _activeTabIndex;
-        private string _navigatingToPath;
-        private DateTime _navigateStartTime;
-        private List<string> _pendingSelectedItems;
-        private TabItemViewModel _navigationSourceTab;
-        private int _navigationSourceTabIndex = -1;
-        private string _cancelledNavigationPath;
-        private DateTime _cancelledNavigationUtc = DateTime.MinValue;
-        private DateTime _lastExplorerPathPollUtc = DateTime.MinValue;
-        private string _cachedExplorerPath = null;
-        private static readonly TimeSpan ExplorerPathPollInterval = TimeSpan.FromMilliseconds(300);
-        private static readonly TimeSpan CancelledNavigationGracePeriod = TimeSpan.FromSeconds(15);
-
+        private readonly TabNavigationStateTracker _navigationTracker = new TabNavigationStateTracker();
 
         private System.Windows.Media.FontFamily _fontFamily = new System.Windows.Media.FontFamily("Segoe UI");
         private double _fontSize = 11.5;
@@ -35,44 +26,36 @@ namespace KjTabBar.ViewModels
         private IExplorerService _explorerService;
         private bool _isDisposed;
 
+        private readonly TabBarExplorerSynchronizer _synchronizer;
+
         public IntPtr ExplorerHwnd
         {
             get { return _explorerHwnd; }
         }
 
-        private class ClosedTabInfo
+        internal TabNavigationStateTracker NavigationTracker
         {
-            public string Path;
-            public int Position;
+            get { return _navigationTracker; }
         }
 
-        private class ClosedTabBatch
-        {
-            public List<ClosedTabInfo> Tabs = new List<ClosedTabInfo>();
-        }
-
-        private List<ClosedTabBatch> _closedTabHistory = new List<ClosedTabBatch>();
-        private ClosedTabBatch _currentRecordingBatch = null;
+        private ClosedTabHistory _closedTabHistory = new ClosedTabHistory();
 
         public bool HasClosedTabs
         {
-            get { return _closedTabHistory.Count > 0; }
+            get { return _closedTabHistory.HasItems; }
         }
 
         private void StartHistoryBatch()
         {
-            _currentRecordingBatch = new ClosedTabBatch();
+            _closedTabHistory.StartBatch();
         }
 
         private void EndHistoryBatch()
         {
-            if (_currentRecordingBatch != null && _currentRecordingBatch.Tabs.Count > 0)
+            if (_closedTabHistory.EndBatch())
             {
-                _closedTabHistory.Add(_currentRecordingBatch);
-                if (_closedTabHistory.Count > 50) _closedTabHistory.RemoveAt(0);
                 OnPropertyChanged("HasClosedTabs");
             }
-            _currentRecordingBatch = null;
         }
 
         public ObservableCollection<TabItemViewModel> Tabs
@@ -97,7 +80,6 @@ namespace KjTabBar.ViewModels
             get { return _activeTabIndex; }
             set { _activeTabIndex = value; OnPropertyChanged("ActiveTabIndex"); }
         }
-
 
         public System.Windows.Media.FontFamily FontFamily
         {
@@ -141,7 +123,6 @@ namespace KjTabBar.ViewModels
 
             _explorerHwnd = explorerHwnd;
             _tabs = new ObservableCollection<TabItemViewModel>();
-            _navigatingToPath = null;
 
             string currentPath = _explorerService.GetCurrentPath(explorerHwnd);
             if (string.IsNullOrEmpty(currentPath))
@@ -154,6 +135,8 @@ namespace KjTabBar.ViewModels
             ActiveTab = firstTab;
             _activeTabIndex = 0;
             UpdateTabTitles();
+
+            _synchronizer = new TabBarExplorerSynchronizer(this, _explorerService);
         }
 
         private void ApplyUserSettings()
@@ -191,10 +174,7 @@ namespace KjTabBar.ViewModels
             }
         }
 
-        /// <summary>
-        /// 指定したパスと同じパスのタブを探す。見つかればそのタブを返す。
-        /// </summary>
-        private TabItemViewModel FindTabByPath(string path)
+        internal TabItemViewModel FindTabByPath(string path)
         {
             if (string.IsNullOrEmpty(path)) return null;
             string normalizedPath = NormalizeTabPath(path).TrimEnd('\\');
@@ -236,10 +216,6 @@ namespace KjTabBar.ViewModels
             UpdateTabTitles();
         }
 
-        /// <summary>
-        /// 指定したパスで新しいタブを追加し、エクスプローラーをそのパスにナビゲートする。
-        /// 同じパスのタブが既にあればそちらを選択する。
-        /// </summary>
         public void AddTabWithPath(string path)
         {
             AddTabWithPath(path, false);
@@ -249,7 +225,6 @@ namespace KjTabBar.ViewModels
         {
             if (string.IsNullOrEmpty(path)) return;
 
-            // 現在のアクティブタブの後ろに挿入
             int insertIndex = _activeTabIndex + 1;
             if (insertIndex > _tabs.Count) insertIndex = _tabs.Count;
 
@@ -264,14 +239,14 @@ namespace KjTabBar.ViewModels
         public void AddTabWithPathAndSelect(string path, System.Collections.Generic.List<string> selectedItems, bool allowSpecialPath)
         {
             if (string.IsNullOrEmpty(path)) return;
-            _pendingSelectedItems = selectedItems;
+            _navigationTracker.PendingSelectedItems = selectedItems;
             AddTabWithPath(path, allowSpecialPath);
         }
 
         public void InsertTabWithPathAndSelect(string path, int index, System.Collections.Generic.List<string> selectedItems, bool allowSpecialPath)
         {
             if (string.IsNullOrEmpty(path)) return;
-            _pendingSelectedItems = selectedItems;
+            _navigationTracker.PendingSelectedItems = selectedItems;
             InsertTabWithPath(path, index, allowSpecialPath);
         }
 
@@ -315,7 +290,6 @@ namespace KjTabBar.ViewModels
             int index = GetTabIndex(tab);
             if (index < 0) return;
 
-            // 右隣に追加
             int newIndex = index + 1;
             string title = _explorerService.GetFolderName(path);
             TabItemViewModel newTab = new TabItemViewModel(path, title, _explorerService);
@@ -329,12 +303,11 @@ namespace KjTabBar.ViewModels
             if (oldIndex < 0 || oldIndex >= _tabs.Count) return;
             if (newIndex < 0 || newIndex > _tabs.Count) return;
 
-            if (newIndex == _tabs.Count) newIndex--; // 末尾の場合は調整
+            if (newIndex == _tabs.Count) newIndex--;
             if (oldIndex == newIndex) return;
 
             _tabs.Move(oldIndex, newIndex);
 
-            // ActiveTabIndexを再計算
             for (int i = 0; i < _tabs.Count; i++)
             {
                 if (_tabs[i] == _activeTab)
@@ -363,7 +336,7 @@ namespace KjTabBar.ViewModels
             return -1;
         }
 
-        private void SetActiveTabOnly(TabItemViewModel tab)
+        internal void SetActiveTabOnly(TabItemViewModel tab)
         {
             if (tab == null)
             {
@@ -374,68 +347,37 @@ namespace KjTabBar.ViewModels
             ActiveTabIndex = GetTabIndex(tab);
         }
 
-        private void ClearPendingNavigationTracking()
+        internal void ClearPendingNavigationTracking()
         {
-            _navigatingToPath = null;
-            _navigationSourceTab = null;
-            _navigationSourceTabIndex = -1;
+            _navigationTracker.ClearPending();
         }
 
-        private void ClearCancelledNavigationTracking()
+        internal void ClearCancelledNavigationTracking()
         {
-            _cancelledNavigationPath = null;
-            _cancelledNavigationUtc = DateTime.MinValue;
+            _navigationTracker.ClearCancelled();
         }
 
-        private bool IsCancelledNavigationMatch(string currentPath)
+        internal bool IsCancelledNavigationMatch(string currentPath)
         {
-            if (string.IsNullOrEmpty(_cancelledNavigationPath))
-            {
-                return false;
-            }
-
-            if (_cancelledNavigationUtc == DateTime.MinValue ||
-                (DateTime.UtcNow - _cancelledNavigationUtc) > CancelledNavigationGracePeriod)
-            {
-                ClearCancelledNavigationTracking();
-                return false;
-            }
-
-            return PathEquals(_cancelledNavigationPath, currentPath);
+            return _navigationTracker.IsCancelledNavigationMatch(currentPath, PathEquals);
         }
 
-        private void CancelPendingNavigation()
+        internal void CancelPendingNavigation()
         {
-            TabItemViewModel navigationSourceTab = _navigationSourceTab;
-            int navigationSourceTabIndex = _navigationSourceTabIndex;
-            string cancelledNavigationPath = _navigatingToPath;
-            TabItemViewModel cancelledNavigationTab = _activeTab;
+            TabItemViewModel rollbackTab;
+            int rollbackIndex;
+            _navigationTracker.CancelNavigation(_activeTab, out rollbackTab, out rollbackIndex);
 
-            if (!string.IsNullOrEmpty(cancelledNavigationPath) &&
-                cancelledNavigationTab != null &&
-                cancelledNavigationTab != navigationSourceTab)
-            {
-                _cancelledNavigationPath = cancelledNavigationPath;
-                _cancelledNavigationUtc = DateTime.UtcNow;
-            }
-            else
-            {
-                ClearCancelledNavigationTracking();
-            }
-
-            ClearPendingNavigationTracking();
-            _pendingSelectedItems = null;
-
-            int existingIndex = GetTabIndex(navigationSourceTab);
+            int existingIndex = GetTabIndex(rollbackTab);
             if (existingIndex >= 0)
             {
-                SetActiveTabOnly(navigationSourceTab);
+                SetActiveTabOnly(rollbackTab);
                 return;
             }
 
-            if (navigationSourceTabIndex >= 0 && navigationSourceTabIndex < _tabs.Count)
+            if (rollbackIndex >= 0 && rollbackIndex < _tabs.Count)
             {
-                SetActiveTabOnly(_tabs[navigationSourceTabIndex]);
+                SetActiveTabOnly(_tabs[rollbackIndex]);
             }
         }
 
@@ -458,9 +400,8 @@ namespace KjTabBar.ViewModels
 
                 if (isFirstValidTab)
                 {
-                    // 最初の有効なタブが見つかった際に初期タブをクリア
                     _tabs.Clear();
-                    _activeTab = null; // アクティブタブ参照も切る
+                    _activeTab = null;
                     _activeTabIndex = -1;
                     isFirstValidTab = false;
                 }
@@ -477,28 +418,15 @@ namespace KjTabBar.ViewModels
                     TabItemViewModel targetTab = FindTabByPath(initialPath);
                     if (targetTab != null)
                     {
-                        // 復元したタブの中にエクスプローラーが最初に開こうとしたパスがあった場合は、そのタブを選択
                         SelectTab(targetTab);
                     }
-                    else
+                    else if (_tabs.Count > 0)
                     {
-                        if (IsPersistedTabPathRestorable(initialPath))
-                        {
-                            // 復元したタブの中に同名パスがなければ新規追加してアクティブにする
-                            string title = _explorerService.GetFolderName(initialPath);
-                            TabItemViewModel newTab = new TabItemViewModel(initialPath, title, _explorerService);
-                            _tabs.Add(newTab);
-                            SelectTab(newTab);
-                        }
-                        else if (_tabs.Count > 0)
-                        {
-                            SelectTab(_tabs[0]);
-                        }
+                        SelectTab(_tabs[0]);
                     }
                 }
                 else if (_tabs.Count > 0)
                 {
-                    // 初期パスがない場合は1番目のタブを選択
                     SelectTab(_tabs[0]);
                 }
             }
@@ -507,22 +435,7 @@ namespace KjTabBar.ViewModels
 
         private bool IsPersistedTabPathRestorable(string path)
         {
-            if (string.IsNullOrEmpty(path)) return false;
-            string normalizedPath = NormalizeTabPath(path);
-            if (string.IsNullOrEmpty(normalizedPath)) return false;
-            if (normalizedPath.StartsWith("::{", StringComparison.OrdinalIgnoreCase)) return true;
-            if (normalizedPath.StartsWith("shell:", StringComparison.OrdinalIgnoreCase)) return true;
-            if (_explorerService.IsControlPanelPath(normalizedPath)) return true;
-            if (IsPotentialFileSystemTabPath(normalizedPath)) return true;
-            return false;
-        }
-
-        private bool IsPotentialFileSystemTabPath(string path)
-        {
-            if (string.IsNullOrEmpty(path)) return false;
-            if (path.StartsWith("\\\\", StringComparison.OrdinalIgnoreCase)) return false;
-            if (path.Length >= 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) return true;
-            return System.IO.Directory.Exists(path);
+            return TabRestorationHelper.IsPersistedTabPathRestorable(path, _explorerService, NormalizeTabPath);
         }
 
         private string NormalizeTabPath(string path)
@@ -571,7 +484,6 @@ namespace KjTabBar.ViewModels
             }
             else
             {
-                // 非アクティブタブを閉じた場合、アクティブタブのインデックスを補正
                 if (index < _activeTabIndex)
                 {
                     ActiveTabIndex = _activeTabIndex - 1;
@@ -582,46 +494,26 @@ namespace KjTabBar.ViewModels
 
         private void RecordClosedTab(string path, int position)
         {
-            if (string.IsNullOrEmpty(path)) return;
-
-            ClosedTabInfo info = new ClosedTabInfo();
-            info.Path = path;
-            info.Position = position;
-
-            if (_currentRecordingBatch != null)
+            if (_closedTabHistory.Record(path, position))
             {
-                _currentRecordingBatch.Tabs.Add(info);
-            }
-            else
-            {
-                ClosedTabBatch batch = new ClosedTabBatch();
-                batch.Tabs.Add(info);
-                _closedTabHistory.Add(batch);
-                if (_closedTabHistory.Count > 50) _closedTabHistory.RemoveAt(0);
                 OnPropertyChanged("HasClosedTabs");
             }
         }
 
         public void ReopenClosedTab()
         {
-            if (_closedTabHistory.Count == 0) return;
+            List<ClosedTabInfo> batch = _closedTabHistory.PopLastBatch();
+            if (batch == null) return;
 
-            int lastIdx = _closedTabHistory.Count - 1;
-            ClosedTabBatch batch = _closedTabHistory[lastIdx];
-            _closedTabHistory.RemoveAt(lastIdx);
             OnPropertyChanged("HasClosedTabs");
 
-            // 履歴に保存された順序の逆順で復元することで、元のインデックス位置を正しく再現する
-            for (int i = batch.Tabs.Count - 1; i >= 0; i--)
+            for (int i = batch.Count - 1; i >= 0; i--)
             {
-                ClosedTabInfo info = batch.Tabs[i];
+                ClosedTabInfo info = batch[i];
                 InsertTabWithPath(info.Path, info.Position);
             }
         }
 
-        /// <summary>
-        /// 指定したタブより右側にあるすべてのタブを閉じる。
-        /// </summary>
         public void CloseTabsToRight(TabItemViewModel tab)
         {
             if (tab == null) return;
@@ -629,7 +521,6 @@ namespace KjTabBar.ViewModels
             if (index < 0) return;
 
             StartHistoryBatch();
-            // インデックスが変わらないよう、常に index + 1 の位置を消し続ける
             while (_tabs.Count > index + 1)
             {
                 CloseTab(_tabs[index + 1]);
@@ -637,9 +528,6 @@ namespace KjTabBar.ViewModels
             EndHistoryBatch();
         }
 
-        /// <summary>
-        /// 指定したタブより左側にあるすべてのタブを閉じる。
-        /// </summary>
         public void CloseTabsToLeft(TabItemViewModel tab)
         {
             if (tab == null) return;
@@ -647,15 +535,12 @@ namespace KjTabBar.ViewModels
             if (index <= 0) return;
 
             StartHistoryBatch();
-            // 先頭から index 個分消す。
-            // CloseTab を呼ぶたびに _tabs の内容が変わるが、常に 0 番目を消せば左側が消える。
             for (int i = 0; i < index; i++)
             {
                 CloseTab(_tabs[0]);
             }
             EndHistoryBatch();
         }
-
 
         public void SelectTab(TabItemViewModel tab)
         {
@@ -670,7 +555,6 @@ namespace KjTabBar.ViewModels
             string path = tab.Path;
             if (string.IsNullOrEmpty(path))
             {
-                // 旧データの null ホームタブは OS 互換パスに補正する
                 path = _explorerService.GetResolvedHomeFolderPath();
                 tab.Path = path;
                 tab.Title = _explorerService.GetFolderName(path);
@@ -683,10 +567,7 @@ namespace KjTabBar.ViewModels
                 return;
             }
 
-            // 万が一のOS側の仕様（特定のフォルダへNavigateすると別窓が強制的に開く等の仕様）によって、
-            // 別窓が開いてはそれが再び「タブ」として吸収(Absorb)される...という無限ループ(増殖)を防ぐため、
-            // 既に同じパスへナビゲーションを試みている最中なら、二重にNavigateを呼ばないようにする
-            if (_navigatingToPath != null && _navigatingToPath.Equals(path, StringComparison.OrdinalIgnoreCase))
+            if (_navigationTracker.NavigatingToPath != null && _navigationTracker.NavigatingToPath.Equals(path, StringComparison.OrdinalIgnoreCase))
             {
                 if (shouldUpdateTitles)
                 {
@@ -698,7 +579,6 @@ namespace KjTabBar.ViewModels
             string currentPath = _explorerService.GetCurrentPath(_explorerHwnd);
             if (PathEquals(currentPath, path))
             {
-                // 既に現在のエクスプローラーが目的のパスに居るなら再ナビゲーションしない
                 if (tab != _activeTab)
                 {
                     SetActiveTabOnly(tab);
@@ -718,24 +598,15 @@ namespace KjTabBar.ViewModels
 
             if (_explorerService.Navigate(_explorerHwnd, path))
             {
-                _navigatingToPath = NormalizeTabPath(path);
-                _navigateStartTime = DateTime.UtcNow;
-                if (previousActiveTab != null && previousActiveTab != tab)
-                {
-                    _navigationSourceTab = previousActiveTab;
-                    _navigationSourceTabIndex = previousActiveTabIndex;
-                }
-                else
-                {
-                    _navigationSourceTab = null;
-                    _navigationSourceTabIndex = -1;
-                }
-                _lastExplorerPathPollUtc = DateTime.MinValue;
+                _navigationTracker.StartNavigation(
+                    NormalizeTabPath(path),
+                    (previousActiveTab != null && previousActiveTab != tab) ? previousActiveTab : null,
+                    (previousActiveTab != null && previousActiveTab != tab) ? previousActiveTabIndex : -1
+                );
             }
             else
             {
-                ClearPendingNavigationTracking();
-                _pendingSelectedItems = null;
+                _navigationTracker.ClearPending();
 
                 if (previousActiveTab != null && previousActiveTab != tab)
                 {
@@ -757,158 +628,15 @@ namespace KjTabBar.ViewModels
             }
         }
 
-        private bool _isSyncing = false;
-
-        /// <summary>
-        /// エクスプローラーのパス変化を検出する。
-        /// SelectTabによるナビゲーション中はタブを追加しない。
-        /// 同じパスのタブが既にあればそちらを選択する。
-        /// </summary>
-        public async void SyncWithExplorer()
+        public async Task SyncWithExplorerAsync()
         {
-            if (_isSyncing) return;
-            _isSyncing = true;
-            bool shouldUpdateTitles = false;
-            try
+            if (_synchronizer != null)
             {
-                bool forcePathPoll = (_navigatingToPath != null || _pendingSelectedItems != null);
-
-                // UIスレッドをブロックしないよう、COMアクセスをバックグラウンドスレッドで行う
-                string currentPath = await Services.ComThreadService.Instance.InvokeAsync(() => GetCurrentPathForSync(forcePathPoll));
-
-                if (_activeTab == null) return;
-
-                if (_explorerService.IsControlPanelRootPath(currentPath))
-                {
-                    string normalizedCPPath = _explorerService.AllControlPanelPath;
-                    if (!PathEquals(_activeTab.Path, normalizedCPPath))
-                    {
-                        _activeTab.Path = normalizedCPPath;
-                        _activeTab.BaseTitle = _explorerService.GetLocalizedControlPanelTitle();
-                        _activeTab.Title = _activeTab.BaseTitle;
-                        shouldUpdateTitles = true;
-                    }
-                    ClearPendingNavigationTracking();
-                    _pendingSelectedItems = null;
-                    return;
-                }
-
-                // パス取得が一時的に不安定な場合は現在のタブ状態を保持する
-                if (string.IsNullOrEmpty(currentPath))
-                {
-                    if (_navigatingToPath != null)
-                    {
-                        if ((DateTime.UtcNow - _navigateStartTime).TotalSeconds > 5)
-                        {
-                            CancelPendingNavigation();
-                        }
-                        return;
-                    }
-                    return;
-                }
-
-                // 現在のアクティブタブとパスが一致 → 何もしない
-                if (PathEquals(_activeTab.Path, currentPath))
-                {
-                    ClearPendingNavigationTracking();
-                    if (_pendingSelectedItems != null)
-                    {
-                        _explorerService.SelectItems(_explorerHwnd, _pendingSelectedItems);
-                        _pendingSelectedItems = null;
-                    }
-                    return;
-                }
-
-                // ナビゲート先パスと一致 → タブ切り替え中のナビゲーション完了
-                if (_navigatingToPath != null && PathEquals(_navigatingToPath, currentPath))
-                {
-                    _activeTab.Path = currentPath;
-                    _activeTab.BaseTitle = _explorerService.GetFolderName(currentPath);
-                    _activeTab.Title = _activeTab.BaseTitle;
-                    ClearPendingNavigationTracking();
-                    shouldUpdateTitles = true;
-                    if (_pendingSelectedItems != null)
-                    {
-                        _explorerService.SelectItems(_explorerHwnd, _pendingSelectedItems);
-                        _pendingSelectedItems = null;
-                    }
-                    return;
-                }
-
-                // ナビゲート先がまだ反映されていない → 待機（タイムアウト付き）
-                if (_navigatingToPath != null)
-                {
-                    if ((DateTime.UtcNow - _navigateStartTime).TotalSeconds > 5)
-                    {
-                        // 5秒以上経過してもナビゲーションが完了しない場合は
-                        // ナビゲーション失敗とみなし、状態を元のタブへ戻す
-                        CancelPendingNavigation();
-                        return;
-                    }
-                    else
-                    {
-                        return;
-                    }
-                }
-
-                if (IsCancelledNavigationMatch(currentPath))
-                {
-                    TabItemViewModel cancelledTab = FindTabByPath(currentPath);
-                    if (cancelledTab != null)
-                    {
-                        if (cancelledTab != _activeTab)
-                        {
-                            SetActiveTabOnly(cancelledTab);
-                        }
-                        cancelledTab.Path = currentPath;
-                        cancelledTab.Title = _explorerService.GetFolderName(currentPath);
-                        shouldUpdateTitles = true;
-                        ClearCancelledNavigationTracking();
-                        return;
-                    }
-
-                    ClearCancelledNavigationTracking();
-                }
-
-                _activeTab.Path = currentPath;
-                _activeTab.BaseTitle = _explorerService.GetFolderName(currentPath);
-                _activeTab.Title = _activeTab.BaseTitle;
-                shouldUpdateTitles = true;
-            }
-            catch (Exception ex)
-            {
-                AppLogger.LogError("TabBarViewModel", "SyncWithExplorer failed.", ex);
-            }
-            finally
-            {
-                _isSyncing = false;
-                if (shouldUpdateTitles)
-                {
-                    UpdateTabTitles();
-                }
+                await _synchronizer.SyncWithExplorerAsync();
             }
         }
 
-        private string GetCurrentPathForSync(bool forcePoll)
-        {
-            DateTime nowUtc = DateTime.UtcNow;
-
-            if (!forcePoll)
-            {
-                if (_lastExplorerPathPollUtc != DateTime.MinValue &&
-                    (nowUtc - _lastExplorerPathPollUtc) < ExplorerPathPollInterval)
-                {
-                    return _cachedExplorerPath;
-                }
-            }
-
-            string currentPath = _explorerService.GetCurrentPath(_explorerHwnd);
-            _cachedExplorerPath = currentPath;
-            _lastExplorerPathPollUtc = nowUtc;
-            return currentPath;
-        }
-
-        private bool PathEquals(string path1, string path2)
+        internal bool PathEquals(string path1, string path2)
         {
             string normalizedPath1 = NormalizeTabPath(path1);
             string normalizedPath2 = NormalizeTabPath(path2);
@@ -917,241 +645,14 @@ namespace KjTabBar.ViewModels
             return string.Equals(normalizedPath1.TrimEnd('\\'), normalizedPath2.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
         }
 
-        private void UpdateTabTitles()
+        internal void UpdateTabTitles()
         {
-            if (_tabs == null || _tabs.Count == 0) return;
-
-            // 1. 各タブの基本情報（フォルダ名）を取得し、タイトルを一旦リセット (キャッシュを活用して高速化)
-            for (int i = 0; i < _tabs.Count; i++)
-            {
-                TabItemViewModel tab = _tabs[i];
-                if (string.IsNullOrEmpty(tab.BaseTitle))
-                {
-                    tab.BaseTitle = _explorerService.GetFolderName(tab.Path);
-                }
-                tab.Title = tab.BaseTitle;
-            }
-
-            // 2. 「フォルダ名」が同じだが「フルパス」が異なるタブ（名前重複）を特定 (O(N) に最適化)
-            Dictionary<string, List<int>> baseNameGroups = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
-            for (int i = 0; i < _tabs.Count; i++)
-            {
-                string title = _tabs[i].Title;
-                if (string.IsNullOrEmpty(title)) title = "Home";
-                if (!baseNameGroups.ContainsKey(title)) baseNameGroups[title] = new List<int>();
-                baseNameGroups[title].Add(i);
-            }
-
-            HashSet<int> collisionIndices = new HashSet<int>();
-            foreach (KeyValuePair<string, List<int>> kvp in baseNameGroups)
-            {
-                if (kvp.Value.Count > 1)
-                {
-                    // パスが異なるものが1つでもあれば、そのグループ全体を深堀り対象とする
-                    string firstPath = _tabs[kvp.Value[0]].Path;
-                    bool hasDifferentPath = false;
-                    for (int i = 1; i < kvp.Value.Count; i++)
-                    {
-                        if (!string.Equals(firstPath, _tabs[kvp.Value[i]].Path, StringComparison.OrdinalIgnoreCase))
-                        {
-                            hasDifferentPath = true;
-                            break;
-                        }
-                    }
-
-                    if (hasDifferentPath)
-                    {
-                        for (int i = 0; i < kvp.Value.Count; i++)
-                        {
-                            collisionIndices.Add(kvp.Value[i]);
-                        }
-                    }
-                }
-            }
-
-            // 3. 名前重複があるタブに対し、階層を遡る
-            if (collisionIndices.Count > 0)
-            {
-                bool changed = true;
-                int maxIterations = 10;
-                while (changed && maxIterations-- > 0)
-                {
-                    changed = false;
-                    Dictionary<string, List<int>> currentTitleGroups = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
-                    foreach (int idx in collisionIndices)
-                    {
-                        string t = _tabs[idx].Title;
-                        if (string.IsNullOrEmpty(t)) continue;
-                        if (!currentTitleGroups.ContainsKey(t)) currentTitleGroups[t] = new List<int>();
-                        currentTitleGroups[t].Add(idx);
-                    }
-
-                    foreach (KeyValuePair<string, List<int>> entry in currentTitleGroups)
-                    {
-                        if (entry.Value.Count > 1)
-                        {
-                            foreach (int idx in entry.Value)
-                            {
-                                string nextTitle = GetDeeperTitle(_tabs[idx].Path, _tabs[idx].Title);
-                                if (!string.Equals(nextTitle, _tabs[idx].Title, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    _tabs[idx].Title = nextTitle;
-                                    changed = true;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 5. 長すぎるタイトルを「先頭...末尾」形式に短縮
-            for (int i = 0; i < _tabs.Count; i++)
-            {
-                _tabs[i].Title = ShortenTitle(_tabs[i].Title, 30);
-            }
-
-            // 6. 最終的なTitleに対して、重複があれば元のタブも含め (1)〇〇, (2)〇〇 を付加する
-            Dictionary<string, List<int>> finalTitleGroups = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
-            for (int i = 0; i < _tabs.Count; i++)
-            {
-                string baseTitle = _tabs[i].Title;
-                if (!finalTitleGroups.ContainsKey(baseTitle))
-                {
-                    finalTitleGroups[baseTitle] = new List<int>();
-                }
-                finalTitleGroups[baseTitle].Add(i);
-            }
-
-            foreach (KeyValuePair<string, List<int>> kvp in finalTitleGroups)
-            {
-                if (kvp.Value.Count > 1)
-                {
-                    int count = 1;
-                    foreach (int idx in kvp.Value)
-                    {
-                        _tabs[idx].Title = $"({count}){kvp.Key}";
-                        count++;
-                    }
-                }
-            }
-        }
-
-        private string GetDeeperTitle(string path, string currentTitle)
-        {
-            if (string.IsNullOrEmpty(path))
-            {
-                return currentTitle;
-            }
-
-            // 特殊なシェルパスは拡張できない
-            if (path.StartsWith("::{") || path.StartsWith("shell:"))
-            {
-                return currentTitle;
-            }
-
-            if (currentTitle.Contains("..."))
-            {
-                return path;
-            }
-
-            string normalizedPath = path.TrimEnd('\\');
-            // セグメントに分割（空要素を除去することで UNC の先頭バックスラッシュ等も一時的に消える）
-            string[] segments = normalizedPath.Split(new char[] { '\\' }, StringSplitOptions.RemoveEmptyEntries);
-
-            if (segments.Length == 0) return path;
-
-            // 現在表示されているセグメント数をカウント
-            // currentTitle内の「\」の数から推定（例: "Folder" -> 1, "Parent\Folder" -> 2）
-            int currentSegmentCount = currentTitle.Split(new char[] { '\\' }, StringSplitOptions.RemoveEmptyEntries).Length;
-            int nextSegmentCount = currentSegmentCount + 1;
-
-            if (segments.Length <= 1 || nextSegmentCount > segments.Length)
-            {
-                // すでに絶対パス形式（ドライブ文字等を含む）の場合は、さらに親を付加すると冗長になるため避ける
-                if (currentTitle.Length >= 2 && currentTitle[1] == ':')
-                {
-                    return currentTitle;
-                }
-
-                // 物理的な階層がこれ以上ない場合、シェルオブジェクト経由で親の名前を取得することを試みる（仮想フォルダ対応）
-                string parentName = _explorerService.GetParentFolderName(normalizedPath);
-                if (!string.IsNullOrEmpty(parentName) && !string.Equals(parentName, currentTitle, StringComparison.OrdinalIgnoreCase))
-                {
-                    string joined = parentName + @"\" + currentTitle;
-                    // ドライブ名（"Windows (C:)" 等）に対して joined が "C:\Windows (C:)" になるのを防ぐ
-                    if (path.Length >= 2 && path[1] == ':' && string.Equals(parentName, path.Substring(0, 2), StringComparison.OrdinalIgnoreCase))
-                    {
-                         return path;
-                    }
-                    return joined;
-                }
-                return path;
-            }
-
-            // 1つ上のセグメントを取得
-            string parentSegment = segments[segments.Length - nextSegmentCount];
-            string result = parentSegment + @"\" + currentTitle;
-
-            // UNC パスまたはドライブレター、ルートに関する補正
-            if (path.StartsWith(@"\\") && !result.StartsWith(@"\\") && segments.Length == nextSegmentCount)
-            {
-                result = @"\\" + result;
-            }
-            else if (result.Length >= 2 && result[1] == ':' && result.Length > 2 && result[2] != '\\')
-            {
-                result = result.Insert(2, @"\");
-            }
-
-            return result;
+            TabTitleDisambiguator.UpdateTitles(_tabs, _explorerService);
         }
 
         private string ShortenTitle(string title, int maxLen)
         {
-            if (string.IsNullOrEmpty(title) || title.Length <= maxLen) return title;
-
-            // 特殊なシェルパス (::{...}) は、下手に短縮すると意味不明になるので、
-            // そのまま表示を優先する (WPF側で末尾省略される)
-            if (title.StartsWith("::{") || title.StartsWith("shell:")) return title;
-
-            // パス (バックスラッシュを含む) の場合は、「先頭...末尾」の短縮を試みる
-            if (title.Contains(@"\"))
-            {
-                // ドライブレターやルート (\) を特定
-                int rootLen = 0;
-                if (title.Length >= 3 && title[1] == ':' && title[2] == '\\') rootLen = 3; // C:\
-                else if (title.StartsWith(@"\\")) // UNC
-                {
-                    int nextSlash = title.IndexOf(@"\", 2);
-                    if (nextSlash > 0) rootLen = nextSlash + 1;
-                }
-                else if (title.StartsWith(@"\")) rootLen = 1;
-
-                string leafName = title.Substring(title.LastIndexOf(@"\") + 1);
-                if (string.IsNullOrEmpty(leafName)) leafName = title; // 末尾が \ の場合など
-
-                // ルート部分 + "...\" + 末尾部分 で収まるかチェック
-                // ルートが特定できている場合のみ構造を維持
-                if ((rootLen > 0 || title.StartsWith(@"\\")) && rootLen + 3 + leafName.Length <= maxLen)
-                {
-                    string rootPart = title.Substring(0, rootLen);
-                    // 必要なら "\" を補う
-                    if (!rootPart.EndsWith(@"\") && !leafName.Contains(@"\")) rootPart += @"\";
-                    return rootPart + @"...\" + leafName;
-                }
-            }
-
-            // 一般的な文字列としての短縮 (Start...End)
-            int startCount = maxLen / 3;
-            if (startCount < 1) startCount = 1;
-            int endCount = maxLen - startCount - 3;
-            if (endCount < 5) endCount = 5; // 末尾を多めに残す
-
-            if (startCount + endCount + 3 > title.Length) return title;
-
-            return title.Substring(0, startCount) + "..." + title.Substring(title.Length - endCount);
+            return TabTitleDisambiguator.ShortenTitle(title, maxLen);
         }
     }
 }
-
-
-

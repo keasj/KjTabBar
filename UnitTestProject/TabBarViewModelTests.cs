@@ -232,6 +232,40 @@ namespace UnitTestProject
             Assert.IsTrue(result20.StartsWith("Par"), $"Shortened title '{result20}' should preserve the start of the title.");
         }
 
+        [TestMethod]
+        public void RestoreTabs_DoesNotAppendInitialExplorerPath_WhenSavedLayoutExists()
+        {
+            MockUserSettings mockSettings = new MockUserSettings();
+            RestoreTabsExplorerService mockExplorer = new RestoreTabsExplorerService();
+            TabBarViewModel vm = new TabBarViewModel(IntPtr.Zero, mockSettings, mockExplorer);
+
+            vm.RestoreTabs(new string[] { @"C:\SavedA", @"C:\SavedB" });
+
+            Assert.AreEqual(2, vm.Tabs.Count);
+            Assert.AreEqual(@"C:\SavedA", vm.Tabs[0].Path);
+            Assert.AreEqual(@"C:\SavedB", vm.Tabs[1].Path);
+            Assert.AreEqual(@"C:\SavedA", vm.ActiveTab.Path);
+            Assert.AreEqual(@"C:\SavedA", mockExplorer.LastNavigatedPath);
+        }
+
+        [TestMethod]
+        public void RestoreTabs_Restores_Unc_Path_From_Persisted_Data()
+        {
+            MockUserSettings mockSettings = new MockUserSettings();
+            RestoreTabsExplorerService mockExplorer = new RestoreTabsExplorerService();
+            TabBarViewModel vm = new TabBarViewModel(IntPtr.Zero, mockSettings, mockExplorer);
+
+            vm.RestoreTabs(new string[]
+            {
+                @"\\server\share\folder",
+                @"C:\SavedB"
+            });
+
+            Assert.AreEqual(2, vm.Tabs.Count);
+            Assert.AreEqual(@"\\server\share\folder", vm.Tabs[0].Path);
+            Assert.AreEqual(@"C:\SavedB", vm.Tabs[1].Path);
+        }
+
         private class CustomMockExplorerService : MockExplorerService
         {
             public override string GetFolderName(string path)
@@ -246,6 +280,32 @@ namespace UnitTestProject
                 {
                     return "MockFolder";
                 }
+            }
+        }
+
+        private sealed class RestoreTabsExplorerService : MockExplorerService
+        {
+            public string LastNavigatedPath { get; private set; }
+
+            public override string GetFolderName(string path)
+            {
+                if (string.IsNullOrEmpty(path))
+                {
+                    return "Home";
+                }
+
+                return path;
+            }
+
+            public override string GetCurrentPath(IntPtr explorerHwnd)
+            {
+                return @"C:\InitialOnly";
+            }
+
+            public override bool Navigate(IntPtr explorerHwnd, string path)
+            {
+                LastNavigatedPath = path;
+                return true;
             }
         }
     }

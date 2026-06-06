@@ -4,6 +4,7 @@ using System.IO;
 using KjTabBar;
 using KjTabBar.Helpers;
 using KjTabBar.Models;
+using KjTabBar.ViewModels;
 
 namespace UnitTestProject
 {
@@ -66,6 +67,29 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void ProtectedTextStorage_IsProtectedFile_Detects_Legacy_Plaintext_Format()
+        {
+            string tempFile = Path.GetTempFileName();
+            try
+            {
+                File.WriteAllText(tempFile, @"C:\Work");
+
+                Assert.IsFalse(ProtectedTextStorage.IsProtectedFile(tempFile));
+
+                ProtectedTextStorage.SaveLines(tempFile, new string[] { @"C:\Work" });
+
+                Assert.IsTrue(ProtectedTextStorage.IsProtectedFile(tempFile));
+            }
+            finally
+            {
+                if (File.Exists(tempFile))
+                {
+                    File.Delete(tempFile);
+                }
+            }
+        }
+
+        [TestMethod]
         public void ProtectedTextStorage_LoadLines_Supports_Legacy_Plaintext_Format()
         {
             string tempFile = Path.GetTempFileName();
@@ -81,6 +105,32 @@ namespace UnitTestProject
                 string[] restoredPaths = ProtectedTextStorage.LoadLines(tempFile);
 
                 CollectionAssert.AreEqual(paths, restoredPaths);
+            }
+            finally
+            {
+                if (File.Exists(tempFile))
+                {
+                    File.Delete(tempFile);
+                }
+            }
+        }
+
+        [TestMethod]
+        public void TabPersistenceService_Uses_Custom_Path_Without_Touching_AppData_Default()
+        {
+            string tempFile = Path.Combine(Path.GetTempPath(), "KjTabBar.Tests." + Guid.NewGuid().ToString("N") + ".tabs.txt");
+            try
+            {
+                MockExplorerService explorer = new MockExplorerService();
+                TabPersistenceService persistence = new TabPersistenceService(tempFile);
+                TabBarViewModel vm = new TabBarViewModel(IntPtr.Zero, new MockUserSettings(), explorer);
+                vm.InsertTabWithPath(@"C:\SavedTab", 1);
+
+                persistence.SaveTabsIfChanged(vm);
+
+                Assert.IsTrue(File.Exists(tempFile));
+                string[] restoredPaths = ProtectedTextStorage.LoadLines(tempFile);
+                CollectionAssert.AreEqual(new string[] { @"C:\MockPath", @"C:\SavedTab" }, restoredPaths);
             }
             finally
             {

@@ -25,7 +25,32 @@ namespace KjTabBar.Helpers
         public static void SaveLines(string path, IList<string> lines)
         {
             string persistedText = SerializeLines(lines);
-            File.WriteAllText(path, persistedText, new UTF8Encoding(false));
+            string directory = Path.GetDirectoryName(path);
+            if (string.IsNullOrEmpty(directory))
+            {
+                directory = Directory.GetCurrentDirectory();
+            }
+
+            string tempPath = Path.Combine(directory, Path.GetFileName(path) + "." + Guid.NewGuid().ToString("N") + ".tmp");
+            try
+            {
+                File.WriteAllText(tempPath, persistedText, new UTF8Encoding(false));
+                if (File.Exists(path))
+                {
+                    File.Replace(tempPath, path, null);
+                }
+                else
+                {
+                    File.Move(tempPath, path);
+                }
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                }
+            }
         }
 
         internal static string SerializeLines(IList<string> lines)
@@ -49,6 +74,22 @@ namespace KjTabBar.Helpers
             return ProtectedPrefix + Convert.ToBase64String(protectedBytes);
         }
 
+        internal static bool IsProtectedText(string persistedText)
+        {
+            return !string.IsNullOrEmpty(persistedText) && persistedText.StartsWith(ProtectedPrefix, StringComparison.Ordinal);
+        }
+
+        public static bool IsProtectedFile(string path)
+        {
+            if (!File.Exists(path))
+            {
+                return false;
+            }
+
+            string persistedText = File.ReadAllText(path, Encoding.UTF8);
+            return IsProtectedText(persistedText);
+        }
+
         internal static string[] DeserializeLines(string persistedText)
         {
             if (string.IsNullOrEmpty(persistedText))
@@ -56,7 +97,7 @@ namespace KjTabBar.Helpers
                 return new string[0];
             }
 
-            if (persistedText.StartsWith(ProtectedPrefix, StringComparison.Ordinal))
+            if (IsProtectedText(persistedText))
             {
                 string protectedPayload = persistedText.Substring(ProtectedPrefix.Length).Trim();
                 if (string.IsNullOrEmpty(protectedPayload))

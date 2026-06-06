@@ -26,7 +26,7 @@ Windows エクスプローラー（`explorer.exe`）を独自のタブバーで�
 ## 動作環境
 
 - OS: Windows 10 / Windows 11
-- ランタイム: .NET 環境 (仕様に合わせてご準備ください)
+- ランタイム: .NET Framework 4.8.1
 
 ## 使い方
 
@@ -56,3 +56,8 @@ Windows エクスプローラー（`explorer.exe`）を独自のタブバーで�
 最新版はこちら：
 
 https://github.com/keasj/KjTabBar/releases/latest
+
+## 開発メモ
+
+- このリポジトリのテキストファイルは CRLF 前提です。Git フックを有効化する場合は `git config core.hooksPath .githooks` を実行してください。
+- pre-commit フックでは `tools/Check-LineEndings.ps1` を実行し、CRLF 管理対象ファイルへ LF-only の行が混ざったコミットをブロックします。
