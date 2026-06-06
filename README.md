@@ -61,3 +61,4 @@ https://github.com/keasj/KjTabBar/releases/latest
 
 - Text files managed by this repository use CRLF. To enable the repository hook, run `git config core.hooksPath .githooks`.
 - The pre-commit hook runs `tools/Check-LineEndings.ps1` and blocks commits that introduce LF-only lines into CRLF-managed files.
+- Release steps are documented in [RELEASE.md](./RELEASE.md).

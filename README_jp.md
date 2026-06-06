@@ -61,3 +61,5 @@ https://github.com/keasj/KjTabBar/releases/latest
 
 - このリポジトリのテキストファイルは CRLF 前提です。Git フックを有効化する場合は `git config core.hooksPath .githooks` を実行してください。
 - pre-commit フックでは `tools/Check-LineEndings.ps1` を実行し、CRLF 管理対象ファイルへ LF-only の行が混ざったコミットをブロックします。
+
+- Release steps are documented in [RELEASE.md](./RELEASE.md).
