@@ -91,6 +91,23 @@ namespace KjTabBar.Models
             return foregroundRoot == hwnd;
         }
 
+        public bool WasForegroundRelatedWindow(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr previousForegroundWindow = _desktopForegroundTracker.PreviousForegroundWindow;
+            if (previousForegroundWindow == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr previousForegroundRoot = _getAncestor(previousForegroundWindow, NativeMethods.GA_ROOT);
+            return previousForegroundRoot == hwnd;
+        }
+
         public bool TryRegisterDesktopLaunchCandidate(IntPtr hwnd)
         {
             if (hwnd == IntPtr.Zero)

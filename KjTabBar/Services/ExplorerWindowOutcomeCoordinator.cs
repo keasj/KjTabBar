@@ -77,12 +77,12 @@ namespace KjTabBar.Services
                         (result.Action == AbsorptionAction.Absorb && result.IsControlPanelPath && controlPanelTarget != null)
                         ? controlPanelTarget
                         : validTarget;
-                    TryAbsorbExplorerWindow(hwnd, targetToUse, result.ResolvedPath, result.AllowSpecialPath);
+                    TryAbsorbExplorerWindow(hwnd, targetToUse, result.ResolvedPath, result.AllowSpecialPath, result.IsControlPanelPath);
                     break;
 
                 case AbsorptionAction.CreateNewTabBar:
                     _windowTracking.ClearAbsorptionState(hwnd);
-                    TryCreateNewTabBar(hwnd);
+                    TryCreateNewTabBar(hwnd, result.ResolvedPath, result.UseResolvedPathOnCreate);
                     break;
 
                 case AbsorptionAction.Ignore:
@@ -92,11 +92,11 @@ namespace KjTabBar.Services
             }
         }
 
-        private void TryAbsorbExplorerWindow(IntPtr hwnd, TabBarViewModel targetViewModel, string path, bool allowSpecialPath)
+        private void TryAbsorbExplorerWindow(IntPtr hwnd, TabBarViewModel targetViewModel, string path, bool allowSpecialPath, bool isControlPanelPath)
         {
             try
             {
-                _interactionService.AbsorbExplorerWindow(hwnd, targetViewModel, path, allowSpecialPath, _ignoreExplorerWindow);
+                _interactionService.AbsorbExplorerWindow(hwnd, targetViewModel, path, allowSpecialPath, isControlPanelPath, _ignoreExplorerWindow);
             }
             catch (Exception ex)
             {
@@ -105,11 +105,11 @@ namespace KjTabBar.Services
             }
         }
 
-        private void TryCreateNewTabBar(IntPtr hwnd)
+        private void TryCreateNewTabBar(IntPtr hwnd, string initialPath, bool useInitialPathOnly)
         {
             try
             {
-                _interactionService.CreateNewTabBar(hwnd, _getUserSettings(), _registerTabBar);
+                _interactionService.CreateNewTabBar(hwnd, _getUserSettings(), _registerTabBar, initialPath, useInitialPathOnly);
             }
             catch (Exception ex)
             {

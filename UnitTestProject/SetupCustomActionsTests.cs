@@ -1,5 +1,8 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using KjTabBar;
+using System.Diagnostics;
+using System.IO;
+using System.Security.Principal;
 
 namespace UnitTestProject
 {
@@ -77,6 +80,73 @@ namespace UnitTestProject
             Assert.IsFalse(SetupCustomActions.IsInstalledExecutablePathMatch(
                 @"C:\Program Files\KjTabBar\KjTabBar.exe",
                 null));
+        }
+
+        [TestMethod]
+        public void TryResolveInstalledExecutablePath_Prefers_TargetDir_When_Provided()
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "KjTabBar_SetupTests_" + System.Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                string exePath = Path.Combine(tempDir, "KjTabBar.exe");
+                File.WriteAllText(exePath, string.Empty);
+
+                string resolvedExePath;
+                string resolvedTargetDir;
+                bool resolved = SetupCustomActions.TryResolveInstalledExecutablePath(tempDir + "\\", @"C:\Temp\ShadowCopy\KjTabBar.exe", out resolvedExePath, out resolvedTargetDir);
+
+                Assert.IsTrue(resolved);
+                Assert.AreEqual(exePath, resolvedExePath);
+                Assert.AreEqual(tempDir, resolvedTargetDir);
+            }
+            finally
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    Directory.Delete(tempDir, true);
+                }
+            }
+        }
+
+        [TestMethod]
+        public void TryResolveInstalledExecutablePath_Falls_Back_To_Assembly_Path_When_TargetDir_Is_Missing()
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "KjTabBar_SetupTests_" + System.Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                string assemblyPath = Path.Combine(tempDir, "KjTabBar.exe");
+                File.WriteAllText(assemblyPath, string.Empty);
+
+                string resolvedExePath;
+                string resolvedTargetDir;
+                bool resolved = SetupCustomActions.TryResolveInstalledExecutablePath(null, assemblyPath, out resolvedExePath, out resolvedTargetDir);
+
+                Assert.IsTrue(resolved);
+                Assert.AreEqual(assemblyPath, resolvedExePath);
+                Assert.AreEqual(tempDir, resolvedTargetDir);
+            }
+            finally
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    Directory.Delete(tempDir, true);
+                }
+            }
+        }
+
+
+        [TestMethod]
+        public void GetProcessOwnerSid_Returns_Current_Process_User_Sid()
+        {
+            using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
+            {
+                string sid = SetupEnvironmentResolver.GetProcessOwnerSid(Process.GetCurrentProcess().Id);
+
+                Assert.IsNotNull(identity.User);
+                Assert.AreEqual(identity.User.Value, sid);
+            }
         }
     }
 }

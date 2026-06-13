@@ -42,9 +42,13 @@ namespace KjTabBar.Services
             return HasActiveControlPanelTab(viewModel);
         }
 
-        public TabBarViewModel FindControlPanelTabBarTarget(List<TabBarViewModel> candidates, string path, Func<IntPtr, bool> isForegroundRelatedWindow)
+        public TabBarViewModel FindControlPanelTabBarTarget(
+            List<TabBarViewModel> candidates,
+            string path,
+            Func<IntPtr, bool> isForegroundRelatedWindow,
+            Func<IntPtr, bool> wasForegroundRelatedWindow)
         {
-            return _controlPanelTabSearch.FindTarget(candidates, path, isForegroundRelatedWindow);
+            return _controlPanelTabSearch.FindTarget(candidates, path, isForegroundRelatedWindow, wasForegroundRelatedWindow);
         }
 
         public List<TabBarViewModel> GetAliveTabBarViewModels()

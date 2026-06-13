@@ -13,22 +13,48 @@ namespace KjTabBar.Models
             _explorerService = explorerService;
         }
 
-        public TabBarViewModel FindTarget(List<TabBarViewModel> candidates, string path, Func<IntPtr, bool> isForegroundRelatedWindow)
+        public TabBarViewModel FindTarget(
+            List<TabBarViewModel> candidates,
+            string path,
+            Func<IntPtr, bool> isForegroundRelatedWindow,
+            Func<IntPtr, bool> wasForegroundRelatedWindow)
         {
             if (string.IsNullOrEmpty(path) || candidates == null)
             {
                 return null;
             }
 
+            bool isControlPanelRootPath = _explorerService.IsControlPanelRootPath(path);
+
             TabBarViewModel activeControlPanelTarget = null;
             TabBarViewModel firstControlPanelTarget = null;
-            TabBarViewModel fallbackControlPanelHost = null;
+            TabBarViewModel foregroundControlPanelHost = null;
+            TabBarViewModel previousForegroundControlPanelHost = null;
             for (int i = 0; i < candidates.Count; i++)
             {
                 TabBarViewModel viewModel = candidates[i];
-                if (fallbackControlPanelHost == null && HasAnyControlPanelTab(viewModel))
+                bool hasAnyControlPanelTab = HasAnyControlPanelTab(viewModel);
+                bool isForegroundRelated =
+                    isForegroundRelatedWindow != null &&
+                    isForegroundRelatedWindow(viewModel.ExplorerHwnd);
+                bool wasForegroundRelated =
+                    wasForegroundRelatedWindow != null &&
+                    wasForegroundRelatedWindow(viewModel.ExplorerHwnd);
+
+                if (!isControlPanelRootPath &&
+                    foregroundControlPanelHost == null &&
+                    hasAnyControlPanelTab &&
+                    isForegroundRelated)
                 {
-                    fallbackControlPanelHost = viewModel;
+                    foregroundControlPanelHost = viewModel;
+                }
+
+                if (!isControlPanelRootPath &&
+                    previousForegroundControlPanelHost == null &&
+                    hasAnyControlPanelTab &&
+                    wasForegroundRelated)
+                {
+                    previousForegroundControlPanelHost = viewModel;
                 }
 
                 if (!HasEquivalentControlPanelTab(viewModel, path))
@@ -36,7 +62,12 @@ namespace KjTabBar.Models
                     continue;
                 }
 
-                if (isForegroundRelatedWindow != null && isForegroundRelatedWindow(viewModel.ExplorerHwnd))
+                if (isControlPanelRootPath)
+                {
+                    continue;
+                }
+
+                if (isForegroundRelated)
                 {
                     return viewModel;
                 }
@@ -56,14 +87,24 @@ namespace KjTabBar.Models
                 }
             }
 
+            if (isControlPanelRootPath)
+            {
+                return null;
+            }
+
             if (activeControlPanelTarget != null)
             {
                 return activeControlPanelTarget;
             }
 
-            if (fallbackControlPanelHost != null)
+            if (foregroundControlPanelHost != null)
             {
-                return fallbackControlPanelHost;
+                return foregroundControlPanelHost;
+            }
+
+            if (previousForegroundControlPanelHost != null)
+            {
+                return previousForegroundControlPanelHost;
             }
 
             return firstControlPanelTarget;

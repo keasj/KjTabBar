@@ -68,6 +68,14 @@ namespace KjTabBar.Services
                 bool isDesktopCandidate = _windowTracking.DesktopLaunchCandidates.Contains(hwnd);
                 bool isDesktopInteractiveCandidate = _windowTracking.DesktopInteractiveLaunchCandidates.Contains(hwnd);
                 bool isControlPanelTabLaunchCandidate = _windowTracking.ControlPanelTabLaunchCandidates.Contains(hwnd);
+                bool isValidTargetForegroundRelated =
+                    validTarget != null &&
+                    (_explorerLaunchTracker.IsForegroundRelatedWindow(validTarget.ExplorerHwnd) ||
+                     _explorerLaunchTracker.WasForegroundRelatedWindow(validTarget.ExplorerHwnd));
+                bool hasActiveControlPanelTabOnValidTarget =
+                    isValidTargetForegroundRelated &&
+                    hasActiveControlPanelTab != null &&
+                    hasActiveControlPanelTab(validTarget);
 
                 if (!isDesktopCandidate && _explorerLaunchTracker.TryRegisterDesktopLaunchCandidate(hwnd))
                 {
@@ -87,6 +95,7 @@ namespace KjTabBar.Services
                         IsDesktopInteractiveCandidate = isDesktopInteractiveCandidate,
                         IsHiddenPending = isHiddenPending,
                         IsControlPanelTabLaunchCandidate = isControlPanelTabLaunchCandidate,
+                        HasActiveControlPanelTabOnValidTarget = hasActiveControlPanelTabOnValidTarget,
                         HasValidTarget = validTarget != null
                     };
 
@@ -107,9 +116,20 @@ namespace KjTabBar.Services
                             TabBarViewModel target = findControlPanelTarget(path);
                             return target != null && hasEquivalentControlPanelTab(target, path);
                         },
-                        delegate
+                        delegate (string path)
                         {
-                            return hasActiveControlPanelTab != null && hasActiveControlPanelTab(validTarget);
+                            if (findControlPanelTarget == null || hasActiveControlPanelTab == null || string.IsNullOrEmpty(path))
+                            {
+                                return false;
+                            }
+
+                            TabBarViewModel target = findControlPanelTarget(path);
+                            if (target == null)
+                            {
+                                return false;
+                            }
+
+                            return hasActiveControlPanelTab(target);
                         });
                 });
 

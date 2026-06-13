@@ -14,6 +14,10 @@ namespace UnitTestProject
         {
             _explorerService = new MockExplorerService();
             _explorerService.AllControlPanelPath = "::{26EE0668-A00A-44D7-9371-BEB064C98683}";
+            _explorerService.IsControlPanelRootPathFunc = delegate (string path)
+            {
+                return string.Equals(path, _explorerService.AllControlPanelPath, StringComparison.OrdinalIgnoreCase);
+            };
         }
 
         [TestMethod]
@@ -25,6 +29,39 @@ namespace UnitTestProject
                 TitleVirtualPath = null,
                 CurrentRetryCount = 2,
                 HasValidTarget = true
+            };
+
+            string resolvedPath;
+            bool allowSpecialPath;
+            AbsorptionAction action = ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath);
+
+            Assert.AreEqual(AbsorptionAction.WaitAndRetryIncrement, action);
+        }
+
+        [TestMethod]
+        public void Evaluate_WaitAndRetry_For_UnresolvedControlPanelRoot_When_AllControlPanelPath_Uses_21EC()
+        {
+            _explorerService.AllControlPanelPath = "::{21EC2020-3AEA-1069-A2DD-08002B30309D}";
+            _explorerService.IsControlPanelRootPathFunc = delegate (string path)
+            {
+                return string.Equals(path, "::{21EC2020-3AEA-1069-A2DD-08002B30309D}", StringComparison.OrdinalIgnoreCase) ||
+                       string.Equals(path, "::{26EE0668-A00A-44D7-9371-BEB064C98683}", StringComparison.OrdinalIgnoreCase);
+            };
+            _explorerService.IsControlPanelPathFunc = delegate (string path)
+            {
+                return _explorerService.IsControlPanelRootPath(path);
+            };
+            _explorerService.NormalizeShellNamespacePathFunc = delegate (string path)
+            {
+                return path;
+            };
+
+            ExplorerWindowContext context = new ExplorerWindowContext
+            {
+                CurrentPath = "::{26EE0668-A00A-44D7-9371-BEB064C98683}",
+                TitleVirtualPath = null,
+                CurrentRetryCount = 0,
+                HasValidTarget = false
             };
 
             string resolvedPath;
@@ -80,7 +117,7 @@ namespace UnitTestProject
         }
 
         [TestMethod]
-        public void Evaluate_ControlPanel_FromManagedControlPanelTab_Returns_Absorb()
+        public void Evaluate_ControlPanel_CandidateWithoutHiddenPending_Returns_Absorb()
         {
             ExplorerWindowContext context = new ExplorerWindowContext
             {
@@ -100,6 +137,149 @@ namespace UnitTestProject
             Assert.AreEqual(AbsorptionAction.Absorb, action);
             Assert.AreEqual(_explorerService.ProgramsAndFeaturesPath, resolvedPath);
             Assert.IsTrue(allowSpecialPath);
+        }
+
+        [TestMethod]
+        public void Evaluate_ControlPanel_CandidateWithHiddenPending_Returns_Absorb()
+        {
+            ExplorerWindowContext context = new ExplorerWindowContext
+            {
+                CurrentPath = _explorerService.ProgramsAndFeaturesPath,
+                TitleVirtualPath = "プログラムと機能",
+                HasValidTarget = true,
+                IsDesktopCandidate = false,
+                IsHiddenPending = true,
+                IsControlPanelTabLaunchCandidate = true
+            };
+
+            _explorerService.IsControlPanelPathFunc = (p) => true;
+
+            string resolvedPath;
+            bool allowSpecialPath;
+            AbsorptionAction action = ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath);
+
+            Assert.AreEqual(AbsorptionAction.Absorb, action);
+            Assert.AreEqual(_explorerService.ProgramsAndFeaturesPath, resolvedPath);
+            Assert.IsTrue(allowSpecialPath);
+        }
+
+        [TestMethod]
+        public void Evaluate_ControlPanel_TargetedControlPanelHostWithoutCandidate_Returns_Absorb()
+        {
+            ExplorerWindowContext context = new ExplorerWindowContext
+            {
+                CurrentPath = _explorerService.PowerOptionsPath,
+                TitleVirtualPath = "電源オプション",
+                HasValidTarget = true,
+                HasControlPanelTarget = true,
+                IsDesktopCandidate = false,
+                HasActiveControlPanelTabOnValidTarget = true
+            };
+
+            _explorerService.IsControlPanelPathFunc = (p) => true;
+
+            string resolvedPath;
+            bool allowSpecialPath;
+            AbsorptionAction action = ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath);
+
+            Assert.AreEqual(AbsorptionAction.Absorb, action);
+            Assert.AreEqual(_explorerService.PowerOptionsPath, resolvedPath);
+            Assert.IsTrue(allowSpecialPath);
+        }
+
+        [TestMethod]
+        public void Evaluate_ControlPanel_ActiveControlPanelTabWithoutCandidate_Returns_Absorb()
+        {
+            ExplorerWindowContext context = new ExplorerWindowContext
+            {
+                CurrentPath = _explorerService.ProgramsAndFeaturesPath,
+                TitleVirtualPath = "プログラムと機能",
+                HasValidTarget = true,
+                HasControlPanelTarget = true,
+                IsDesktopCandidate = false,
+                CurrentRetryCount = 0,
+                HasActiveControlPanelTabOnValidTarget = true
+            };
+
+            _explorerService.IsControlPanelPathFunc = (p) => true;
+
+            string resolvedPath;
+            bool allowSpecialPath;
+            AbsorptionAction action = ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath);
+
+            Assert.AreEqual(AbsorptionAction.Absorb, action);
+            Assert.AreEqual(_explorerService.ProgramsAndFeaturesPath, resolvedPath);
+            Assert.IsTrue(allowSpecialPath);
+        }
+
+        [TestMethod]
+        public void Evaluate_ControlPanel_ActiveControlPanelTabWithoutCandidate_Absorbs_AfterRetryWindow()
+        {
+            ExplorerWindowContext context = new ExplorerWindowContext
+            {
+                CurrentPath = _explorerService.PowerOptionsPath,
+                TitleVirtualPath = "電源オプション",
+                HasValidTarget = true,
+                HasControlPanelTarget = true,
+                IsDesktopCandidate = false,
+                CurrentRetryCount = ExplorerAbsorptionDecisionMaker.MaxTransientControlPanelRetryCount,
+                HasActiveControlPanelTabOnValidTarget = true
+            };
+
+            _explorerService.IsControlPanelPathFunc = (p) => true;
+
+            string resolvedPath;
+            bool allowSpecialPath;
+            AbsorptionAction action = ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath);
+
+            Assert.AreEqual(AbsorptionAction.Absorb, action);
+            Assert.AreEqual(_explorerService.PowerOptionsPath, resolvedPath);
+            Assert.IsTrue(allowSpecialPath);
+        }
+
+        [TestMethod]
+        public void Evaluate_ControlPanel_TargetedHostWithoutForegroundRelatedActiveValidTarget_Returns_Ignore()
+        {
+            ExplorerWindowContext context = new ExplorerWindowContext
+            {
+                CurrentPath = _explorerService.PowerOptionsPath,
+                TitleVirtualPath = "電源オプション",
+                HasValidTarget = true,
+                HasControlPanelTarget = true,
+                IsDesktopCandidate = false,
+                HasActiveControlPanelTabOnValidTarget = false
+            };
+
+            _explorerService.IsControlPanelPathFunc = (p) => true;
+
+            string resolvedPath;
+            bool allowSpecialPath;
+            AbsorptionAction action = ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath);
+
+            Assert.AreEqual(AbsorptionAction.Ignore, action);
+        }
+
+        [TestMethod]
+        public void Evaluate_ControlPanel_TargetedHostWithMatchedControlPanelTarget_Absorbs_WithoutForegroundRelatedValidTarget()
+        {
+            ExplorerWindowContext context = new ExplorerWindowContext
+            {
+                CurrentPath = _explorerService.PowerOptionsPath,
+                TitleVirtualPath = "電源オプション",
+                HasValidTarget = true,
+                HasControlPanelTarget = true,
+                IsDesktopCandidate = false,
+                HasActiveControlPanelTabOnValidTarget = false,
+                HasActiveControlPanelTabFunc = () => true
+            };
+
+            _explorerService.IsControlPanelPathFunc = (p) => true;
+
+            string resolvedPath;
+            bool allowSpecialPath;
+            AbsorptionAction action = ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath);
+
+            Assert.AreEqual(AbsorptionAction.Ignore, action);
         }
 
         [TestMethod]

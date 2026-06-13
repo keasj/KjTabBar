@@ -18,6 +18,7 @@ namespace KjTabBar.Models
         public bool IsDesktopInteractiveCandidate { get; set; }
         public bool IsHiddenPending { get; set; }
         public bool IsControlPanelTabLaunchCandidate { get; set; }
+        public bool HasActiveControlPanelTabOnValidTarget { get; set; }
         public bool HasValidTarget { get; set; }
         public bool HasControlPanelTarget { get; set; }
 
@@ -66,7 +67,7 @@ namespace KjTabBar.Models
 
             bool shouldRetryTransientControlPanel = string.IsNullOrEmpty(context.TitleVirtualPath) &&
                                                     !string.IsNullOrEmpty(normalizedDecisionPath) &&
-                                                    normalizedDecisionPath.Equals(explorerService.AllControlPanelPath, StringComparison.OrdinalIgnoreCase);
+                                                    explorerService.IsControlPanelRootPath(normalizedDecisionPath);
                                                     
             bool shouldRetryTransientDesktopPlaceholder =
                 ExplorerWindowDecisionLogic.ShouldRetryTransientDesktopPlaceholder(
@@ -160,6 +161,15 @@ namespace KjTabBar.Models
 
             if (isControlPanelPath)
             {
+                if (!context.IsControlPanelTabLaunchCandidate &&
+                    context.HasActiveControlPanelTabOnValidTarget &&
+                    context.HasControlPanelTarget &&
+                    (context.HasEquivalentControlPanelTabFunc == null || !context.HasEquivalentControlPanelTabFunc(decisionPath)))
+                {
+                    allowSpecialPath = true;
+                    return AbsorptionAction.Absorb;
+                }
+
                 if (context.IsControlPanelTabLaunchCandidate)
                 {
                     allowSpecialPath = true;

@@ -23,7 +23,7 @@ namespace KjTabBar.Models
             _tabsFilePath = tabsFilePath;
         }
 
-        public void LoadTabsTo(TabBarViewModel viewModel)
+        public bool LoadTabsTo(TabBarViewModel viewModel)
         {
             try
             {
@@ -39,6 +39,8 @@ namespace KjTabBar.Models
                     {
                         ProtectedTextStorage.SaveLines(file, paths);
                     }
+
+                    return paths.Length > 0;
                 }
             }
             catch (Exception ex)
@@ -46,6 +48,8 @@ namespace KjTabBar.Models
                 _tabsLoadFailed = true;
                 AppLogger.LogError("TabPersistenceService", "Failed to load tabs.txt. Automatic tab saving is disabled to avoid overwriting existing data.", ex);
             }
+
+            return false;
         }
 
         public void SaveTabsIfChanged(TabBarViewModel viewModel)

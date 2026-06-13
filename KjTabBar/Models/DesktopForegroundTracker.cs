@@ -10,6 +10,7 @@ namespace KjTabBar.Models
         private DateTime _lastDesktopInteractiveLaunchTokenUtc = DateTime.MinValue;
         private string _lastForegroundClassName = string.Empty;
 
+        public IntPtr PreviousForegroundWindow { get; private set; }
         public IntPtr LastForegroundWindow { get; private set; }
 
         public bool WasDesktopForegroundRecently()
@@ -47,6 +48,7 @@ namespace KjTabBar.Models
             }
 
             _isDesktopForeground = isDesktopWindowClass;
+            PreviousForegroundWindow = LastForegroundWindow;
             LastForegroundWindow = foregroundWindow;
             _lastForegroundClassName = className;
         }

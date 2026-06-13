@@ -46,9 +46,14 @@ namespace KjTabBar.Services
             bundle.AppUiDispatcherAdapter = new AppUiDispatcherAdapter(
                 dispatcher,
                 bundle.ExplorerTabTargetResolver,
-                bundle.ExplorerLaunchTracker.IsForegroundRelatedWindow);
+                bundle.ExplorerLaunchTracker.IsForegroundRelatedWindow,
+                bundle.ExplorerLaunchTracker.WasForegroundRelatedWindow);
             bundle.ExplorerWindowEvaluationService = new ExplorerWindowEvaluationService(explorerService, bundle.DesktopPathClassifier);
-            bundle.ExplorerWindowInteractionService = new ExplorerWindowInteractionService(explorerService, windowTracking, tabPersistence);
+            bundle.ExplorerWindowInteractionService = new ExplorerWindowInteractionService(
+                explorerService,
+                windowTracking,
+                tabPersistence,
+                tabBars.RebindExplorerWindow);
             bundle.ExplorerWindowMonitorCoordinator = new ExplorerWindowMonitorCoordinator(tabBars, windowTracking, desktopForegroundTracker, bundle.ExplorerLaunchTracker);
             bundle.ExplorerWindowOutcomeCoordinator = new ExplorerWindowOutcomeCoordinator(
                 windowTracking,

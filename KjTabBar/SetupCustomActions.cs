@@ -18,6 +18,7 @@ namespace KjTabBar
         internal const string PostInstallHelperArgument = "--kjtb-post-install";
         private const string SetupExePathEnvironmentName = "KJTB_EXE_PATH";
         private const string SetupWorkingDirectoryEnvironmentName = "KJTB_WORKING_DIRECTORY";
+        private const string SetupTargetDirParameterName = "targetdir";
         private const string StartupRunSubKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
         private const string StartupApprovedRunSubKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
 
@@ -37,7 +38,7 @@ namespace KjTabBar
             {
                 string exePath;
                 string targetDir;
-                if (TryGetInstalledExecutablePath(out exePath, out targetDir))
+                if (TryGetInstalledExecutablePathFromContext(out exePath, out targetDir))
                 {
                     Process installerProcess = null;
                     int installerProcessId;
@@ -344,12 +345,35 @@ namespace KjTabBar
             return trimmed;
         }
 
+        private bool TryGetInstalledExecutablePathFromContext(out string exePath, out string targetDir)
+        {
+            string configuredTargetDir = Context != null ? Context.Parameters[SetupTargetDirParameterName] : null;
+            string assemblyPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+            return TryResolveInstalledExecutablePath(configuredTargetDir, assemblyPath, out exePath, out targetDir);
+        }
+
         private static bool TryGetInstalledExecutablePath(out string exePath, out string targetDir)
+        {
+            string assemblyPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+            return TryResolveInstalledExecutablePath(null, assemblyPath, out exePath, out targetDir);
+        }
+
+        internal static bool TryResolveInstalledExecutablePath(string configuredTargetDir, string assemblyPath, out string exePath, out string targetDir)
         {
             exePath = null;
             targetDir = null;
 
-            string assemblyPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+            if (!string.IsNullOrWhiteSpace(configuredTargetDir))
+            {
+                string normalizedTargetDir = configuredTargetDir.Trim().Trim('"');
+                if (!string.IsNullOrEmpty(normalizedTargetDir))
+                {
+                    targetDir = Path.GetFullPath(normalizedTargetDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                    exePath = Path.Combine(targetDir, "KjTabBar.exe");
+                    return true;
+                }
+            }
+
             if (string.IsNullOrEmpty(assemblyPath))
             {
                 return false;
@@ -385,7 +409,7 @@ namespace KjTabBar
             {
                 string installedExePath;
                 string installedTargetDir;
-                if (!TryGetInstalledExecutablePath(out installedExePath, out installedTargetDir))
+                if (!TryGetInstalledExecutablePathFromContext(out installedExePath, out installedTargetDir))
                 {
                     AppLogger.LogInfo("SetupCustomActions", "Skipping process termination because the installed executable path could not be resolved.");
                     return;
@@ -463,7 +487,7 @@ namespace KjTabBar
         {
             string installedExePath;
             string installedTargetDir;
-            if (!TryGetInstalledExecutablePath(out installedExePath, out installedTargetDir))
+            if (!TryGetInstalledExecutablePathFromContext(out installedExePath, out installedTargetDir))
             {
                 AppLogger.LogInfo("SetupCustomActions", "Skipping startup cleanup because the installed executable path could not be resolved.");
                 return;

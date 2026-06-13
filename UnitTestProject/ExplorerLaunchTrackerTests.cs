@@ -45,6 +45,27 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void WasForegroundRelatedWindow_ReturnsTrue_For_PreviousForegroundRoot()
+        {
+            IntPtr currentForeground = (IntPtr)20;
+            ExplorerLaunchTracker tracker = new ExplorerLaunchTracker(
+                new DesktopForegroundTracker(),
+                new ExplorerWindowTrackingState(),
+                hwnd => false,
+                hwnd => false,
+                () => currentForeground,
+                hwnd => "CabinetWClass",
+                (hwnd, flags) => hwnd,
+                hwnd => true);
+
+            tracker.UpdateForegroundState((IntPtr)10, "CabinetWClass");
+            tracker.UpdateForegroundState((IntPtr)20, "CabinetWClass");
+
+            Assert.IsTrue(tracker.WasForegroundRelatedWindow((IntPtr)10));
+            Assert.IsFalse(tracker.WasForegroundRelatedWindow((IntPtr)30));
+        }
+
+        [TestMethod]
         public void TryRegisterDesktopLaunchCandidate_AddsInteractiveCandidate_AfterDesktopTransition()
         {
             ExplorerWindowTrackingState windowTracking = new ExplorerWindowTrackingState();

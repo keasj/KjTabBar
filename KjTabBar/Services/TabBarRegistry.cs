@@ -20,6 +20,41 @@ namespace KjTabBar.Services
             _tabBars[hwnd] = window;
         }
 
+        public bool RebindExplorerWindow(TabBarViewModel viewModel, IntPtr newExplorerHwnd)
+        {
+            if (viewModel == null || newExplorerHwnd == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr previousHwnd = IntPtr.Zero;
+            TabBarWindow window = null;
+
+            foreach (KeyValuePair<IntPtr, TabBarWindow> kvp in _tabBars)
+            {
+                if (ReferenceEquals(kvp.Value != null ? kvp.Value.DataContext : null, viewModel))
+                {
+                    previousHwnd = kvp.Key;
+                    window = kvp.Value;
+                    break;
+                }
+            }
+
+            if (window == null)
+            {
+                return false;
+            }
+
+            if (previousHwnd != newExplorerHwnd)
+            {
+                _tabBars.Remove(previousHwnd);
+                _tabBars[newExplorerHwnd] = window;
+            }
+
+            window.RebindExplorer(newExplorerHwnd);
+            return true;
+        }
+
         public void ClearAndCloseAll()
         {
             foreach (KeyValuePair<IntPtr, TabBarWindow> kvp in _tabBars)

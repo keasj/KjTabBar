@@ -28,13 +28,7 @@ namespace KjTabBar
                 }
                 else
                 {
-                    using (RegistryKey runKey = Registry.CurrentUser.CreateSubKey(StartupRunSubKeyPath))
-                    {
-                        if (runKey != null)
-                        {
-                            runKey.SetValue(SetupCustomActions.StartupValueName, runValue, RegistryValueKind.String);
-                        }
-                    }
+                    AppLogger.LogInfo("SetupRegistryManager", "Skipped startup Run registration because the target user SID could not be resolved.");
                 }
             }
             catch (Exception ex)

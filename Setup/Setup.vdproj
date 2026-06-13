@@ -103,7 +103,7 @@
             "Sequence" = "3:1"
             "Identifier" = "8:_E2E8DF0E_1F4F_45B4_A665_76E7300B4B0F"
             "InstallerClass" = "11:TRUE"
-            "CustomActionData" = "8:"
+            "CustomActionData" = "8:/targetdir=\"[TARGETDIR]\\\""
             }
             "{4AA51A2D-7D85-4A59-BA75-B0809FC8B380}:_89BA1CD591C04F54B7A8D59C37C13131"
             {
@@ -117,7 +117,7 @@
             "Sequence" = "3:1"
             "Identifier" = "8:_D57DF849_F73A_42E4_BAD2_279B6D25DF4D"
             "InstallerClass" = "11:TRUE"
-            "CustomActionData" = "8:"
+            "CustomActionData" = "8:/targetdir=\"[TARGETDIR]\\\""
             }
         }
         "DefaultFeature"
@@ -257,7 +257,7 @@
         "RemovePreviousVersions" = "11:TRUE"
         "DetectNewerInstalledVersion" = "11:TRUE"
         "InstallAllUsers" = "11:FALSE"
-        "ProductVersion" = "8:1.1.3"
+        "ProductVersion" = "8:1.1.5"
         "Manufacturer" = "8:KjTabBar"
         "ARPHELPTELEPHONE" = "8:"
         "ARPHELPLINK" = "8:"

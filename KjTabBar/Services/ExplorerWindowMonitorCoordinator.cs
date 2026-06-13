@@ -19,6 +19,7 @@ namespace KjTabBar.Services
         private readonly DesktopForegroundTracker _desktopForegroundTracker;
         private readonly ExplorerLaunchTracker _explorerLaunchTracker;
         private readonly Func<IntPtr, string> _getClassName;
+        private readonly Func<IntPtr, uint, IntPtr> _getAncestor;
         private readonly Func<IntPtr, NativeMethods.RECT?> _getWindowRect;
         private readonly Action<IntPtr> _moveWindowOffscreen;
         private readonly Func<DateTime> _getUtcNow;
@@ -34,6 +35,7 @@ namespace KjTabBar.Services
                   desktopForegroundTracker,
                   explorerLaunchTracker,
                   GetClassNameCore,
+                  NativeMethods.GetAncestor,
                   GetWindowRectCore,
                   MoveWindowOffscreenCore,
                   delegate { return DateTime.UtcNow; })
@@ -46,6 +48,7 @@ namespace KjTabBar.Services
             DesktopForegroundTracker desktopForegroundTracker,
             ExplorerLaunchTracker explorerLaunchTracker,
             Func<IntPtr, string> getClassName,
+            Func<IntPtr, uint, IntPtr> getAncestor,
             Func<IntPtr, NativeMethods.RECT?> getWindowRect,
             Action<IntPtr> moveWindowOffscreen,
             Func<DateTime> getUtcNow)
@@ -55,6 +58,7 @@ namespace KjTabBar.Services
             _desktopForegroundTracker = desktopForegroundTracker;
             _explorerLaunchTracker = explorerLaunchTracker;
             _getClassName = getClassName;
+            _getAncestor = getAncestor;
             _getWindowRect = getWindowRect;
             _moveWindowOffscreen = moveWindowOffscreen;
             _getUtcNow = getUtcNow;
@@ -67,41 +71,54 @@ namespace KjTabBar.Services
                 return;
             }
 
-            if (_tabBars.Contains(hwnd)) return;
-            if (_windowTracking.IgnoredWindows.Contains(hwnd)) return;
-            if (_windowTracking.HiddenPendingAbsorb.ContainsKey(hwnd)) return;
-            if (_windowTracking.AbsorbPathRetryCounts.ContainsKey(hwnd)) return;
+            IntPtr rootHwnd = GetRootWindowOrSelf(hwnd);
+            if (rootHwnd == IntPtr.Zero)
+            {
+                return;
+            }
 
-            if (_getClassName(hwnd) != "CabinetWClass") return;
+            if (_tabBars.Contains(rootHwnd)) return;
+            if (_windowTracking.IgnoredWindows.Contains(rootHwnd)) return;
+            if (_windowTracking.HiddenPendingAbsorb.ContainsKey(rootHwnd)) return;
+            if (_windowTracking.AbsorbPathRetryCounts.ContainsKey(rootHwnd)) return;
+
+            if (_getClassName(rootHwnd) != "CabinetWClass") return;
+
+            if (_windowTracking.TryConsumeExplicitIndependentLaunchRequest())
+            {
+                _windowTracking.IgnoreWindow(rootHwnd);
+                return;
+            }
 
             TabBarViewModel validTarget = findValidTarget != null ? findValidTarget() : null;
             if (validTarget == null) return;
 
-            if (_explorerLaunchTracker.IsForegroundRelatedWindow(validTarget.ExplorerHwnd) &&
+            if ((_explorerLaunchTracker.IsForegroundRelatedWindow(validTarget.ExplorerHwnd) ||
+                 _explorerLaunchTracker.WasForegroundRelatedWindow(validTarget.ExplorerHwnd)) &&
                 hasActiveControlPanelTab != null &&
                 hasActiveControlPanelTab(validTarget))
             {
-                _windowTracking.ControlPanelTabLaunchCandidates.Add(hwnd);
+                _windowTracking.ControlPanelTabLaunchCandidates.Add(rootHwnd);
             }
 
             if (!_desktopForegroundTracker.WasDesktopForegroundRecently()) return;
 
-            _windowTracking.DesktopLaunchCandidates.Add(hwnd);
+            _windowTracking.DesktopLaunchCandidates.Add(rootHwnd);
             if (_desktopForegroundTracker.WasDesktopInteractiveForegroundRecently())
             {
-                _windowTracking.DesktopInteractiveLaunchCandidates.Add(hwnd);
+                _windowTracking.DesktopInteractiveLaunchCandidates.Add(rootHwnd);
             }
 
-            NativeMethods.RECT? rect = _getWindowRect(hwnd);
+            NativeMethods.RECT? rect = _getWindowRect(rootHwnd);
             DateTime hiddenUtc = _getUtcNow();
             if (rect.HasValue)
             {
-                _windowTracking.AddHiddenPendingWindow(hwnd, rect.Value, hiddenUtc);
-                _moveWindowOffscreen(hwnd);
+                _windowTracking.AddHiddenPendingWindow(rootHwnd, rect.Value, hiddenUtc);
+                _moveWindowOffscreen(rootHwnd);
             }
             else
             {
-                _windowTracking.HiddenPendingAbsorb[hwnd] = hiddenUtc;
+                _windowTracking.HiddenPendingAbsorb[rootHwnd] = hiddenUtc;
             }
         }
 
@@ -164,6 +181,25 @@ namespace KjTabBar.Services
         private static void MoveWindowOffscreenCore(IntPtr hwnd)
         {
             NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, -32000, -32000, 0, 0, NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER);
+        }
+
+        private IntPtr GetRootWindowOrSelf(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero)
+            {
+                return IntPtr.Zero;
+            }
+
+            if (_getAncestor != null)
+            {
+                IntPtr rootHwnd = _getAncestor(hwnd, NativeMethods.GA_ROOT);
+                if (rootHwnd != IntPtr.Zero)
+                {
+                    return rootHwnd;
+                }
+            }
+
+            return hwnd;
         }
     }
 }

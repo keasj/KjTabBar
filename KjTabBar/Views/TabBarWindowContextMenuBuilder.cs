@@ -39,7 +39,7 @@ namespace KjTabBar.Views
             {
                 string path = tabVM.Path;
                 if (string.IsNullOrEmpty(path)) path = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                _explorerService.OpenInNewWindow(path);
+                _window.OpenPathInNewWindow(path);
             };
             menu.Items.Add(openInNewWindowItem);
 

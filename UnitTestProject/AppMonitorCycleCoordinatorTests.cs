@@ -33,6 +33,7 @@ namespace UnitTestProject
                 new DesktopForegroundTracker(),
                 launchTracker,
                 delegate (IntPtr hwnd) { return string.Empty; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
                 delegate (IntPtr hwnd) { return null; },
                 delegate (IntPtr hwnd) { },
                 delegate { return DateTime.UtcNow; });

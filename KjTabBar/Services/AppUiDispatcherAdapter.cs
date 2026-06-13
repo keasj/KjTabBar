@@ -9,15 +9,18 @@ namespace KjTabBar.Services
         private readonly Dispatcher _dispatcher;
         private readonly ExplorerTabTargetResolver _tabTargetResolver;
         private readonly Func<IntPtr, bool> _isForegroundRelatedWindow;
+        private readonly Func<IntPtr, bool> _wasForegroundRelatedWindow;
 
         public AppUiDispatcherAdapter(
             Dispatcher dispatcher,
             ExplorerTabTargetResolver tabTargetResolver,
-            Func<IntPtr, bool> isForegroundRelatedWindow)
+            Func<IntPtr, bool> isForegroundRelatedWindow,
+            Func<IntPtr, bool> wasForegroundRelatedWindow)
         {
             _dispatcher = dispatcher;
             _tabTargetResolver = tabTargetResolver;
             _isForegroundRelatedWindow = isForegroundRelatedWindow;
+            _wasForegroundRelatedWindow = wasForegroundRelatedWindow;
         }
 
         public TabBarViewModel FindValidTabBarTarget()
@@ -35,7 +38,8 @@ namespace KjTabBar.Services
                 return _tabTargetResolver.FindControlPanelTabBarTarget(
                     _tabTargetResolver.GetAliveTabBarViewModels(),
                     path,
-                    _isForegroundRelatedWindow);
+                    _isForegroundRelatedWindow,
+                    _wasForegroundRelatedWindow);
             }));
         }
 

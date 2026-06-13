@@ -5,17 +5,20 @@ namespace KjTabBar.Models
     internal sealed class ShellCurrentPathResolver
     {
         private readonly Func<string, string> _mapLocationNameToKnownShellPath;
+        private readonly Func<string, bool> _isControlPanelPath;
         private readonly Func<string, bool> _isControlPanelRootPath;
         private readonly Func<string, string> _normalizeShellPath;
         private readonly Func<string, bool> _isNavigablePath;
 
         public ShellCurrentPathResolver(
             Func<string, string> mapLocationNameToKnownShellPath,
+            Func<string, bool> isControlPanelPath,
             Func<string, bool> isControlPanelRootPath,
             Func<string, string> normalizeShellPath,
             Func<string, bool> isNavigablePath)
         {
             _mapLocationNameToKnownShellPath = mapLocationNameToKnownShellPath;
+            _isControlPanelPath = isControlPanelPath;
             _isControlPanelRootPath = isControlPanelRootPath;
             _normalizeShellPath = normalizeShellPath;
             _isNavigablePath = isNavigablePath;
@@ -24,12 +27,21 @@ namespace KjTabBar.Models
         public string Resolve(string locationUrl, string locationName, string folderPath)
         {
             string mappedControlPanelPath = _mapLocationNameToKnownShellPath(locationName);
+            string normalizedFolderPath = _normalizeShellPath(folderPath);
+            if (!string.IsNullOrEmpty(mappedControlPanelPath) &&
+                _isControlPanelRootPath(mappedControlPanelPath) &&
+                !string.IsNullOrEmpty(normalizedFolderPath) &&
+                _isControlPanelPath(normalizedFolderPath) &&
+                !_isControlPanelRootPath(normalizedFolderPath))
+            {
+                return normalizedFolderPath;
+            }
+
             if (!string.IsNullOrEmpty(mappedControlPanelPath) && _isControlPanelRootPath(mappedControlPanelPath))
             {
                 return mappedControlPanelPath;
             }
 
-            string normalizedFolderPath = _normalizeShellPath(folderPath);
             if (!string.IsNullOrEmpty(normalizedFolderPath))
             {
                 return normalizedFolderPath;

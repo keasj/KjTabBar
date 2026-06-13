@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using Microsoft.Win32;
@@ -14,6 +14,7 @@ namespace KjTabBar.Models
         public string HomeFolderPath { get; } = "::{679F85CB-0220-4080-B29B-5540CC05AAB6}";
         public string ProgramsAndFeaturesPath { get; } = "::{7B81BE6A-CE2B-4676-A29E-EB907A5126C5}";
         public string PowerOptionsPath { get; } = "::{025A5937-A6BE-4686-A844-36FE4BEC8B6D}";
+        private const string ControlPanelFolderShellPath = "shell:ControlPanelFolder";
         private const string ControlPanelItemNavigationPrefix = "::{26EE0668-A00A-44D7-9371-BEB064C98683}\\0\\";
 
         private readonly ShellLocationNameResolver _shellLocationNameResolver;
@@ -100,6 +101,7 @@ namespace KjTabBar.Models
                     ShellWindowComInterop.ReleaseComObjectSafe),
                 _shellCurrentPathResolver = new ShellCurrentPathResolver(
                     MapLocationNameToKnownShellPath,
+                    IsControlPanelPath,
                     IsControlPanelRootPath,
                     NormalizeShellPath,
                     IsNavigablePath),
@@ -337,17 +339,53 @@ namespace KjTabBar.Models
             return GetNavigableShellPath(path);
         }
 
-        public void OpenInNewWindow(string path)
+        internal bool ShouldLaunchPlainExplorerForNewWindow(string path)
         {
-            if (string.IsNullOrEmpty(path)) return;
+            return IsControlPanelRootPath(path);
+        }
+
+        internal string GetNewWindowNavigationPath(string path)
+        {
+            if (ShouldLaunchPlainExplorerForNewWindow(path))
+            {
+                return ControlPanelFolderShellPath;
+            }
+
+            return path;
+        }
+
+        public bool OpenInNewWindow(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
             try
             {
+                if (ShouldLaunchPlainExplorerForNewWindow(path))
+                {
+                    string navigationPath = GetNewWindowNavigationPath(path);
+                    System.Diagnostics.Process controlPanelExplorerProcess = System.Diagnostics.Process.Start("explorer.exe", "\"" + navigationPath + "\"");
+                    if (controlPanelExplorerProcess != null)
+                    {
+                        controlPanelExplorerProcess.Dispose();
+                        return true;
+                    }
+
+                    AppLogger.LogInfo("ExplorerManager", "Failed to open a new Explorer window for the requested Control Panel root path.");
+                    System.Windows.MessageBox.Show(
+                        "別ウィンドウでコントロール パネルを開く操作に失敗しました。",
+                        "起動エラー",
+                        System.Windows.MessageBoxButton.OK,
+                        System.Windows.MessageBoxImage.Error);
+                    return false;
+                }
+
                 string externalPath = GetExternalExplorerLaunchPath(path);
                 System.Diagnostics.Process process = System.Diagnostics.Process.Start("explorer.exe", "\"" + externalPath + "\"");
                 if (process != null)
                 {
                     process.Dispose();
                 }
+
+                return true;
             }
             catch (Exception ex)
             {
@@ -357,6 +395,7 @@ namespace KjTabBar.Models
                     "起動エラー",
                     System.Windows.MessageBoxButton.OK,
                     System.Windows.MessageBoxImage.Error);
+                return false;
             }
         }
     }

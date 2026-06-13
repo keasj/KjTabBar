@@ -54,6 +54,7 @@ namespace UnitTestProject
             ShellPathNormalizer normalizer = CreateNormalizer();
             Assert.IsFalse(normalizer.IsControlPanelRootPath("::{20D04FE0-3AEA-1069-A2D8-08002B30309D}"));
             Assert.IsFalse(normalizer.IsControlPanelRootPath(@"C:\Windows"));
+            Assert.IsFalse(normalizer.IsControlPanelRootPath(PowerOptionsPath));
             Assert.IsFalse(normalizer.IsControlPanelRootPath(""));
             Assert.IsFalse(normalizer.IsControlPanelRootPath(null));
         }
@@ -92,6 +93,22 @@ namespace UnitTestProject
         {
             ShellPathNormalizer normalizer = CreateNormalizer();
             Assert.AreEqual("::{20D04FE0-3AEA-1069-A2D8-08002B30309D}", normalizer.NormalizeShellPath("::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\\"));
+        }
+
+        [TestMethod]
+        public void NormalizeShellPath_Resolves_ControlPanel_Cpl_Text()
+        {
+            ShellPathNormalizer normalizer = CreateNormalizer();
+            Assert.AreEqual(PowerOptionsPath, normalizer.NormalizeShellPath(@"C:\Windows\System32\powercfg.cpl"));
+            Assert.AreEqual(ProgramsAndFeaturesPath, normalizer.NormalizeShellPath(@"C:\Windows\System32\appwiz.cpl"));
+        }
+
+        [TestMethod]
+        public void NormalizeShellPath_Resolves_ControlPanel_Canonical_Name_Text()
+        {
+            ShellPathNormalizer normalizer = CreateNormalizer();
+            Assert.AreEqual(PowerOptionsPath, normalizer.NormalizeShellPath("control.exe /name Microsoft.PowerOptions"));
+            Assert.AreEqual(ProgramsAndFeaturesPath, normalizer.NormalizeShellPath("control.exe /name Microsoft.ProgramsAndFeatures"));
         }
 
         [TestMethod]
@@ -136,6 +153,16 @@ namespace UnitTestProject
             Assert.IsNotNull(path);
             string normalizedPath = normalizer.NormalizeShellPath(path);
             Assert.AreEqual("::{7B81BE6A-CE2B-4676-A29E-EB907A5126C5}", normalizedPath.ToUpperInvariant());
+        }
+
+        [TestMethod]
+        public void FindControlPanelItemPathByTitle_Finds_PowerOptions()
+        {
+            ShellPathNormalizer normalizer = CreateNormalizer();
+            string path = normalizer.FindControlPanelItemPathByTitle("Power Options");
+            Assert.IsNotNull(path);
+            string normalizedPath = normalizer.NormalizeShellPath(path);
+            Assert.AreEqual("::{025A5937-A6BE-4686-A844-36FE4BEC8B6D}", normalizedPath.ToUpperInvariant());
         }
 
         [TestMethod]

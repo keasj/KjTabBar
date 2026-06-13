@@ -17,7 +17,9 @@ namespace KjTabBar.Services
         private readonly Func<IntPtr, string> _getWindowTitle;
         private readonly Action<IntPtr> _showExplorerWindow;
         private readonly Action<IntPtr> _forceSetForegroundWindow;
+        private readonly Action<IntPtr, NativeMethods.RECT> _moveExplorerWindow;
         private readonly Action<IntPtr> _postCloseWindow;
+        private readonly Func<TabBarViewModel, IntPtr, bool> _rebindExplorerWindow;
         private readonly Func<TabBarWindow> _createTabBarWindow;
         private readonly Action<TabBarWindow> _showTabBarWindow;
 
@@ -32,6 +34,28 @@ namespace KjTabBar.Services
                   GetWindowTitleCore,
                   delegate (IntPtr hwnd) { NativeMethods.ShowWindow(hwnd, NativeMethods.SW_SHOW); },
                   NativeMethods.ForceSetForegroundWindow,
+                  MoveExplorerWindowCore,
+                  DefaultRebindExplorerWindow,
+                  delegate (IntPtr hwnd) { NativeMethods.PostMessage(hwnd, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero); },
+                  delegate { return new TabBarWindow(); },
+                  delegate (TabBarWindow window) { window.Show(); })
+        {
+        }
+
+        internal ExplorerWindowInteractionService(
+            IExplorerService explorerService,
+            ExplorerWindowTrackingState windowTracking,
+            TabPersistenceService tabPersistence,
+            Func<TabBarViewModel, IntPtr, bool> rebindExplorerWindow)
+            : this(
+                  explorerService,
+                  windowTracking,
+                  tabPersistence,
+                  GetWindowTitleCore,
+                  delegate (IntPtr hwnd) { NativeMethods.ShowWindow(hwnd, NativeMethods.SW_SHOW); },
+                  NativeMethods.ForceSetForegroundWindow,
+                  MoveExplorerWindowCore,
+                  rebindExplorerWindow ?? DefaultRebindExplorerWindow,
                   delegate (IntPtr hwnd) { NativeMethods.PostMessage(hwnd, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero); },
                   delegate { return new TabBarWindow(); },
                   delegate (TabBarWindow window) { window.Show(); })
@@ -45,6 +69,8 @@ namespace KjTabBar.Services
             Func<IntPtr, string> getWindowTitle,
             Action<IntPtr> showExplorerWindow,
             Action<IntPtr> forceSetForegroundWindow,
+            Action<IntPtr, NativeMethods.RECT> moveExplorerWindow,
+            Func<TabBarViewModel, IntPtr, bool> rebindExplorerWindow,
             Action<IntPtr> postCloseWindow,
             Func<TabBarWindow> createTabBarWindow,
             Action<TabBarWindow> showTabBarWindow)
@@ -55,12 +81,44 @@ namespace KjTabBar.Services
             _getWindowTitle = getWindowTitle;
             _showExplorerWindow = showExplorerWindow;
             _forceSetForegroundWindow = forceSetForegroundWindow;
+            _moveExplorerWindow = moveExplorerWindow;
+            _rebindExplorerWindow = rebindExplorerWindow;
             _postCloseWindow = postCloseWindow;
             _createTabBarWindow = createTabBarWindow;
             _showTabBarWindow = showTabBarWindow;
         }
 
-        public void CreateNewTabBar(IntPtr hwnd, IUserSettings userSettings, Action<IntPtr, TabBarWindow> registerTabBar)
+        internal ExplorerWindowInteractionService(
+            IExplorerService explorerService,
+            ExplorerWindowTrackingState windowTracking,
+            TabPersistenceService tabPersistence,
+            Func<IntPtr, string> getWindowTitle,
+            Action<IntPtr> showExplorerWindow,
+            Action<IntPtr> forceSetForegroundWindow,
+            Action<IntPtr> postCloseWindow,
+            Func<TabBarWindow> createTabBarWindow,
+            Action<TabBarWindow> showTabBarWindow)
+            : this(
+                  explorerService,
+                  windowTracking,
+                  tabPersistence,
+                  getWindowTitle,
+                  showExplorerWindow,
+                  forceSetForegroundWindow,
+                  MoveExplorerWindowCore,
+                  DefaultRebindExplorerWindow,
+                  postCloseWindow,
+                  createTabBarWindow,
+                  showTabBarWindow)
+        {
+        }
+
+        public void CreateNewTabBar(
+            IntPtr hwnd,
+            IUserSettings userSettings,
+            Action<IntPtr, TabBarWindow> registerTabBar,
+            string initialPath,
+            bool useInitialPathOnly)
         {
             if (_windowTracking.HiddenPendingAbsorb.Remove(hwnd))
             {
@@ -68,10 +126,11 @@ namespace KjTabBar.Services
             }
 
             TabBarViewModel viewModel = new TabBarViewModel(hwnd, userSettings, _explorerService);
-            _tabPersistence.LoadTabsTo(viewModel);
+            InitializeTabsForNewWindow(viewModel, initialPath, useInitialPathOnly);
 
             TabBarWindow tabBarWindow = _createTabBarWindow();
             tabBarWindow.ExplorerService = _explorerService;
+            tabBarWindow.WindowTrackingState = _windowTracking;
             tabBarWindow.DataContext = viewModel;
             _showTabBarWindow(tabBarWindow);
 
@@ -79,6 +138,38 @@ namespace KjTabBar.Services
             {
                 registerTabBar(hwnd, tabBarWindow);
             }
+        }
+
+        internal void InitializeTabsForNewWindow(TabBarViewModel viewModel, string initialPath, bool useInitialPathOnly)
+        {
+            if (viewModel == null)
+            {
+                return;
+            }
+
+            bool loadedSavedTabs = _tabPersistence.LoadTabsTo(viewModel);
+
+            if (string.IsNullOrEmpty(initialPath))
+            {
+                return;
+            }
+
+            bool allowSpecialPath = _explorerService.IsControlPanelPath(initialPath);
+
+            TabItemViewModel targetTab = viewModel.FindTabByPath(initialPath);
+            if (targetTab != null)
+            {
+                viewModel.SelectTab(targetTab);
+                return;
+            }
+
+            if (loadedSavedTabs || useInitialPathOnly)
+            {
+                viewModel.InsertTabWithPath(initialPath, viewModel.Tabs.Count, allowSpecialPath);
+                return;
+            }
+
+            viewModel.RestoreTabs(new string[] { initialPath });
         }
 
         public string GetDesktopVirtualPathFromWindowTitle(IntPtr explorerHwnd)
@@ -102,9 +193,16 @@ namespace KjTabBar.Services
             TabBarViewModel targetViewModel,
             string path,
             bool allowSpecialPath,
+            bool isControlPanelPath,
             Action<IntPtr> ignoreExplorerWindow)
         {
-            if (!allowSpecialPath && !IsPathTabCompatible(path))
+            string normalizedPath = _explorerService.NormalizeKnownPath(path);
+            string targetPath = string.IsNullOrEmpty(normalizedPath) ? path : normalizedPath;
+            bool effectiveControlPanelPath = isControlPanelPath || _explorerService.IsControlPanelPath(targetPath);
+            bool hasReusableControlPanelTab = effectiveControlPanelPath && FindAnyControlPanelTab(targetViewModel) != null;
+            bool effectiveAllowSpecialPath = allowSpecialPath || hasReusableControlPanelTab;
+
+            if (!effectiveAllowSpecialPath && !IsPathTabCompatible(targetPath))
             {
                 if (ignoreExplorerWindow != null)
                 {
@@ -113,13 +211,18 @@ namespace KjTabBar.Services
                 return false;
             }
 
+            if (effectiveAllowSpecialPath &&
+                effectiveControlPanelPath &&
+                TryRebindControlPanelTab(newExplorerHwnd, targetViewModel, targetPath))
+            {
+                return true;
+            }
+
             List<string> selectedItems = _explorerService.GetSelectedItems(newExplorerHwnd);
             int insertIndex = targetViewModel.Tabs.Count;
-            targetViewModel.InsertTabWithPathAndSelect(path, insertIndex, selectedItems, allowSpecialPath);
+            targetViewModel.InsertTabWithPathAndSelect(targetPath, insertIndex, selectedItems, effectiveAllowSpecialPath);
 
-            _forceSetForegroundWindow(targetViewModel.ExplorerHwnd);
-            _windowTracking.MarkAbsorbedWindow(newExplorerHwnd);
-            _postCloseWindow(newExplorerHwnd);
+            FinalizeAbsorbedWindow(newExplorerHwnd, targetViewModel.ExplorerHwnd);
 
             return true;
         }
@@ -142,6 +245,132 @@ namespace KjTabBar.Services
             }
 
             return true;
+        }
+
+        private bool TryRebindControlPanelTab(IntPtr newExplorerHwnd, TabBarViewModel targetViewModel, string path)
+        {
+            if (targetViewModel == null || string.IsNullOrEmpty(path) || newExplorerHwnd == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            TabItemViewModel reusableTab = targetViewModel.FindTabByPath(path);
+            if (reusableTab == null)
+            {
+                TabItemViewModel activeTab = targetViewModel.ActiveTab;
+                reusableTab = activeTab;
+                if (reusableTab == null || string.IsNullOrEmpty(reusableTab.Path) || !_explorerService.IsControlPanelPath(reusableTab.Path))
+                {
+                    reusableTab = FindAnyControlPanelTab(targetViewModel);
+                    if (reusableTab == null)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            IntPtr previousExplorerHwnd = targetViewModel.ExplorerHwnd;
+            NativeMethods.RECT previousExplorerRect = _explorerService.GetExplorerWindowRect(previousExplorerHwnd);
+            if (_windowTracking.HiddenPendingAbsorb.ContainsKey(newExplorerHwnd))
+            {
+                _windowTracking.RestoreHiddenWindow(newExplorerHwnd);
+                _showExplorerWindow(newExplorerHwnd);
+            }
+
+            AlignExplorerWindowToPreviousRect(newExplorerHwnd, previousExplorerRect);
+
+            if (_rebindExplorerWindow == null || !_rebindExplorerWindow(targetViewModel, newExplorerHwnd))
+            {
+                return false;
+            }
+
+            if (!string.Equals(reusableTab.Path, path, StringComparison.OrdinalIgnoreCase))
+            {
+                string title = _explorerService.GetFolderName(path);
+                reusableTab.Path = path;
+                reusableTab.BaseTitle = string.IsNullOrEmpty(title) ? _explorerService.GetLocalizedHomeTitle() : title;
+                reusableTab.Title = reusableTab.BaseTitle;
+                targetViewModel.UpdateTabTitles();
+            }
+
+            targetViewModel.SelectTab(reusableTab);
+
+            _forceSetForegroundWindow(newExplorerHwnd);
+
+            if (previousExplorerHwnd != IntPtr.Zero && previousExplorerHwnd != newExplorerHwnd)
+            {
+                _windowTracking.IgnoreWindow(previousExplorerHwnd);
+                _postCloseWindow(previousExplorerHwnd);
+            }
+
+            return true;
+        }
+
+        private TabItemViewModel FindAnyControlPanelTab(TabBarViewModel targetViewModel)
+        {
+            if (targetViewModel == null)
+            {
+                return null;
+            }
+
+            for (int i = 0; i < targetViewModel.Tabs.Count; i++)
+            {
+                TabItemViewModel tab = targetViewModel.Tabs[i];
+                if (tab == null || string.IsNullOrEmpty(tab.Path))
+                {
+                    continue;
+                }
+
+                if (_explorerService.IsControlPanelPath(tab.Path))
+                {
+                    return tab;
+                }
+            }
+
+            return null;
+        }
+
+        private void FinalizeAbsorbedWindow(IntPtr newExplorerHwnd, IntPtr targetExplorerHwnd)
+        {
+            _forceSetForegroundWindow(targetExplorerHwnd);
+            _windowTracking.MarkAbsorbedWindow(newExplorerHwnd);
+            _postCloseWindow(newExplorerHwnd);
+        }
+
+        private static bool DefaultRebindExplorerWindow(TabBarViewModel viewModel, IntPtr newExplorerHwnd)
+        {
+            if (viewModel == null || newExplorerHwnd == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            viewModel.SetExplorerHwnd(newExplorerHwnd);
+            return true;
+        }
+
+        private void AlignExplorerWindowToPreviousRect(IntPtr explorerHwnd, NativeMethods.RECT previousExplorerRect)
+        {
+            if (_moveExplorerWindow == null || explorerHwnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            if (previousExplorerRect.Width <= 0 || previousExplorerRect.Height <= 0)
+            {
+                return;
+            }
+
+            _moveExplorerWindow(explorerHwnd, previousExplorerRect);
+        }
+
+        private static void MoveExplorerWindowCore(IntPtr explorerHwnd, NativeMethods.RECT rect)
+        {
+            if (explorerHwnd == IntPtr.Zero || rect.Width <= 0 || rect.Height <= 0)
+            {
+                return;
+            }
+
+            NativeMethods.MoveWindow(explorerHwnd, rect.Left, rect.Top, rect.Width, rect.Height, false);
         }
 
         private static string GetWindowTitleCore(IntPtr hwnd)

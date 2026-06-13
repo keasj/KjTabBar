@@ -39,5 +39,27 @@ namespace UnitTestProject
 
             Assert.IsTrue(resolver.IsControlPanelRootName("コントロール パネル", "コントロール パネル"));
         }
+
+        [TestMethod]
+        public void MapLocationNameToKnownShellPath_ReturnsPowerOptions_From_WindowTitleSuffix()
+        {
+            ShellLocationNameResolver resolver = new ShellLocationNameResolver(
+                "cp-root",
+                "home",
+                "programs",
+                "power",
+                delegate (string title) { return title == "電源オプション" ? "power" : null; });
+
+            string mapped = resolver.MapLocationNameToKnownShellPath(
+                "電源オプション - コントロール パネル",
+                "コントロール パネル",
+                "ホーム",
+                "ネットワーク",
+                "ごみ箱",
+                "PC");
+
+            Assert.AreEqual("power", mapped);
+        }
+
     }
 }

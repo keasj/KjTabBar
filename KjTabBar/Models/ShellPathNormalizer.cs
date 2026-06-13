@@ -166,6 +166,13 @@ namespace KjTabBar.Models
                 return false;
             }
 
+            string normalizedNamespacePath = NormalizeBasicShellNamespacePath(path);
+            string lastGuidToken = GetLastGuidToken(normalizedNamespacePath);
+            if (string.IsNullOrEmpty(lastGuidToken) || !IsControlPanelRootGuid(lastGuidToken))
+            {
+                return false;
+            }
+
             if (ContainsNonControlPanelRootGuid(lowerPath))
             {
                 return false;
@@ -249,11 +256,9 @@ namespace KjTabBar.Models
             if (string.IsNullOrEmpty(path)) return null;
 
             string trimmed = path.Trim().TrimEnd('\\');
+            string compactTrimmed = ShellLocationNameResolver.CompactForComparison(trimmed.ToLowerInvariant());
             if (trimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
             {
-                string lowerTrimmed = trimmed.ToLowerInvariant();
-                string compactTrimmed = ShellLocationNameResolver.CompactForComparison(lowerTrimmed);
-
                 if (compactTrimmed.Equals("shell:home") ||
                     compactTrimmed.Equals("shell:homefolder") ||
                     compactTrimmed.StartsWith("shell:quickaccess"))
@@ -277,6 +282,16 @@ namespace KjTabBar.Models
                 {
                     return "::{645FF040-5081-101B-9F08-00AA002F954E}";
                 }
+            }
+
+            if (compactTrimmed.Contains("microsoft.programsandfeatures") || compactTrimmed.Contains("appwiz.cpl"))
+            {
+                return _programsAndFeaturesPath;
+            }
+
+            if (compactTrimmed.Contains("microsoft.poweroptions") || compactTrimmed.Contains("powercfg.cpl"))
+            {
+                return _powerOptionsPath;
             }
 
             return NormalizeShellNamespacePath(trimmed);
@@ -650,7 +665,7 @@ namespace KjTabBar.Models
 
                     AddControlPanelItemTitleMapEntry(titleMap, "Programs and Features", _programsAndFeaturesPath);
                     AddControlPanelItemTitleMapEntry(titleMap, "プログラムと機能", _programsAndFeaturesPath);
-                    AddControlPanelItemTitleMapEntry(titleMap, "Power Options", _programsAndFeaturesPath);
+                    AddControlPanelItemTitleMapEntry(titleMap, "Power Options", _powerOptionsPath);
                     AddControlPanelItemTitleMapEntry(titleMap, "電源オプション", _powerOptionsPath);
                     AddControlPanelItemPathEntry(itemPaths, _programsAndFeaturesPath);
                     AddControlPanelItemPathEntry(itemPaths, _powerOptionsPath);

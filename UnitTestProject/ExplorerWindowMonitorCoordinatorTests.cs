@@ -34,6 +34,7 @@ namespace UnitTestProject
                 foregroundTracker,
                 launchTracker,
                 delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
                 delegate (IntPtr hwnd) { return new NativeMethods.RECT(); },
                 delegate (IntPtr hwnd) { movedOffscreen = true; },
                 delegate { return new DateTime(2026, 6, 2, 0, 0, 0, DateTimeKind.Utc); });
@@ -56,6 +57,89 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void HandleShowEvent_Ignores_ExplicitIndependentLaunchRequest()
+        {
+            TabBarRegistry tabBars = new TabBarRegistry();
+            ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState();
+            DesktopForegroundTracker foregroundTracker = new DesktopForegroundTracker();
+            ExplorerLaunchTracker launchTracker = new ExplorerLaunchTracker(
+                foregroundTracker,
+                trackingState,
+                delegate (IntPtr hwnd) { return false; },
+                delegate (IntPtr hwnd) { return false; },
+                delegate { return (IntPtr)100; },
+                delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return true; });
+
+            bool movedOffscreen = false;
+            ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                tabBars,
+                trackingState,
+                foregroundTracker,
+                launchTracker,
+                delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return new NativeMethods.RECT(); },
+                delegate (IntPtr hwnd) { movedOffscreen = true; },
+                delegate { return new DateTime(2026, 6, 2, 0, 0, 0, DateTimeKind.Utc); });
+
+            trackingState.RegisterExplicitIndependentLaunchRequest();
+
+            coordinator.HandleShowEvent(
+                (IntPtr)210,
+                delegate { return new TabBarViewModel((IntPtr)100, new MockUserSettings(), new MockExplorerService()); },
+                delegate (TabBarViewModel vm) { return true; });
+
+            Assert.IsTrue(trackingState.IgnoredWindows.Contains((IntPtr)210));
+            Assert.IsFalse(trackingState.ControlPanelTabLaunchCandidates.Contains((IntPtr)210));
+            Assert.IsFalse(trackingState.DesktopLaunchCandidates.Contains((IntPtr)210));
+            Assert.IsFalse(trackingState.HiddenPendingAbsorb.ContainsKey((IntPtr)210));
+            Assert.IsFalse(movedOffscreen);
+        }
+
+        [TestMethod]
+        public void HandleShowEvent_RegistersControlPanelCandidate_WhenManagedWindowWasPreviousForeground()
+        {
+            TabBarRegistry tabBars = new TabBarRegistry();
+            ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState();
+            DesktopForegroundTracker foregroundTracker = new DesktopForegroundTracker();
+            IntPtr currentForeground = (IntPtr)200;
+            ExplorerLaunchTracker launchTracker = new ExplorerLaunchTracker(
+                foregroundTracker,
+                trackingState,
+                delegate (IntPtr hwnd) { return false; },
+                delegate (IntPtr hwnd) { return false; },
+                delegate { return currentForeground; },
+                delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return true; });
+
+            ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                tabBars,
+                trackingState,
+                foregroundTracker,
+                launchTracker,
+                delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return new NativeMethods.RECT(); },
+                delegate (IntPtr hwnd) { },
+                delegate { return new DateTime(2026, 6, 2, 0, 0, 0, DateTimeKind.Utc); });
+
+            foregroundTracker.Update((IntPtr)100, "CabinetWClass");
+            foregroundTracker.Update((IntPtr)200, "CabinetWClass");
+
+            TabBarViewModel validTarget = new TabBarViewModel((IntPtr)100, new MockUserSettings(), new MockExplorerService());
+
+            coordinator.HandleShowEvent(
+                (IntPtr)220,
+                delegate { return validTarget; },
+                delegate (TabBarViewModel vm) { return true; });
+
+            Assert.IsTrue(trackingState.ControlPanelTabLaunchCandidates.Contains((IntPtr)220));
+        }
+
+        [TestMethod]
         public void PrepareProcessRequests_ReevaluatesIgnoredWindow_WhenNoValidTarget()
         {
             ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState();
@@ -67,6 +151,7 @@ namespace UnitTestProject
                 new DesktopForegroundTracker(),
                 CreateLaunchTracker(trackingState),
                 delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
                 delegate (IntPtr hwnd) { return null; },
                 delegate (IntPtr hwnd) { },
                 delegate { return DateTime.UtcNow; });
@@ -82,6 +167,33 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void PrepareProcessRequests_DoesNotReevaluateIgnoredWindow_WhenOnlyControlPanelCandidateArrivesLater()
+        {
+            ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState();
+            trackingState.IgnoredWindows.Add((IntPtr)11);
+            trackingState.ControlPanelTabLaunchCandidates.Add((IntPtr)11);
+
+            ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                new TabBarRegistry(),
+                trackingState,
+                new DesktopForegroundTracker(),
+                CreateLaunchTracker(trackingState),
+                delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return null; },
+                delegate (IntPtr hwnd) { },
+                delegate { return DateTime.UtcNow; });
+
+            List<ExplorerWindowProcessRequest> requests = coordinator.PrepareProcessRequests(
+                new List<IntPtr> { (IntPtr)11 },
+                delegate { return new TabBarViewModel((IntPtr)100, new MockUserSettings(), new MockExplorerService()); });
+
+            Assert.AreEqual(0, requests.Count);
+            Assert.IsTrue(trackingState.IgnoredWindows.Contains((IntPtr)11));
+            Assert.IsFalse(trackingState.ProcessingExplorerWindows.Contains((IntPtr)11));
+        }
+
+        [TestMethod]
         public void PrepareProcessRequests_SkipsManagedAndAlreadyProcessingWindows()
         {
             TabBarRegistry tabBars = new TabBarRegistry();
@@ -94,6 +206,7 @@ namespace UnitTestProject
                 new DesktopForegroundTracker(),
                 CreateLaunchTracker(trackingState),
                 delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
                 delegate (IntPtr hwnd) { return null; },
                 delegate (IntPtr hwnd) { },
                 delegate { return DateTime.UtcNow; });
@@ -103,6 +216,67 @@ namespace UnitTestProject
                 delegate { return null; });
 
             Assert.AreEqual(0, requests.Count);
+        }
+
+        [TestMethod]
+        public void HandleShowEvent_UsesRootWindow_WhenChildWindowShowIsReported()
+        {
+            TabBarRegistry tabBars = new TabBarRegistry();
+            ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState();
+            DesktopForegroundTracker foregroundTracker = new DesktopForegroundTracker();
+            ExplorerLaunchTracker launchTracker = new ExplorerLaunchTracker(
+                foregroundTracker,
+                trackingState,
+                delegate (IntPtr hwnd) { return false; },
+                delegate (IntPtr hwnd) { return false; },
+                delegate { return (IntPtr)100; },
+                delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return true; });
+
+            IntPtr movedHwnd = IntPtr.Zero;
+            ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                tabBars,
+                trackingState,
+                foregroundTracker,
+                launchTracker,
+                delegate (IntPtr hwnd)
+                {
+                    if (hwnd == (IntPtr)300)
+                    {
+                        return "CabinetWClass";
+                    }
+
+                    return "DirectUIHWND";
+                },
+                delegate (IntPtr hwnd, uint flags)
+                {
+                    if (hwnd == (IntPtr)301)
+                    {
+                        return (IntPtr)300;
+                    }
+
+                    return hwnd;
+                },
+                delegate (IntPtr hwnd) { return new NativeMethods.RECT(); },
+                delegate (IntPtr hwnd) { movedHwnd = hwnd; },
+                delegate { return new DateTime(2026, 6, 12, 0, 0, 0, DateTimeKind.Utc); });
+
+            foregroundTracker.Update((IntPtr)50, "SHELLDLL_DefView");
+            foregroundTracker.Update((IntPtr)100, "CabinetWClass");
+
+            TabBarViewModel validTarget = new TabBarViewModel((IntPtr)100, new MockUserSettings(), new MockExplorerService());
+
+            coordinator.HandleShowEvent(
+                (IntPtr)301,
+                delegate { return validTarget; },
+                delegate (TabBarViewModel vm) { return true; });
+
+            Assert.IsTrue(trackingState.ControlPanelTabLaunchCandidates.Contains((IntPtr)300));
+            Assert.IsTrue(trackingState.DesktopLaunchCandidates.Contains((IntPtr)300));
+            Assert.IsTrue(trackingState.HiddenPendingAbsorb.ContainsKey((IntPtr)300));
+            Assert.AreEqual((IntPtr)300, movedHwnd);
+            Assert.IsFalse(trackingState.ControlPanelTabLaunchCandidates.Contains((IntPtr)301));
         }
 
         private static ExplorerLaunchTracker CreateLaunchTracker(ExplorerWindowTrackingState trackingState)

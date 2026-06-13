@@ -6,6 +6,9 @@ namespace KjTabBar.Models
 {
     internal sealed class ExplorerWindowTrackingState
     {
+        private static readonly TimeSpan ExplicitIndependentLaunchTimeout = TimeSpan.FromSeconds(5);
+        private readonly List<DateTime> _explicitIndependentLaunchRequests = new List<DateTime>();
+
         public HashSet<IntPtr> IgnoredWindows { get; private set; }
         public HashSet<IntPtr> ProcessingExplorerWindows { get; private set; }
         public Dictionary<IntPtr, int> AbsorbPathRetryCounts { get; private set; }
@@ -86,6 +89,35 @@ namespace KjTabBar.Models
             ClearAbsorptionState(hwnd);
             IgnoredWindows.Add(hwnd);
         }
+
+        public void RegisterExplicitIndependentLaunchRequest()
+        {
+            _explicitIndependentLaunchRequests.Add(DateTime.UtcNow);
+        }
+
+        public void CancelExplicitIndependentLaunchRequest()
+        {
+            RemoveExpiredExplicitIndependentLaunchRequests(DateTime.UtcNow);
+            if (_explicitIndependentLaunchRequests.Count <= 0)
+            {
+                return;
+            }
+
+            _explicitIndependentLaunchRequests.RemoveAt(_explicitIndependentLaunchRequests.Count - 1);
+        }
+
+        public bool TryConsumeExplicitIndependentLaunchRequest()
+        {
+            RemoveExpiredExplicitIndependentLaunchRequests(DateTime.UtcNow);
+            if (_explicitIndependentLaunchRequests.Count <= 0)
+            {
+                return false;
+            }
+
+            _explicitIndependentLaunchRequests.RemoveAt(0);
+            return true;
+        }
+
         public void MarkAbsorbedWindow(IntPtr hwnd)
         {
             if (hwnd == IntPtr.Zero)
@@ -164,6 +196,19 @@ namespace KjTabBar.Models
 
             HiddenPendingAbsorb.Clear();
             HiddenOriginalRects.Clear();
+        }
+
+        private void RemoveExpiredExplicitIndependentLaunchRequests(DateTime nowUtc)
+        {
+            while (_explicitIndependentLaunchRequests.Count > 0)
+            {
+                if ((nowUtc - _explicitIndependentLaunchRequests[0]) <= ExplicitIndependentLaunchTimeout)
+                {
+                    break;
+                }
+
+                _explicitIndependentLaunchRequests.RemoveAt(0);
+            }
         }
 
         private static void RemoveClosedWindows(HashSet<IntPtr> collection, List<IntPtr> explorerWindows)

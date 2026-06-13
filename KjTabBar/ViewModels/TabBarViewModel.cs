@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -31,6 +31,16 @@ namespace KjTabBar.ViewModels
         public IntPtr ExplorerHwnd
         {
             get { return _explorerHwnd; }
+        }
+
+        internal void SetExplorerHwnd(IntPtr explorerHwnd)
+        {
+            if (explorerHwnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            _explorerHwnd = explorerHwnd;
         }
 
         internal TabNavigationStateTracker NavigationTracker

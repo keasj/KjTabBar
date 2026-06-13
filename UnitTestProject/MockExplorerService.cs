@@ -24,6 +24,10 @@ namespace UnitTestProject
         public Func<string, bool> IsControlPanelPathFunc { get; set; }
         public Func<string, bool> IsControlPanelRootPathFunc { get; set; }
         public Func<string, bool> IsTransientShellPlaceholderPathFunc { get; set; }
+        public Func<string, string> NormalizeKnownPathFunc { get; set; }
+        public Func<string, string> NormalizeShellNamespacePathFunc { get; set; }
+        public bool OpenInNewWindowResult { get; set; } = true;
+        public string OpenedInNewWindowPath { get; private set; }
 
         public bool IsControlPanelPath(string path) => IsControlPanelPathFunc != null ? IsControlPanelPathFunc(path) : path == AllControlPanelPath;
         public bool IsControlPanelRootPath(string path) => IsControlPanelRootPathFunc != null ? IsControlPanelRootPathFunc(path) : false;
@@ -31,9 +35,13 @@ namespace UnitTestProject
         public bool IsTransientShellPlaceholderPath(string path) => IsTransientShellPlaceholderPathFunc != null ? IsTransientShellPlaceholderPathFunc(path) : false;
         public string MapLocationNameToKnownShellPath(string locationName) => locationName;
         public virtual bool Navigate(IntPtr explorerHwnd, string path) => true;
-        public string NormalizeKnownPath(string path) => path;
-        public string NormalizeShellNamespacePath(string path) => path;
-        public void OpenInNewWindow(string path) { }
+        public string NormalizeKnownPath(string path) => NormalizeKnownPathFunc != null ? NormalizeKnownPathFunc(path) : path;
+        public string NormalizeShellNamespacePath(string path) => NormalizeShellNamespacePathFunc != null ? NormalizeShellNamespacePathFunc(path) : path;
+        public bool OpenInNewWindow(string path)
+        {
+            OpenedInNewWindowPath = path;
+            return OpenInNewWindowResult;
+        }
         public void CreateShortcuts(string[] sourceFiles, string destinationFolder, IntPtr targetWindowHandle) { }
         public void CreateSymbolicLinks(string[] sourceFiles, string destinationFolder, IntPtr targetWindowHandle) { }
         public void ReleaseCachedComObjects() { }

@@ -13,6 +13,7 @@ Instead of hooking into or modifying Explorer itself, it places an independent t
   - Multiple Explorer windows are managed across the system and consolidated into a single tab bar window.
 - **Drag and drop support**
   - Reorder tabs with left-button drag
+  - Drag a tab out of the tab bar and drop it outside the Explorer window to move that tab into a new window and close the source tab
   - Move or copy files and folders onto tabs by dropping items from outside
   - Show a context menu on right-drag drop such as "Copy here", "Move here", and "Create symbolic link here"
   - Symbolic links are created with the current standard-user privileges; if privileges are insufficient, the app shows guidance instead of retrying as administrator.
@@ -26,7 +27,7 @@ Instead of hooking into or modifying Explorer itself, it places an independent t
 ## Requirements
 
 - OS: Windows 10 / Windows 11
-- Runtime: .NET Framework 4.8.1
+- Runtime: .NET environment (prepare it according to the specification)
 
 ## Usage
 
@@ -37,6 +38,7 @@ Instead of hooking into or modifying Explorer itself, it places an independent t
    - Use the `+` button on the right to open a folder-picker dialog and add a new tab.
    - Each tab shows a per-path icon, including shell-specific icons for special folders and Control Panel sub-items.
    - Right-click a tab to access actions such as `Duplicate Tab`, `Open in New Window`, `Copy Path`, and `Close Tab`.
+   - Drag a tab outside the tab bar and drop it outside Explorer to reopen that tab as a separate window and close the original tab.
 5. **Settings**
    - Right-click the background area of the tab bar and choose `Settings...` to change options such as the tab font size.
 6. To exit, right-click the task tray icon and choose `Exit`.
@@ -56,9 +58,3 @@ For details, see the [LICENSE](LICENSE) file.
 Latest version:
 
 https://github.com/keasj/KjTabBar/releases/latest
-
-## Development Notes
-
-- Text files managed by this repository use CRLF. To enable the repository hook, run `git config core.hooksPath .githooks`.
-- The pre-commit hook runs `tools/Check-LineEndings.ps1` and blocks commits that introduce LF-only lines into CRLF-managed files.
-- Release steps are documented in [RELEASE.md](./RELEASE.md).

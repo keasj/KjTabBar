@@ -18,6 +18,7 @@ namespace KjTabBar.Views
     public partial class TabBarWindow : Window
     {
         public IExplorerService ExplorerService { get; set; }
+        internal ExplorerWindowTrackingState WindowTrackingState { get; set; }
         private IExplorerService _explorerService => ExplorerService;
 
         private DispatcherTimer _positionTimer;
@@ -183,6 +184,29 @@ namespace KjTabBar.Views
             TabBarViewModel vm = GetVM();
             if (vm == null || _positioner == null) return false;
             return _positioner.IsExplorerAlive(vm.ExplorerHwnd);
+        }
+
+        internal void RebindExplorer(IntPtr explorerHwnd)
+        {
+            if (explorerHwnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            TabBarViewModel vm = GetVM();
+            if (vm == null)
+            {
+                return;
+            }
+
+            vm.SetExplorerHwnd(explorerHwnd);
+
+            if (IsLoaded)
+            {
+                WindowInteropHelper helper = new WindowInteropHelper(this);
+                helper.Owner = explorerHwnd;
+                UpdatePosition();
+            }
         }
 
         private bool IsExplorerMinimized()
@@ -385,9 +409,66 @@ namespace KjTabBar.Views
                     TabItemViewModel tab = (TabItemViewModel)element.DataContext;
                     if (tab != null)
                     {
-                        DragDrop.DoDragDrop(element, tab, DragDropEffects.Move);
+                        DragDropEffects effect = DragDrop.DoDragDrop(element, tab, DragDropEffects.Move);
+                        OpenDraggedTabInNewWindowIfDroppedOutside(effect, tab);
                     }
                     _isDragging = false;
+                }
+            }
+        }
+
+        private void OpenDraggedTabInNewWindowIfDroppedOutside(DragDropEffects effect, TabItemViewModel tab)
+        {
+            TabBarViewModel vm = GetVM();
+            if (tab == null || vm == null || _explorerService == null)
+            {
+                return;
+            }
+
+            NativeMethods.POINT cursorPoint;
+            if (!NativeMethods.GetCursorPos(out cursorPoint))
+            {
+                return;
+            }
+
+            NativeMethods.RECT windowRect;
+            if (!NativeMethods.GetWindowRect(_myHwnd, out windowRect))
+            {
+                return;
+            }
+
+            TabExternalDragOpenDecider.TryOpenInNewWindowAndCloseSourceTab(
+                effect,
+                tab,
+                vm,
+                OpenPathInNewWindow,
+                cursorPoint,
+                windowRect);
+        }
+
+        internal bool OpenPathInNewWindow(string path)
+        {
+            if (string.IsNullOrEmpty(path) || _explorerService == null)
+            {
+                return false;
+            }
+
+            if (WindowTrackingState != null)
+            {
+                WindowTrackingState.RegisterExplicitIndependentLaunchRequest();
+            }
+
+            bool opened = false;
+            try
+            {
+                opened = _explorerService.OpenInNewWindow(path);
+                return opened;
+            }
+            finally
+            {
+                if (!opened && WindowTrackingState != null)
+                {
+                    WindowTrackingState.CancelExplicitIndependentLaunchRequest();
                 }
             }
         }

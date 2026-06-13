@@ -40,5 +40,97 @@ namespace UnitTestProject
 
             Assert.IsTrue(resolver.HasEquivalentControlPanelTab(viewModel, "cp"));
         }
+
+        [TestMethod]
+        public void FindTarget_ReturnsForegroundControlPanelHost_WhenEquivalentTabDoesNotExist()
+        {
+            MockExplorerService explorerService = new MockExplorerService();
+            explorerService.IsControlPanelPathFunc = delegate (string path)
+            {
+                return path == "cp-root" || path == "cp-item";
+            };
+            explorerService.IsControlPanelRootPathFunc = delegate (string path) { return path == "cp-root"; };
+
+            ControlPanelTabSearch search = new ControlPanelTabSearch(explorerService);
+            TabBarViewModel foregroundHost = new TabBarViewModel((IntPtr)10, new MockUserSettings(), explorerService);
+            foregroundHost.InsertTabWithPath("cp-root", 1, true);
+
+            TabBarViewModel result = search.FindTarget(
+                new System.Collections.Generic.List<TabBarViewModel> { foregroundHost },
+                "cp-item",
+                delegate (IntPtr hwnd) { return hwnd == (IntPtr)10; },
+                delegate (IntPtr hwnd) { return false; });
+
+            Assert.AreSame(foregroundHost, result);
+        }
+
+        [TestMethod]
+        public void FindTarget_DoesNotReturnBackgroundControlPanelHost_WhenEquivalentTabDoesNotExist()
+        {
+            MockExplorerService explorerService = new MockExplorerService();
+            explorerService.IsControlPanelPathFunc = delegate (string path)
+            {
+                return path == "cp-root" || path == "cp-item";
+            };
+            explorerService.IsControlPanelRootPathFunc = delegate (string path) { return path == "cp-root"; };
+
+            ControlPanelTabSearch search = new ControlPanelTabSearch(explorerService);
+            TabBarViewModel backgroundHost = new TabBarViewModel((IntPtr)20, new MockUserSettings(), explorerService);
+            backgroundHost.InsertTabWithPath("cp-root", 1, true);
+
+            TabBarViewModel result = search.FindTarget(
+                new System.Collections.Generic.List<TabBarViewModel> { backgroundHost },
+                "cp-item",
+                delegate (IntPtr hwnd) { return false; },
+                delegate (IntPtr hwnd) { return false; });
+
+            Assert.IsNull(result);
+        }
+
+        [TestMethod]
+        public void FindTarget_DoesNotReturnForegroundControlPanelHost_ForControlPanelRootPath()
+        {
+            MockExplorerService explorerService = new MockExplorerService();
+            explorerService.IsControlPanelPathFunc = delegate (string path)
+            {
+                return path == "cp-root" || path == "cp-item";
+            };
+            explorerService.IsControlPanelRootPathFunc = delegate (string path) { return path == "cp-root"; };
+
+            ControlPanelTabSearch search = new ControlPanelTabSearch(explorerService);
+            TabBarViewModel foregroundHost = new TabBarViewModel((IntPtr)30, new MockUserSettings(), explorerService);
+            foregroundHost.InsertTabWithPath("cp-root", 1, true);
+
+            TabBarViewModel result = search.FindTarget(
+                new System.Collections.Generic.List<TabBarViewModel> { foregroundHost },
+                "cp-root",
+                delegate (IntPtr hwnd) { return hwnd == (IntPtr)30; },
+                delegate (IntPtr hwnd) { return false; });
+
+            Assert.IsNull(result);
+        }
+
+        [TestMethod]
+        public void FindTarget_ReturnsPreviousForegroundControlPanelHost_WhenEquivalentTabDoesNotExist()
+        {
+            MockExplorerService explorerService = new MockExplorerService();
+            explorerService.IsControlPanelPathFunc = delegate (string path)
+            {
+                return path == "cp-root" || path == "cp-item";
+            };
+            explorerService.IsControlPanelRootPathFunc = delegate (string path) { return path == "cp-root"; };
+
+            ControlPanelTabSearch search = new ControlPanelTabSearch(explorerService);
+            TabBarViewModel previousForegroundHost = new TabBarViewModel((IntPtr)40, new MockUserSettings(), explorerService);
+            previousForegroundHost.InsertTabWithPath("cp-root", 1, true);
+
+            TabBarViewModel result = search.FindTarget(
+                new System.Collections.Generic.List<TabBarViewModel> { previousForegroundHost },
+                "cp-item",
+                delegate (IntPtr hwnd) { return false; },
+                delegate (IntPtr hwnd) { return hwnd == (IntPtr)40; });
+
+            Assert.AreSame(previousForegroundHost, result);
+        }
     }
 }

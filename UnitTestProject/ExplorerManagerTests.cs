@@ -38,6 +38,46 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void ShouldLaunchPlainExplorerForNewWindow_ReturnsTrue_ForControlPanelRoot()
+        {
+            ExplorerManager manager = new ExplorerManager();
+
+            bool result = manager.ShouldLaunchPlainExplorerForNewWindow(manager.AllControlPanelPath);
+
+            Assert.IsTrue(result);
+        }
+
+        [TestMethod]
+        public void ShouldLaunchPlainExplorerForNewWindow_ReturnsFalse_ForControlPanelItem()
+        {
+            ExplorerManager manager = new ExplorerManager();
+
+            bool result = manager.ShouldLaunchPlainExplorerForNewWindow(manager.ProgramsAndFeaturesPath);
+
+            Assert.IsFalse(result);
+        }
+
+        [TestMethod]
+        public void GetNewWindowNavigationPath_ReturnsShellControlPanelFolder_ForControlPanelRoot()
+        {
+            ExplorerManager manager = new ExplorerManager();
+
+            string path = manager.GetNewWindowNavigationPath(manager.AllControlPanelPath);
+
+            Assert.AreEqual("shell:ControlPanelFolder", path);
+        }
+
+        [TestMethod]
+        public void GetNewWindowNavigationPath_ReturnsOriginalPath_ForControlPanelItem()
+        {
+            ExplorerManager manager = new ExplorerManager();
+
+            string path = manager.GetNewWindowNavigationPath(manager.ProgramsAndFeaturesPath);
+
+            Assert.AreEqual(manager.ProgramsAndFeaturesPath, path);
+        }
+
+        [TestMethod]
         public void IsTabPathCurrentlyAvailable_Allows_Unc_Path()
         {
             ShellPathAvailabilityEvaluator evaluator = new ShellPathAvailabilityEvaluator(
@@ -215,6 +255,7 @@ namespace UnitTestProject
                 {
                     return locationName == "Control Panel" ? "::{21EC2020-3AEA-1069-A2DD-08002B30309D}" : null;
                 },
+                delegate (string path) { return false; },
                 delegate (string path) { return path == "::{21EC2020-3AEA-1069-A2DD-08002B30309D}"; },
                 delegate (string path) { return null; },
                 delegate (string path) { return false; });
@@ -225,10 +266,41 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void Resolve_Prefers_ControlPanelItem_From_FolderPath_When_LocationName_Is_ControlPanelRoot()
+        {
+            ShellCurrentPathResolver resolver = new ShellCurrentPathResolver(
+                delegate (string locationName)
+                {
+                    return locationName == "Control Panel" ? "::{21EC2020-3AEA-1069-A2DD-08002B30309D}" : null;
+                },
+                delegate (string path)
+                {
+                    return path == "::{21EC2020-3AEA-1069-A2DD-08002B30309D}" ||
+                           path == "::{025A5937-A6BE-4686-A844-36FE4BEC8B6D}";
+                },
+                delegate (string path) { return path == "::{21EC2020-3AEA-1069-A2DD-08002B30309D}"; },
+                delegate (string path)
+                {
+                    return path == @"::{26EE0668-A00A-44D7-9371-BEB064C98683}\0\::{025A5937-A6BE-4686-A844-36FE4BEC8B6D}"
+                        ? "::{025A5937-A6BE-4686-A844-36FE4BEC8B6D}"
+                        : null;
+                },
+                delegate (string path) { return false; });
+
+            string resolved = resolver.Resolve(
+                "ignored",
+                "Control Panel",
+                @"::{26EE0668-A00A-44D7-9371-BEB064C98683}\0\::{025A5937-A6BE-4686-A844-36FE4BEC8B6D}");
+
+            Assert.AreEqual("::{025A5937-A6BE-4686-A844-36FE4BEC8B6D}", resolved);
+        }
+
+        [TestMethod]
         public void Resolve_Falls_Back_To_FolderPath_When_No_Other_Path_Is_Resolved()
         {
             ShellCurrentPathResolver resolver = new ShellCurrentPathResolver(
                 delegate (string locationName) { return null; },
+                delegate (string path) { return false; },
                 delegate (string path) { return false; },
                 delegate (string path) { return null; },
                 delegate (string path) { return false; });

@@ -53,6 +53,56 @@ namespace KjTabBar.Models
                 return null;
             }
 
+            string mappedPath = TryMapSingleLocationName(
+                locationName,
+                localizedControlPanelTitle,
+                localizedHomeTitle,
+                localizedNetworkTitle,
+                localizedRecycleBinTitle,
+                localizedThisPCTitle);
+            if (!string.IsNullOrEmpty(mappedPath))
+            {
+                return mappedPath;
+            }
+
+            string[] titleSegments = locationName.Split(new string[] { " - ", " – ", " — ", " | " }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < titleSegments.Length; i++)
+            {
+                string segment = titleSegments[i].Trim();
+                if (string.IsNullOrEmpty(segment))
+                {
+                    continue;
+                }
+
+                mappedPath = TryMapSingleLocationName(
+                    segment,
+                    localizedControlPanelTitle,
+                    localizedHomeTitle,
+                    localizedNetworkTitle,
+                    localizedRecycleBinTitle,
+                    localizedThisPCTitle);
+                if (!string.IsNullOrEmpty(mappedPath))
+                {
+                    return mappedPath;
+                }
+            }
+
+            return null;
+        }
+
+        private string TryMapSingleLocationName(
+            string locationName,
+            string localizedControlPanelTitle,
+            string localizedHomeTitle,
+            string localizedNetworkTitle,
+            string localizedRecycleBinTitle,
+            string localizedThisPCTitle)
+        {
+            if (string.IsNullOrEmpty(locationName))
+            {
+                return null;
+            }
+
             string compactName = CompactForComparison(locationName.ToLowerInvariant());
             if (IsControlPanelRootName(locationName, localizedControlPanelTitle))
             {

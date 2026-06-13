@@ -10,6 +10,7 @@ namespace KjTabBar.Models
         public bool IsDesktopInteractiveCandidate { get; set; }
         public bool IsHiddenPending { get; set; }
         public bool IsControlPanelTabLaunchCandidate { get; set; }
+        public bool HasActiveControlPanelTabOnValidTarget { get; set; }
         public bool HasValidTarget { get; set; }
     }
 
@@ -19,6 +20,7 @@ namespace KjTabBar.Models
         public string ResolvedPath { get; set; }
         public bool AllowSpecialPath { get; set; }
         public bool IsControlPanelPath { get; set; }
+        public bool UseResolvedPathOnCreate { get; set; }
     }
 
     internal sealed class ExplorerWindowEvaluationService
@@ -37,19 +39,54 @@ namespace KjTabBar.Models
             Func<IntPtr, string> getTitleVirtualPath,
             Func<string, bool> hasControlPanelTarget,
             Func<string, bool> hasEquivalentControlPanelTab,
-            Func<bool> hasActiveControlPanelTab)
+            Func<string, bool> hasActiveControlPanelTab)
         {
             string path = _explorerService.GetCurrentPath(input.ExplorerHwnd);
             string titlePath = getTitleVirtualPath != null ? getTitleVirtualPath(input.ExplorerHwnd) : null;
 
-            bool isControlPanelPath = _explorerService.IsControlPanelPath(path) ||
-                                      (!string.IsNullOrEmpty(titlePath) && _explorerService.IsControlPanelRootPath(titlePath));
+            bool titleIndicatesControlPanel =
+                !string.IsNullOrEmpty(titlePath) &&
+                (_explorerService.IsControlPanelRootPath(titlePath) || _explorerService.IsControlPanelPath(titlePath));
 
+            bool titleIndicatesControlPanelItem =
+                !string.IsNullOrEmpty(titlePath) &&
+                _explorerService.IsControlPanelPath(titlePath) &&
+                !_explorerService.IsControlPanelRootPath(titlePath);
+
+            if (titleIndicatesControlPanelItem &&
+                (string.IsNullOrEmpty(path) ||
+                 _explorerService.IsTransientShellPlaceholderPath(path) ||
+                 !_explorerService.IsControlPanelPath(path) ||
+                 _explorerService.IsControlPanelRootPath(path)))
+            {
+                path = titlePath;
+            }
+
+            bool isControlPanelPath = _explorerService.IsControlPanelPath(path) || titleIndicatesControlPanel;
+
+            string controlPanelSearchPath = null;
             bool hasControlPanelTargetLocal = false;
             if (isControlPanelPath && hasControlPanelTarget != null)
             {
-                string searchPath = _explorerService.IsControlPanelRootPath(titlePath) ? _explorerService.AllControlPanelPath : path;
+                string searchPath = path;
+                if (_explorerService.IsControlPanelRootPath(titlePath))
+                {
+                    searchPath = _explorerService.AllControlPanelPath;
+                }
+                else if ((string.IsNullOrEmpty(searchPath) || !_explorerService.IsControlPanelPath(searchPath)) &&
+                         _explorerService.IsControlPanelPath(titlePath))
+                {
+                    searchPath = titlePath;
+                }
+
+                controlPanelSearchPath = searchPath;
                 hasControlPanelTargetLocal = hasControlPanelTarget(searchPath);
+                if (!hasControlPanelTargetLocal &&
+                    input.HasActiveControlPanelTabOnValidTarget &&
+                    !_explorerService.IsControlPanelRootPath(searchPath))
+                {
+                    hasControlPanelTargetLocal = true;
+                }
             }
 
             ExplorerWindowContext context = new ExplorerWindowContext
@@ -59,6 +96,7 @@ namespace KjTabBar.Models
                 IsDesktopInteractiveCandidate = input.IsDesktopInteractiveCandidate,
                 IsHiddenPending = input.IsHiddenPending,
                 IsControlPanelTabLaunchCandidate = input.IsControlPanelTabLaunchCandidate,
+                HasActiveControlPanelTabOnValidTarget = input.HasActiveControlPanelTabOnValidTarget,
                 HasValidTarget = input.HasValidTarget,
                 HasControlPanelTarget = hasControlPanelTargetLocal,
 
@@ -76,7 +114,12 @@ namespace KjTabBar.Models
                 },
                 HasActiveControlPanelTabFunc = delegate
                 {
-                    return hasActiveControlPanelTab != null && hasActiveControlPanelTab();
+                    if (hasActiveControlPanelTab != null && hasActiveControlPanelTab(controlPanelSearchPath))
+                    {
+                        return true;
+                    }
+
+                    return input.HasActiveControlPanelTabOnValidTarget;
                 }
             };
 
@@ -84,12 +127,32 @@ namespace KjTabBar.Models
             bool allowSpecialPath;
             AbsorptionAction action = ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath);
 
+            bool resolvedIsControlPanelPath =
+                _explorerService.IsControlPanelPath(resolvedPath) ||
+                (!string.IsNullOrEmpty(titlePath) &&
+                 (_explorerService.IsControlPanelRootPath(titlePath) || _explorerService.IsControlPanelPath(titlePath)));
+            bool shouldUseResolvedPathOnCreate =
+                resolvedIsControlPanelPath ||
+                (input.IsDesktopCandidate &&
+                 ExplorerAbsorptionLogic.ShouldAbsorbDesktopOriginPath(
+                     context.IsDesktopFolderPathFunc != null && context.IsDesktopFolderPathFunc(resolvedPath),
+                     context.IsDesktopShortcutTargetFunc != null && context.IsDesktopShortcutTargetFunc(resolvedPath),
+                     context.IsDesktopShellItemPathFunc != null &&
+                         (context.IsDesktopShellItemPathFunc(resolvedPath) ||
+                          (!string.IsNullOrEmpty(titlePath) && context.IsDesktopShellItemPathFunc(titlePath))),
+                     context.IsDesktopSpecialShellPathFunc != null &&
+                         (context.IsDesktopSpecialShellPathFunc(resolvedPath) ||
+                          (!string.IsNullOrEmpty(titlePath) && context.IsDesktopSpecialShellPathFunc(titlePath)))));
+
             return new ExplorerWindowEvaluationResult
             {
                 Action = action,
                 ResolvedPath = resolvedPath,
                 AllowSpecialPath = allowSpecialPath,
-                IsControlPanelPath = isControlPanelPath
+                IsControlPanelPath = resolvedIsControlPanelPath,
+                UseResolvedPathOnCreate =
+                    action == AbsorptionAction.CreateNewTabBar &&
+                    shouldUseResolvedPathOnCreate
             };
         }
     }

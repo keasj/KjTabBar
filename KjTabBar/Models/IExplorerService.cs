@@ -21,7 +21,7 @@ namespace KjTabBar.Models
         string ResolveShortcutTarget(string path);
         bool IsTransientShellPlaceholderPath(string path);
         bool Navigate(IntPtr explorerHwnd, string path);
-        void OpenInNewWindow(string path);
+        bool OpenInNewWindow(string path);
         void CreateShortcuts(string[] sourceFiles, string destinationFolder, IntPtr targetWindowHandle);
         void CreateSymbolicLinks(string[] sourceFiles, string destinationFolder, IntPtr targetWindowHandle);
         string GetParentFolderName(string path);
