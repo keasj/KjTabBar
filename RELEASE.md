@@ -114,15 +114,21 @@ Create the release notes from GitHub automatically:
 
 Upload the built files to the existing release.
 
-If you want to upload directly from the build output locations:
+Do not rely on `source#name` to change the downloaded filename. In GitHub CLI, that syntax sets the asset label, while the actual downloadable filename stays the original file name.
+
+Create copies with the final release filenames first, then upload those files directly:
 
 ```powershell
-& 'C:\Program Files\GitHub CLI\gh.exe' release upload v1.1.3.0 `
-  'KjTabBar\bin\Release\net481\KjTabBar.exe#KjTabBar-v1.1.3.0.exe' `
-  'Setup\Release\setup.exe#KjTabBar-v1.1.3.0-setup.exe' `
-  'Setup\Release\Setup.msi#KjTabBar-v1.1.3.0-setup.msi'
-```
+New-Item -ItemType Directory -Force -Path '.\_release' | Out-Null
+Copy-Item 'KjTabBar\bin\Release\net481\KjTabBar.exe' '.\_release\KjTabBar-v1.1.3.0.exe' -Force
+Copy-Item 'Setup\Release\setup.exe' '.\_release\KjTabBar-v1.1.3.0-setup.exe' -Force
+Copy-Item 'Setup\Release\Setup.msi' '.\_release\KjTabBar-v1.1.3.0-setup.msi' -Force
 
+& 'C:\Program Files\GitHub CLI\gh.exe' release upload v1.1.3.0 `
+  '.\_release\KjTabBar-v1.1.3.0.exe' `
+  '.\_release\KjTabBar-v1.1.3.0-setup.exe' `
+  '.\_release\KjTabBar-v1.1.3.0-setup.msi'
+```
 ## 9. Verify the Published Release
 
 Confirm the release contents:
