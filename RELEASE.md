@@ -102,6 +102,8 @@ Replace `v1.1.3.0` with the target version when releasing a different build.
 
 ## 7. Create the GitHub Release
 
+Run GitHub CLI release commands outside the sandbox in Codex sessions so gh can read the Windows keyring token reliably.
+
 Create the release notes from GitHub automatically:
 
 ```powershell
