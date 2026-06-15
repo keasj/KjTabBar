@@ -40,6 +40,7 @@ namespace KjTabBar
         private LanguageResourceService _languageResourceService = new LanguageResourceService();
         private MemoryMaintenanceService _memoryMaintenance;
         private WinEventHookRegistration _showEventHook;
+        private WinEventHookRegistration _moveSizeEndEventHook;
 
         private static readonly TimeSpan MaxHiddenDuration = TimeSpan.FromSeconds(2);
         private DesktopPathClassifier _desktopPathClassifier;
@@ -58,6 +59,7 @@ namespace KjTabBar
                 TabBars = _tabBars,
                 TrayIconService = _trayIconService,
                 ShowEventHook = _showEventHook,
+                MoveSizeEndEventHook = _moveSizeEndEventHook,
                 WindowTracking = _windowTracking,
                 ForegroundEventHook = _foregroundEventHook,
                 Mutex = _mutex
@@ -118,6 +120,7 @@ namespace KjTabBar
             _trayIconService.Initialize(name => TryFindResource(name), Shutdown);
             _foregroundEventHook = _appRuntimeCoordinator.TryRegisterWinEventHook("foreground", NativeMethods.EVENT_SYSTEM_FOREGROUND, NativeMethods.EVENT_SYSTEM_FOREGROUND, ForegroundEventCallback, "Failed to set up foreground hook. Falling back to polling.");
             _showEventHook = _appRuntimeCoordinator.TryRegisterWinEventHook("show", NativeMethods.EVENT_OBJECT_SHOW, NativeMethods.EVENT_OBJECT_SHOW, ShowEventCallback, "Failed to set up show hook.");
+            _moveSizeEndEventHook = _appRuntimeCoordinator.TryRegisterWinEventHook("movesizeend", NativeMethods.EVENT_SYSTEM_MOVESIZEEND, NativeMethods.EVENT_SYSTEM_MOVESIZEEND, MoveSizeEndEventCallback, "Failed to set up movesizeend hook.");
             _monitorTimer = _appRuntimeCoordinator.CreateMonitorTimer(TimeSpan.FromMilliseconds(500), MonitorTimer_Tick);
 
             ThemeManager.Instance.StartMonitoring();
@@ -221,6 +224,67 @@ namespace KjTabBar
                 {
                     return _windowTracking.IgnoredWindows.Contains(targetHwnd);
                 });
+        }
+
+        private void MoveSizeEndEventCallback(
+            IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
+            int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
+        {
+            try
+            {
+                if (eventType != NativeMethods.EVENT_SYSTEM_MOVESIZEEND) return;
+                if (idObject != 0) return; // OBJID_WINDOW
+                if (hwnd == IntPtr.Zero) return;
+
+                StringBuilder className = new StringBuilder(256);
+                NativeMethods.GetClassName(hwnd, className, className.Capacity);
+                if (className.ToString() != "CabinetWClass") return;
+
+                TabBarViewModel activeTabBarVM = _appUiDispatcherAdapter?.FindValidTabBarTarget();
+                if (activeTabBarVM == null) return;
+                if (hwnd == activeTabBarVM.ExplorerHwnd) return;
+
+                TabBarWindow window;
+                if (_tabBars.TryGetTabBarWindow(activeTabBarVM.ExplorerHwnd, out window))
+                {
+                    NativeMethods.POINT mousePos;
+                    if (NativeMethods.GetCursorPos(out mousePos))
+                    {
+                        var helper = new System.Windows.Interop.WindowInteropHelper(window);
+                        IntPtr tabBarHwnd = helper.Handle;
+                        if (tabBarHwnd != IntPtr.Zero && NativeMethods.GetWindowRect(tabBarHwnd, out NativeMethods.RECT rect))
+                        {
+                            if (mousePos.X >= rect.Left && mousePos.X <= rect.Right &&
+                                mousePos.Y >= rect.Top && mousePos.Y <= rect.Bottom)
+                            {
+                                _ = ComThreadService.Instance.InvokeAsync(() =>
+                                {
+                                    string path = _explorerService.GetCurrentPath(hwnd);
+                                    if (!string.IsNullOrEmpty(path))
+                                    {
+                                        Dispatcher.BeginInvoke(new Action(() =>
+                                        {
+                                            bool isControlPanel = _explorerService.IsControlPanelPath(path);
+                                            _explorerWindowInteractionService.AbsorbExplorerWindow(
+                                                hwnd,
+                                                activeTabBarVM,
+                                                path,
+                                                allowSpecialPath: true,
+                                                isControlPanelPath: isControlPanel,
+                                                ignoreExplorerWindow: null
+                                            );
+                                        }));
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Helpers.AppLogger.LogError("App", "MoveSizeEndEventCallback failed.", ex);
+            }
         }
     }
 }

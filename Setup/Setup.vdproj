@@ -93,7 +93,7 @@
         {
             "{4AA51A2D-7D85-4A59-BA75-B0809FC8B380}:_5EB6189405334D52BE2B2E246D65E0D7"
             {
-            "Name" = "8:ƒvƒ‰ƒCƒ}ƒŠo—Í from KjTabBar (Active)"
+            "Name" = "8:ï¿½vï¿½ï¿½ï¿½Cï¿½}ï¿½ï¿½ï¿½oï¿½ï¿½ from KjTabBar (Active)"
             "Condition" = "8:"
             "Object" = "8:_41353C4D88514DFBB6A8572111DFFEDC"
             "FileType" = "3:2"
@@ -107,7 +107,7 @@
             }
             "{4AA51A2D-7D85-4A59-BA75-B0809FC8B380}:_89BA1CD591C04F54B7A8D59C37C13131"
             {
-            "Name" = "8:ƒvƒ‰ƒCƒ}ƒŠo—Í from KjTabBar (Active)"
+            "Name" = "8:ï¿½vï¿½ï¿½ï¿½Cï¿½}ï¿½ï¿½ï¿½oï¿½ï¿½ from KjTabBar (Active)"
             "Condition" = "8:"
             "Object" = "8:_41353C4D88514DFBB6A8572111DFFEDC"
             "FileType" = "3:2"
@@ -257,7 +257,7 @@
         "RemovePreviousVersions" = "11:TRUE"
         "DetectNewerInstalledVersion" = "11:TRUE"
         "InstallAllUsers" = "11:FALSE"
-        "ProductVersion" = "8:1.1.5"
+        "ProductVersion" = "8:1.1.6"
         "Manufacturer" = "8:KjTabBar"
         "ARPHELPTELEPHONE" = "8:"
         "ARPHELPLINK" = "8:"
@@ -423,7 +423,7 @@
                     "{688940B3-5CA9-4162-8DEE-2993FA9D8CBC}:_896822FCC9C34A1EBF3339419D58C13F"
                     {
                     "Sequence" = "3:100"
-                    "DisplayName" = "8:isó‹µ"
+                    "DisplayName" = "8:ï¿½iï¿½sï¿½ï¿½"
                     "UseDynamicProperties" = "11:TRUE"
                     "IsDependency" = "11:FALSE"
                     "SourcePath" = "8:<VsdDialogDir>\\VsdAdminProgressDlg.wid"
@@ -467,7 +467,7 @@
                     "{688940B3-5CA9-4162-8DEE-2993FA9D8CBC}:_229CB288A5BB4173ACBD9F2AE621B6C3"
                     {
                     "Sequence" = "3:100"
-                    "DisplayName" = "8:isó‹µ"
+                    "DisplayName" = "8:ï¿½iï¿½sï¿½ï¿½"
                     "UseDynamicProperties" = "11:TRUE"
                     "IsDependency" = "11:FALSE"
                     "SourcePath" = "8:<VsdDialogDir>\\VsdProgressDlg.wid"
@@ -511,7 +511,7 @@
                     "{688940B3-5CA9-4162-8DEE-2993FA9D8CBC}:_0F97C536DC2D419F906D8B46C8E0DFD9"
                     {
                     "Sequence" = "3:100"
-                    "DisplayName" = "8:‚æ‚¤‚±‚»"
+                    "DisplayName" = "8:ï¿½æ‚¤ï¿½ï¿½ï¿½ï¿½"
                     "UseDynamicProperties" = "11:TRUE"
                     "IsDependency" = "11:FALSE"
                     "SourcePath" = "8:<VsdDialogDir>\\VsdAdminWelcomeDlg.wid"
@@ -559,7 +559,7 @@
                     "{688940B3-5CA9-4162-8DEE-2993FA9D8CBC}:_10961C1E3EF7471BB4860FD0F02D99BE"
                     {
                     "Sequence" = "3:300"
-                    "DisplayName" = "8:ƒCƒ“ƒXƒg[ƒ‹‚ÌŠm”F"
+                    "DisplayName" = "8:ï¿½Cï¿½ï¿½ï¿½Xï¿½gï¿½[ï¿½ï¿½ï¿½ÌŠmï¿½F"
                     "UseDynamicProperties" = "11:TRUE"
                     "IsDependency" = "11:FALSE"
                     "SourcePath" = "8:<VsdDialogDir>\\VsdAdminConfirmDlg.wid"
@@ -581,7 +581,7 @@
                     "{688940B3-5CA9-4162-8DEE-2993FA9D8CBC}:_8079780F98D34FC98415B77723EF46B4"
                     {
                     "Sequence" = "3:200"
-                    "DisplayName" = "8:ƒCƒ“ƒXƒg[ƒ‹ ƒtƒHƒ‹ƒ_["
+                    "DisplayName" = "8:ï¿½Cï¿½ï¿½ï¿½Xï¿½gï¿½[ï¿½ï¿½ ï¿½tï¿½Hï¿½ï¿½ï¿½_ï¿½["
                     "UseDynamicProperties" = "11:TRUE"
                     "IsDependency" = "11:FALSE"
                     "SourcePath" = "8:<VsdDialogDir>\\VsdAdminFolderDlg.wid"
@@ -612,7 +612,7 @@
                     "{688940B3-5CA9-4162-8DEE-2993FA9D8CBC}:_8E2BDAEFC2154D2A9761B18CC8C0ED7E"
                     {
                     "Sequence" = "3:100"
-                    "DisplayName" = "8:Š®—¹"
+                    "DisplayName" = "8:ï¿½ï¿½ï¿½ï¿½"
                     "UseDynamicProperties" = "11:TRUE"
                     "IsDependency" = "11:FALSE"
                     "SourcePath" = "8:<VsdDialogDir>\\VsdFinishedDlg.wid"
@@ -656,7 +656,7 @@
                     "{688940B3-5CA9-4162-8DEE-2993FA9D8CBC}:_4E436C3DE88D4771889A8CC87D737395"
                     {
                     "Sequence" = "3:100"
-                    "DisplayName" = "8:Š®—¹"
+                    "DisplayName" = "8:ï¿½ï¿½ï¿½ï¿½"
                     "UseDynamicProperties" = "11:TRUE"
                     "IsDependency" = "11:FALSE"
                     "SourcePath" = "8:<VsdDialogDir>\\VsdAdminFinishedDlg.wid"
@@ -687,7 +687,7 @@
                     "{688940B3-5CA9-4162-8DEE-2993FA9D8CBC}:_2F2F619F85B64280A0E97359402750F5"
                     {
                     "Sequence" = "3:300"
-                    "DisplayName" = "8:ƒCƒ“ƒXƒg[ƒ‹‚ÌŠm”F"
+                    "DisplayName" = "8:ï¿½Cï¿½ï¿½ï¿½Xï¿½gï¿½[ï¿½ï¿½ï¿½ÌŠmï¿½F"
                     "UseDynamicProperties" = "11:TRUE"
                     "IsDependency" = "11:FALSE"
                     "SourcePath" = "8:<VsdDialogDir>\\VsdConfirmDlg.wid"
@@ -709,7 +709,7 @@
                     "{688940B3-5CA9-4162-8DEE-2993FA9D8CBC}:_5B820DD4083C4177829910A68FF28395"
                     {
                     "Sequence" = "3:100"
-                    "DisplayName" = "8:‚æ‚¤‚±‚»"
+                    "DisplayName" = "8:ï¿½æ‚¤ï¿½ï¿½ï¿½ï¿½"
                     "UseDynamicProperties" = "11:TRUE"
                     "IsDependency" = "11:FALSE"
                     "SourcePath" = "8:<VsdDialogDir>\\VsdWelcomeDlg.wid"
@@ -757,7 +757,7 @@
                     "{688940B3-5CA9-4162-8DEE-2993FA9D8CBC}:_BDCB4FF096B942878E0F920A149CFB87"
                     {
                     "Sequence" = "3:200"
-                    "DisplayName" = "8:ƒCƒ“ƒXƒg[ƒ‹ ƒtƒHƒ‹ƒ_["
+                    "DisplayName" = "8:ï¿½Cï¿½ï¿½ï¿½Xï¿½gï¿½[ï¿½ï¿½ ï¿½tï¿½Hï¿½ï¿½ï¿½_ï¿½["
                     "UseDynamicProperties" = "11:TRUE"
                     "IsDependency" = "11:FALSE"
                     "SourcePath" = "8:<VsdDialogDir>\\VsdFolderDlg.wid"

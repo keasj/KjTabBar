@@ -221,6 +221,36 @@ namespace UnitTestProject
             Assert.IsTrue(result.AllowSpecialPath);
         }
 
+        [TestMethod]
+        public void Evaluate_ControlPanelItem_UsesManagedControlPanelLaunchSourceFallback_WhenSpecificTargetLookupFails()
+        {
+            MockExplorerService explorerService = new MockExplorerService();
+            explorerService.IsControlPanelPathFunc = delegate (string path)
+            {
+                return path == explorerService.AllControlPanelPath || path == explorerService.PowerOptionsPath;
+            };
+
+            ExplorerWindowEvaluationService service =
+                new ExplorerWindowEvaluationService(explorerService, new DesktopPathClassifier(explorerService));
+
+            ExplorerWindowEvaluationResult result = service.Evaluate(
+                new ExplorerWindowEvaluationInput
+                {
+                    ExplorerHwnd = (IntPtr)14,
+                    HasValidTarget = true,
+                    WasManagedControlPanelLaunchSource = true
+                },
+                delegate (IntPtr hwnd) { return explorerService.PowerOptionsPath; },
+                delegate (string path) { return false; },
+                delegate (string path) { return false; },
+                delegate (string path) { return false; });
+
+            Assert.AreEqual(AbsorptionAction.Absorb, result.Action);
+            Assert.AreEqual(explorerService.PowerOptionsPath, result.ResolvedPath);
+            Assert.IsTrue(result.IsControlPanelPath);
+            Assert.IsTrue(result.AllowSpecialPath);
+        }
+
         private sealed class DesktopFolderExplorerService : MockExplorerService
         {
             public override string GetCurrentPath(IntPtr explorerHwnd)

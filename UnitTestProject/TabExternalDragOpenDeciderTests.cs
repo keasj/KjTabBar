@@ -56,6 +56,7 @@ namespace UnitTestProject
             bool result = TabExternalDragOpenDecider.TryOpenInNewWindowAndCloseSourceTab(
                 DragDropEffects.None,
                 draggedTab,
+                draggedTab.Path,
                 viewModel,
                 explorerService.OpenInNewWindow,
                 new NativeMethods.POINT { X = 50, Y = 50 },
@@ -81,6 +82,7 @@ namespace UnitTestProject
             bool result = TabExternalDragOpenDecider.TryOpenInNewWindowAndCloseSourceTab(
                 DragDropEffects.None,
                 draggedTab,
+                draggedTab.Path,
                 viewModel,
                 explorerService.OpenInNewWindow,
                 new NativeMethods.POINT { X = 50, Y = 50 },
@@ -89,6 +91,31 @@ namespace UnitTestProject
             Assert.IsFalse(result);
             Assert.AreEqual(2, viewModel.Tabs.Count);
             Assert.AreEqual(@"C:\Work", viewModel.Tabs[1].Path);
+        }
+
+        [TestMethod]
+        public void TryOpenInNewWindowAndCloseSourceTab_UsesDragStartPath_WhenTabPathChangesDuringDrag()
+        {
+            MockExplorerService explorerService = new MockExplorerService();
+            TabBarViewModel viewModel = new TabBarViewModel(System.IntPtr.Zero, new MockUserSettings(), explorerService);
+            viewModel.InsertTabWithPath(@"E:\", 1);
+            TabItemViewModel draggedTab = viewModel.Tabs[1];
+            string draggedPath = draggedTab.Path;
+
+            draggedTab.Path = explorerService.PowerOptionsPath;
+
+            bool result = TabExternalDragOpenDecider.TryOpenInNewWindowAndCloseSourceTab(
+                DragDropEffects.None,
+                draggedTab,
+                draggedPath,
+                viewModel,
+                explorerService.OpenInNewWindow,
+                new NativeMethods.POINT { X = 50, Y = 50 },
+                new NativeMethods.RECT { Left = 100, Top = 100, Right = 300, Bottom = 300 });
+
+            Assert.IsTrue(result);
+            Assert.AreEqual(@"E:\", explorerService.OpenedInNewWindowPath);
+            Assert.AreEqual(1, viewModel.Tabs.Count);
         }
     }
 }

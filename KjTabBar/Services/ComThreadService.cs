@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using KjTabBar.Helpers;
+using KjTabBar.Models;
 
 namespace KjTabBar.Services
 {
@@ -28,15 +29,30 @@ namespace KjTabBar.Services
 
         private void RunLoop()
         {
-            foreach (Action action in _queue.GetConsumingEnumerable())
+            try
+            {
+                foreach (Action action in _queue.GetConsumingEnumerable())
+                {
+                    try
+                    {
+                        action();
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.LogError("ComThreadService", "Unhandled action failed on COM worker thread.", ex);
+                    }
+                }
+            }
+            finally
             {
                 try
                 {
-                    action();
+                    ShellWindowCacheManager.ResetShellApplication();
+                    System.Runtime.InteropServices.Marshal.CleanupUnusedObjectsInCurrentContext();
                 }
                 catch (Exception ex)
                 {
-                    AppLogger.LogError("ComThreadService", "Unhandled action failed on COM worker thread.", ex);
+                    AppLogger.LogError("ComThreadService", "Failed to clean up COM cache at thread exit.", ex);
                 }
             }
         }

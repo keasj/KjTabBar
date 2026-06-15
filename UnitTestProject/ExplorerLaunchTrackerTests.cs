@@ -25,7 +25,7 @@ namespace UnitTestProject
         }
 
         [TestMethod]
-        public void UpdateForegroundState_RegistersControlPanelLaunchCandidate_OnWindowTransition()
+        public void UpdateForegroundState_DoesNotRegisterControlPanelLaunchCandidate_OnWindowTransitionAlone()
         {
             ExplorerWindowTrackingState windowTracking = new ExplorerWindowTrackingState();
             ExplorerLaunchTracker tracker = new ExplorerLaunchTracker(
@@ -41,7 +41,7 @@ namespace UnitTestProject
             tracker.UpdateForegroundState((IntPtr)10, "CabinetWClass");
             tracker.UpdateForegroundState((IntPtr)20, "CabinetWClass");
 
-            Assert.IsTrue(windowTracking.ControlPanelTabLaunchCandidates.Contains((IntPtr)20));
+            Assert.IsFalse(windowTracking.ControlPanelTabLaunchCandidates.Contains((IntPtr)20));
         }
 
         [TestMethod]
@@ -63,6 +63,47 @@ namespace UnitTestProject
 
             Assert.IsTrue(tracker.WasForegroundRelatedWindow((IntPtr)10));
             Assert.IsFalse(tracker.WasForegroundRelatedWindow((IntPtr)30));
+        }
+
+        [TestMethod]
+        public void WasManagedControlPanelLaunchSource_ReturnsTrue_For_PreviousManagedControlPanelWindow()
+        {
+            ExplorerWindowTrackingState windowTracking = new ExplorerWindowTrackingState();
+            DesktopForegroundTracker foregroundTracker = new DesktopForegroundTracker();
+            ExplorerLaunchTracker tracker = new ExplorerLaunchTracker(
+                foregroundTracker,
+                windowTracking,
+                delegate (IntPtr hwnd) { return hwnd == (IntPtr)10; },
+                delegate (IntPtr hwnd) { return false; },
+                delegate { return (IntPtr)20; },
+                delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return true; });
+
+            tracker.UpdateForegroundState((IntPtr)10, "CabinetWClass");
+            tracker.UpdateForegroundState((IntPtr)20, "CabinetWClass");
+
+            Assert.IsTrue(tracker.WasManagedControlPanelLaunchSource());
+        }
+
+        [TestMethod]
+        public void WasManagedControlPanelLaunchSource_ReturnsTrue_For_LastManagedControlPanelWindow()
+        {
+            ExplorerWindowTrackingState windowTracking = new ExplorerWindowTrackingState();
+            DesktopForegroundTracker foregroundTracker = new DesktopForegroundTracker();
+            ExplorerLaunchTracker tracker = new ExplorerLaunchTracker(
+                foregroundTracker,
+                windowTracking,
+                delegate (IntPtr hwnd) { return hwnd == (IntPtr)10; },
+                delegate (IntPtr hwnd) { return false; },
+                delegate { return (IntPtr)20; },
+                delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return true; });
+
+            tracker.UpdateForegroundState((IntPtr)10, "CabinetWClass");
+
+            Assert.IsTrue(tracker.WasManagedControlPanelLaunchSource());
         }
 
         [TestMethod]

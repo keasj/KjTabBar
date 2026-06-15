@@ -68,6 +68,7 @@ namespace KjTabBar.Services
                 bool isDesktopCandidate = _windowTracking.DesktopLaunchCandidates.Contains(hwnd);
                 bool isDesktopInteractiveCandidate = _windowTracking.DesktopInteractiveLaunchCandidates.Contains(hwnd);
                 bool isControlPanelTabLaunchCandidate = _windowTracking.ControlPanelTabLaunchCandidates.Contains(hwnd);
+                bool wasManagedControlPanelLaunchSource = _explorerLaunchTracker.WasManagedControlPanelLaunchSource();
                 bool isValidTargetForegroundRelated =
                     validTarget != null &&
                     (_explorerLaunchTracker.IsForegroundRelatedWindow(validTarget.ExplorerHwnd) ||
@@ -95,6 +96,7 @@ namespace KjTabBar.Services
                         IsDesktopInteractiveCandidate = isDesktopInteractiveCandidate,
                         IsHiddenPending = isHiddenPending,
                         IsControlPanelTabLaunchCandidate = isControlPanelTabLaunchCandidate,
+                        WasManagedControlPanelLaunchSource = wasManagedControlPanelLaunchSource,
                         HasActiveControlPanelTabOnValidTarget = hasActiveControlPanelTabOnValidTarget,
                         HasValidTarget = validTarget != null
                     };

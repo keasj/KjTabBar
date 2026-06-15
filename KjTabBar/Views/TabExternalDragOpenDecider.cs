@@ -10,6 +10,7 @@ namespace KjTabBar.Views
         public static bool TryOpenInNewWindowAndCloseSourceTab(
             DragDropEffects dragEffect,
             TabItemViewModel tab,
+            string draggedPath,
             TabBarViewModel viewModel,
             Func<string, bool> openInNewWindow,
             NativeMethods.POINT cursorScreenPoint,
@@ -20,12 +21,12 @@ namespace KjTabBar.Views
                 return false;
             }
 
-            if (!ShouldOpenInNewWindow(dragEffect, tab.Path, cursorScreenPoint, windowScreenRect))
+            if (!ShouldOpenInNewWindow(dragEffect, draggedPath, cursorScreenPoint, windowScreenRect))
             {
                 return false;
             }
 
-            if (!openInNewWindow(tab.Path))
+            if (!openInNewWindow(draggedPath))
             {
                 return false;
             }

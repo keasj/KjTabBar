@@ -132,5 +132,53 @@ namespace UnitTestProject
 
             Assert.AreSame(previousForegroundHost, result);
         }
+
+        [TestMethod]
+        public void FindTarget_DoesNotReturnEquivalentBackgroundControlPanelHost_WithoutForegroundRelation()
+        {
+            MockExplorerService explorerService = new MockExplorerService();
+            explorerService.IsControlPanelPathFunc = delegate (string path)
+            {
+                return path == "cp-root" || path == "cp-item";
+            };
+            explorerService.IsControlPanelRootPathFunc = delegate (string path) { return path == "cp-root"; };
+
+            ControlPanelTabSearch search = new ControlPanelTabSearch(explorerService);
+            TabBarViewModel backgroundHost = new TabBarViewModel((IntPtr)50, new MockUserSettings(), explorerService);
+            backgroundHost.InsertTabWithPath("cp-item", 1, true);
+            backgroundHost.SelectTab(backgroundHost.Tabs[1]);
+
+            TabBarViewModel result = search.FindTarget(
+                new System.Collections.Generic.List<TabBarViewModel> { backgroundHost },
+                "cp-item",
+                delegate (IntPtr hwnd) { return false; },
+                delegate (IntPtr hwnd) { return false; });
+
+            Assert.IsNull(result);
+        }
+
+        [TestMethod]
+        public void FindTarget_ReturnsSoleControlPanelHost_ForControlPanelItem()
+        {
+            MockExplorerService explorerService = new MockExplorerService();
+            explorerService.IsControlPanelPathFunc = delegate (string path)
+            {
+                return path == "cp-root" || path == explorerService.PowerOptionsPath;
+            };
+            explorerService.IsControlPanelRootPathFunc = delegate (string path) { return path == "cp-root"; };
+            explorerService.NormalizeShellNamespacePathFunc = delegate (string path) { return path; };
+
+            ControlPanelTabSearch search = new ControlPanelTabSearch(explorerService);
+            TabBarViewModel soleHost = new TabBarViewModel((IntPtr)60, new MockUserSettings(), explorerService);
+            soleHost.InsertTabWithPath("cp-root", 1, true);
+
+            TabBarViewModel result = search.FindTarget(
+                new System.Collections.Generic.List<TabBarViewModel> { soleHost },
+                explorerService.PowerOptionsPath,
+                delegate (IntPtr hwnd) { return false; },
+                delegate (IntPtr hwnd) { return false; });
+
+            Assert.AreSame(soleHost, result);
+        }
     }
 }

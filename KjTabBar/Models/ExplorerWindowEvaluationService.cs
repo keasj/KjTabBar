@@ -1,4 +1,5 @@
 using System;
+using KjTabBar.Helpers;
 
 namespace KjTabBar.Models
 {
@@ -10,6 +11,7 @@ namespace KjTabBar.Models
         public bool IsDesktopInteractiveCandidate { get; set; }
         public bool IsHiddenPending { get; set; }
         public bool IsControlPanelTabLaunchCandidate { get; set; }
+        public bool WasManagedControlPanelLaunchSource { get; set; }
         public bool HasActiveControlPanelTabOnValidTarget { get; set; }
         public bool HasValidTarget { get; set; }
     }
@@ -82,6 +84,14 @@ namespace KjTabBar.Models
                 controlPanelSearchPath = searchPath;
                 hasControlPanelTargetLocal = hasControlPanelTarget(searchPath);
                 if (!hasControlPanelTargetLocal &&
+                    input.WasManagedControlPanelLaunchSource &&
+                    input.HasValidTarget &&
+                    !_explorerService.IsControlPanelRootPath(searchPath))
+                {
+                    hasControlPanelTargetLocal = true;
+                }
+
+                if (!hasControlPanelTargetLocal &&
                     input.HasActiveControlPanelTabOnValidTarget &&
                     !_explorerService.IsControlPanelRootPath(searchPath))
                 {
@@ -96,6 +106,7 @@ namespace KjTabBar.Models
                 IsDesktopInteractiveCandidate = input.IsDesktopInteractiveCandidate,
                 IsHiddenPending = input.IsHiddenPending,
                 IsControlPanelTabLaunchCandidate = input.IsControlPanelTabLaunchCandidate,
+                WasManagedControlPanelLaunchSource = input.WasManagedControlPanelLaunchSource,
                 HasActiveControlPanelTabOnValidTarget = input.HasActiveControlPanelTabOnValidTarget,
                 HasValidTarget = input.HasValidTarget,
                 HasControlPanelTarget = hasControlPanelTargetLocal,
@@ -143,6 +154,25 @@ namespace KjTabBar.Models
                      context.IsDesktopSpecialShellPathFunc != null &&
                          (context.IsDesktopSpecialShellPathFunc(resolvedPath) ||
                           (!string.IsNullOrEmpty(titlePath) && context.IsDesktopSpecialShellPathFunc(titlePath)))));
+
+            if (resolvedIsControlPanelPath)
+            {
+                AppLogger.LogInfo(
+                    "ExplorerWindowEvaluationService",
+                    string.Format(
+                        "CP evaluate hwnd={0} action={1} path={2} titlePath={3} searchPath={4} hasValidTarget={5} hasControlPanelTarget={6} hasActiveControlPanelTabOnValidTarget={7} isControlPanelTabLaunchCandidate={8} wasManagedControlPanelLaunchSource={9} allowSpecialPath={10}",
+                        input.ExplorerHwnd,
+                        action,
+                        path ?? string.Empty,
+                        titlePath ?? string.Empty,
+                        controlPanelSearchPath ?? string.Empty,
+                        input.HasValidTarget,
+                        hasControlPanelTargetLocal,
+                        input.HasActiveControlPanelTabOnValidTarget,
+                        input.IsControlPanelTabLaunchCandidate,
+                        input.WasManagedControlPanelLaunchSource,
+                        allowSpecialPath));
+            }
 
             return new ExplorerWindowEvaluationResult
             {

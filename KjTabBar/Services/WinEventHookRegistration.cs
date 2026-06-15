@@ -8,6 +8,7 @@ namespace KjTabBar.Services
         private readonly string _name;
         private IntPtr _hook = IntPtr.Zero;
         private NativeMethods.WinEventDelegate _callback;
+        private bool _disposed;
 
         public WinEventHookRegistration(string name)
         {
@@ -29,6 +30,11 @@ namespace KjTabBar.Services
 
         public void Dispose()
         {
+            if (_disposed)
+            {
+                return;
+            }
+
             if (_hook != IntPtr.Zero)
             {
                 try
@@ -41,8 +47,10 @@ namespace KjTabBar.Services
                 }
 
                 _hook = IntPtr.Zero;
-                _callback = null;
             }
+
+            _callback = null;
+            _disposed = true;
         }
     }
 }

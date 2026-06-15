@@ -86,22 +86,24 @@ namespace KjTabBar.Services
 
             if (_windowTracking.TryConsumeExplicitIndependentLaunchRequest())
             {
-                _windowTracking.IgnoreWindow(rootHwnd);
+                _windowTracking.IgnoreExplicitIndependentLaunchWindow(rootHwnd);
                 return;
             }
 
             TabBarViewModel validTarget = findValidTarget != null ? findValidTarget() : null;
             if (validTarget == null) return;
 
+            bool wasDesktopForegroundRecently = _desktopForegroundTracker.WasDesktopForegroundRecently();
             if ((_explorerLaunchTracker.IsForegroundRelatedWindow(validTarget.ExplorerHwnd) ||
                  _explorerLaunchTracker.WasForegroundRelatedWindow(validTarget.ExplorerHwnd)) &&
                 hasActiveControlPanelTab != null &&
-                hasActiveControlPanelTab(validTarget))
+                hasActiveControlPanelTab(validTarget) &&
+                wasDesktopForegroundRecently)
             {
                 _windowTracking.ControlPanelTabLaunchCandidates.Add(rootHwnd);
             }
 
-            if (!_desktopForegroundTracker.WasDesktopForegroundRecently()) return;
+            if (!wasDesktopForegroundRecently) return;
 
             _windowTracking.DesktopLaunchCandidates.Add(rootHwnd);
             if (_desktopForegroundTracker.WasDesktopInteractiveForegroundRecently())
@@ -141,6 +143,11 @@ namespace KjTabBar.Services
                 TabBarViewModel validTarget = findValidTarget != null ? findValidTarget() : null;
                 if (_windowTracking.IgnoredWindows.Contains(hwnd))
                 {
+                    if (_windowTracking.ExplicitIndependentLaunchWindows.Contains(hwnd))
+                    {
+                        continue;
+                    }
+
                     if (!ExplorerWindowDecisionLogic.ShouldReevaluateIgnoredWindow(validTarget != null))
                     {
                         continue;

@@ -18,6 +18,7 @@ namespace KjTabBar.Models
         public bool IsDesktopInteractiveCandidate { get; set; }
         public bool IsHiddenPending { get; set; }
         public bool IsControlPanelTabLaunchCandidate { get; set; }
+        public bool WasManagedControlPanelLaunchSource { get; set; }
         public bool HasActiveControlPanelTabOnValidTarget { get; set; }
         public bool HasValidTarget { get; set; }
         public bool HasControlPanelTarget { get; set; }
@@ -162,6 +163,16 @@ namespace KjTabBar.Models
             if (isControlPanelPath)
             {
                 if (!context.IsControlPanelTabLaunchCandidate &&
+                    context.HasControlPanelTarget &&
+                    context.HasActiveControlPanelTabFunc != null &&
+                    context.HasActiveControlPanelTabFunc() &&
+                    (context.HasEquivalentControlPanelTabFunc == null || !context.HasEquivalentControlPanelTabFunc(decisionPath)))
+                {
+                    allowSpecialPath = true;
+                    return AbsorptionAction.Absorb;
+                }
+
+                if (!context.IsControlPanelTabLaunchCandidate &&
                     context.HasActiveControlPanelTabOnValidTarget &&
                     context.HasControlPanelTarget &&
                     (context.HasEquivalentControlPanelTabFunc == null || !context.HasEquivalentControlPanelTabFunc(decisionPath)))
@@ -171,6 +182,13 @@ namespace KjTabBar.Models
                 }
 
                 if (context.IsControlPanelTabLaunchCandidate)
+                {
+                    allowSpecialPath = true;
+                    return AbsorptionAction.Absorb;
+                }
+
+                if (context.WasManagedControlPanelLaunchSource &&
+                    context.HasControlPanelTarget)
                 {
                     allowSpecialPath = true;
                     return AbsorptionAction.Absorb;

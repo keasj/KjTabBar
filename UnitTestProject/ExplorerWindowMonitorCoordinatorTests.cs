@@ -92,6 +92,7 @@ namespace UnitTestProject
                 delegate (TabBarViewModel vm) { return true; });
 
             Assert.IsTrue(trackingState.IgnoredWindows.Contains((IntPtr)210));
+            Assert.IsTrue(trackingState.ExplicitIndependentLaunchWindows.Contains((IntPtr)210));
             Assert.IsFalse(trackingState.ControlPanelTabLaunchCandidates.Contains((IntPtr)210));
             Assert.IsFalse(trackingState.DesktopLaunchCandidates.Contains((IntPtr)210));
             Assert.IsFalse(trackingState.HiddenPendingAbsorb.ContainsKey((IntPtr)210));
@@ -126,6 +127,7 @@ namespace UnitTestProject
                 delegate (IntPtr hwnd) { },
                 delegate { return new DateTime(2026, 6, 2, 0, 0, 0, DateTimeKind.Utc); });
 
+            foregroundTracker.Update((IntPtr)50, "SHELLDLL_DefView");
             foregroundTracker.Update((IntPtr)100, "CabinetWClass");
             foregroundTracker.Update((IntPtr)200, "CabinetWClass");
 
@@ -137,6 +139,49 @@ namespace UnitTestProject
                 delegate (TabBarViewModel vm) { return true; });
 
             Assert.IsTrue(trackingState.ControlPanelTabLaunchCandidates.Contains((IntPtr)220));
+        }
+
+        [TestMethod]
+        public void HandleShowEvent_DoesNotRegisterControlPanelCandidate_WithoutDesktopForeground()
+        {
+            TabBarRegistry tabBars = new TabBarRegistry();
+            ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState();
+            DesktopForegroundTracker foregroundTracker = new DesktopForegroundTracker();
+            IntPtr currentForeground = (IntPtr)200;
+            ExplorerLaunchTracker launchTracker = new ExplorerLaunchTracker(
+                foregroundTracker,
+                trackingState,
+                delegate (IntPtr hwnd) { return false; },
+                delegate (IntPtr hwnd) { return false; },
+                delegate { return currentForeground; },
+                delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return true; });
+
+            ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                tabBars,
+                trackingState,
+                foregroundTracker,
+                launchTracker,
+                delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return new NativeMethods.RECT(); },
+                delegate (IntPtr hwnd) { },
+                delegate { return new DateTime(2026, 6, 15, 0, 0, 0, DateTimeKind.Utc); });
+
+            foregroundTracker.Update((IntPtr)100, "CabinetWClass");
+            foregroundTracker.Update((IntPtr)200, "CabinetWClass");
+
+            TabBarViewModel validTarget = new TabBarViewModel((IntPtr)100, new MockUserSettings(), new MockExplorerService());
+
+            coordinator.HandleShowEvent(
+                (IntPtr)230,
+                delegate { return validTarget; },
+                delegate (TabBarViewModel vm) { return true; });
+
+            Assert.IsFalse(trackingState.ControlPanelTabLaunchCandidates.Contains((IntPtr)230));
+            Assert.IsFalse(trackingState.DesktopLaunchCandidates.Contains((IntPtr)230));
+            Assert.IsFalse(trackingState.HiddenPendingAbsorb.ContainsKey((IntPtr)230));
         }
 
         [TestMethod]
@@ -191,6 +236,33 @@ namespace UnitTestProject
             Assert.AreEqual(0, requests.Count);
             Assert.IsTrue(trackingState.IgnoredWindows.Contains((IntPtr)11));
             Assert.IsFalse(trackingState.ProcessingExplorerWindows.Contains((IntPtr)11));
+        }
+
+        [TestMethod]
+        public void PrepareProcessRequests_DoesNotReevaluate_ExplicitIndependentLaunchWindow_WhenNoValidTarget()
+        {
+            ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState();
+            trackingState.IgnoreExplicitIndependentLaunchWindow((IntPtr)12);
+
+            ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                new TabBarRegistry(),
+                trackingState,
+                new DesktopForegroundTracker(),
+                CreateLaunchTracker(trackingState),
+                delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return null; },
+                delegate (IntPtr hwnd) { },
+                delegate { return DateTime.UtcNow; });
+
+            List<ExplorerWindowProcessRequest> requests = coordinator.PrepareProcessRequests(
+                new List<IntPtr> { (IntPtr)12 },
+                delegate { return null; });
+
+            Assert.AreEqual(0, requests.Count);
+            Assert.IsTrue(trackingState.IgnoredWindows.Contains((IntPtr)12));
+            Assert.IsTrue(trackingState.ExplicitIndependentLaunchWindows.Contains((IntPtr)12));
+            Assert.IsFalse(trackingState.ProcessingExplorerWindows.Contains((IntPtr)12));
         }
 
         [TestMethod]

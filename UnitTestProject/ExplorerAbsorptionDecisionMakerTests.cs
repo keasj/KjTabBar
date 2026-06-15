@@ -279,7 +279,34 @@ namespace UnitTestProject
             bool allowSpecialPath;
             AbsorptionAction action = ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath);
 
-            Assert.AreEqual(AbsorptionAction.Ignore, action);
+            Assert.AreEqual(AbsorptionAction.Absorb, action);
+            Assert.AreEqual(_explorerService.PowerOptionsPath, resolvedPath);
+            Assert.IsTrue(allowSpecialPath);
+        }
+
+        [TestMethod]
+        public void Evaluate_ControlPanel_ManagedControlPanelLaunchSource_Returns_Absorb()
+        {
+            ExplorerWindowContext context = new ExplorerWindowContext
+            {
+                CurrentPath = _explorerService.PowerOptionsPath,
+                TitleVirtualPath = "電源オプション",
+                HasValidTarget = true,
+                HasControlPanelTarget = true,
+                IsDesktopCandidate = false,
+                HasActiveControlPanelTabOnValidTarget = false,
+                WasManagedControlPanelLaunchSource = true
+            };
+
+            _explorerService.IsControlPanelPathFunc = (p) => true;
+
+            string resolvedPath;
+            bool allowSpecialPath;
+            AbsorptionAction action = ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath);
+
+            Assert.AreEqual(AbsorptionAction.Absorb, action);
+            Assert.AreEqual(_explorerService.PowerOptionsPath, resolvedPath);
+            Assert.IsTrue(allowSpecialPath);
         }
 
         [TestMethod]

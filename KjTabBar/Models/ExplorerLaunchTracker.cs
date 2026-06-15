@@ -65,7 +65,6 @@ namespace KjTabBar.Models
 
         public void UpdateForegroundState(IntPtr foregroundWindow, string className)
         {
-            RegisterControlPanelTabLaunchCandidate(foregroundWindow, _desktopForegroundTracker.LastForegroundWindow);
             _desktopForegroundTracker.Update(foregroundWindow, className);
         }
 
@@ -108,6 +107,16 @@ namespace KjTabBar.Models
             return previousForegroundRoot == hwnd;
         }
 
+        public bool WasManagedControlPanelLaunchSource()
+        {
+            if (IsManagedControlPanelLaunchSourceWindow(_desktopForegroundTracker.LastForegroundWindow))
+            {
+                return true;
+            }
+
+            return IsManagedControlPanelLaunchSourceWindow(_desktopForegroundTracker.PreviousForegroundWindow);
+        }
+
         public bool TryRegisterDesktopLaunchCandidate(IntPtr hwnd)
         {
             if (hwnd == IntPtr.Zero)
@@ -134,33 +143,6 @@ namespace KjTabBar.Models
             return true;
         }
 
-        private void RegisterControlPanelTabLaunchCandidate(IntPtr foregroundWindow, IntPtr previousForegroundWindow)
-        {
-            IntPtr currentRoot = GetRootWindowOrSelf(foregroundWindow);
-            IntPtr previousRoot = GetRootWindowOrSelf(previousForegroundWindow);
-            if (currentRoot == IntPtr.Zero || previousRoot == IntPtr.Zero)
-            {
-                return;
-            }
-
-            if (currentRoot == previousRoot)
-            {
-                return;
-            }
-
-            if (_isManagedControlPanelLaunchSource == null || !_isManagedControlPanelLaunchSource(previousRoot))
-            {
-                return;
-            }
-
-            if (!IsUnmanagedExplorerWindow(currentRoot))
-            {
-                return;
-            }
-
-            _windowTracking.ControlPanelTabLaunchCandidates.Add(currentRoot);
-        }
-
         private IntPtr GetRootWindowOrSelf(IntPtr hwnd)
         {
             if (hwnd == IntPtr.Zero)
@@ -177,27 +159,22 @@ namespace KjTabBar.Models
             return hwnd;
         }
 
-        private bool IsUnmanagedExplorerWindow(IntPtr hwnd)
+        private bool IsManagedControlPanelLaunchSourceWindow(IntPtr hwnd)
         {
             if (hwnd == IntPtr.Zero)
             {
                 return false;
             }
 
-            if (_isManagedExplorerWindow != null && _isManagedExplorerWindow(hwnd))
+            IntPtr root = GetRootWindowOrSelf(hwnd);
+            if (root == IntPtr.Zero)
             {
                 return false;
             }
 
-            if (!_isWindow(hwnd))
-            {
-                return false;
-            }
-
-            string className = _getClassName(hwnd);
-            return className.Equals("CabinetWClass", StringComparison.OrdinalIgnoreCase);
+            return _isManagedControlPanelLaunchSource != null &&
+                   _isManagedControlPanelLaunchSource(root);
         }
-
         private static string GetClassNameCore(IntPtr hwnd)
         {
             StringBuilder className = new StringBuilder(256);

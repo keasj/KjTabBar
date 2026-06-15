@@ -135,7 +135,7 @@ namespace UnitTestProject
         }
 
         [TestMethod]
-        public void AbsorbExplorerWindow_ReusesActiveControlPanelTab_WhenEquivalentTabDoesNotExist()
+        public void AbsorbExplorerWindow_AddsControlPanelTab_WhenEquivalentTabDoesNotExist()
         {
             MockExplorerService explorerService = new MockExplorerService();
             explorerService.IsControlPanelPathFunc = delegate (string path)
@@ -163,8 +163,10 @@ namespace UnitTestProject
             bool absorbed = service.AbsorbExplorerWindow((IntPtr)202, targetViewModel, explorerService.PowerOptionsPath, true, true, delegate (IntPtr hwnd) { });
 
             Assert.IsTrue(absorbed);
-            Assert.AreEqual(2, targetViewModel.Tabs.Count);
+            Assert.AreEqual(3, targetViewModel.Tabs.Count);
+            Assert.AreEqual(explorerService.AllControlPanelPath, targetViewModel.Tabs[1].Path);
             Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.ActiveTab.Path);
+            Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.Tabs[2].Path);
             Assert.AreEqual((IntPtr)202, foregroundHwnd);
             Assert.AreEqual((IntPtr)202, targetViewModel.ExplorerHwnd);
             Assert.AreEqual((IntPtr)100, closedHwnd);
@@ -217,7 +219,7 @@ namespace UnitTestProject
         }
 
         [TestMethod]
-        public void AbsorbExplorerWindow_ReusesBackgroundControlPanelTab_WhenActiveTabIsNotControlPanel()
+        public void AbsorbExplorerWindow_PreservesBackgroundControlPanelTab_WhenActiveTabIsNotControlPanel()
         {
             MockExplorerService explorerService = new MockExplorerService();
             explorerService.IsControlPanelPathFunc = delegate (string path)
@@ -247,16 +249,18 @@ namespace UnitTestProject
             bool absorbed = service.AbsorbExplorerWindow((IntPtr)203, targetViewModel, explorerService.PowerOptionsPath, true, true, delegate (IntPtr hwnd) { });
 
             Assert.IsTrue(absorbed);
-            Assert.AreEqual(3, targetViewModel.Tabs.Count);
+            Assert.AreEqual(4, targetViewModel.Tabs.Count);
             Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.ActiveTab.Path);
-            Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.Tabs[1].Path);
+            Assert.AreEqual(explorerService.AllControlPanelPath, targetViewModel.Tabs[1].Path);
+            Assert.AreEqual(@"C:\Work", targetViewModel.Tabs[2].Path);
+            Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.Tabs[3].Path);
             Assert.AreEqual((IntPtr)203, foregroundHwnd);
             Assert.AreEqual((IntPtr)203, targetViewModel.ExplorerHwnd);
             Assert.AreEqual((IntPtr)100, closedHwnd);
         }
 
         [TestMethod]
-        public void AbsorbExplorerWindow_ReusesControlPanelTab_WhenPathNormalizesToControlPanelItem()
+        public void AbsorbExplorerWindow_PreservesControlPanelRoot_WhenPathNormalizesToControlPanelItem()
         {
             MockExplorerService explorerService = new MockExplorerService();
             explorerService.IsControlPanelPathFunc = delegate (string path)
@@ -294,12 +298,80 @@ namespace UnitTestProject
                 delegate (IntPtr hwnd) { });
 
             Assert.IsTrue(absorbed);
-            Assert.AreEqual(2, targetViewModel.Tabs.Count);
+            Assert.AreEqual(3, targetViewModel.Tabs.Count);
             Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.ActiveTab.Path);
-            Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.Tabs[1].Path);
+            Assert.AreEqual(explorerService.AllControlPanelPath, targetViewModel.Tabs[1].Path);
+            Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.Tabs[2].Path);
             Assert.AreEqual((IntPtr)204, foregroundHwnd);
             Assert.AreEqual((IntPtr)204, targetViewModel.ExplorerHwnd);
             Assert.AreEqual((IntPtr)100, closedHwnd);
+        }
+
+        [TestMethod]
+        public void AbsorbExplorerWindow_CreatesControlPanelTab_WhenNoControlPanelTabExists()
+        {
+            MockExplorerService explorerService = new MockExplorerService();
+            explorerService.IsControlPanelPathFunc = delegate (string path)
+            {
+                return path == explorerService.PowerOptionsPath;
+            };
+
+            ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState();
+            IntPtr foregroundHwnd = IntPtr.Zero;
+            IntPtr closedHwnd = IntPtr.Zero;
+            ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                explorerService,
+                trackingState,
+                TestTabPersistenceFactory.Create(),
+                delegate (IntPtr hwnd) { return string.Empty; },
+                delegate (IntPtr hwnd) { },
+                delegate (IntPtr hwnd) { foregroundHwnd = hwnd; },
+                delegate (IntPtr hwnd) { closedHwnd = hwnd; },
+                delegate { return null; },
+                delegate { });
+
+            TabBarViewModel targetViewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorerService);
+            Assert.AreEqual(1, targetViewModel.Tabs.Count);
+
+            bool absorbed = service.AbsorbExplorerWindow((IntPtr)201, targetViewModel, explorerService.PowerOptionsPath, true, true, delegate (IntPtr hwnd) { });
+
+            Assert.IsTrue(absorbed);
+            Assert.AreEqual(2, targetViewModel.Tabs.Count);
+            Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.ActiveTab.Path);
+            Assert.AreEqual((IntPtr)201, foregroundHwnd);
+            Assert.AreEqual((IntPtr)201, targetViewModel.ExplorerHwnd);
+            Assert.AreEqual((IntPtr)100, closedHwnd);
+        }
+
+        [TestMethod]
+        public void AbsorbExplorerWindow_DoesNotLeaveTemporaryControlPanelTab_WhenRebindFails()
+        {
+            MockExplorerService explorerService = new MockExplorerService();
+            explorerService.IsControlPanelPathFunc = delegate (string path)
+            {
+                return path == explorerService.PowerOptionsPath;
+            };
+
+            ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                explorerService,
+                new ExplorerWindowTrackingState(),
+                TestTabPersistenceFactory.Create(),
+                delegate (IntPtr hwnd) { return string.Empty; },
+                delegate (IntPtr hwnd) { },
+                delegate (IntPtr hwnd) { },
+                delegate (IntPtr hwnd, NativeMethods.RECT rect) { },
+                delegate (TabBarViewModel viewModel, IntPtr hwnd) { return false; },
+                delegate (IntPtr hwnd) { },
+                delegate { return null; },
+                delegate { });
+
+            TabBarViewModel targetViewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorerService);
+
+            bool absorbed = service.AbsorbExplorerWindow((IntPtr)201, targetViewModel, explorerService.PowerOptionsPath, true, true, delegate (IntPtr hwnd) { });
+
+            Assert.IsTrue(absorbed);
+            Assert.AreEqual(2, targetViewModel.Tabs.Count);
+            Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.ActiveTab.Path);
         }
 
         [TestMethod]

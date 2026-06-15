@@ -254,19 +254,15 @@ namespace KjTabBar.Services
                 return false;
             }
 
+            bool createdTab = false;
             TabItemViewModel reusableTab = targetViewModel.FindTabByPath(path);
             if (reusableTab == null)
             {
-                TabItemViewModel activeTab = targetViewModel.ActiveTab;
-                reusableTab = activeTab;
-                if (reusableTab == null || string.IsNullOrEmpty(reusableTab.Path) || !_explorerService.IsControlPanelPath(reusableTab.Path))
-                {
-                    reusableTab = FindAnyControlPanelTab(targetViewModel);
-                    if (reusableTab == null)
-                    {
-                        return false;
-                    }
-                }
+                string title = _explorerService.GetFolderName(path);
+                string baseTitle = string.IsNullOrEmpty(title) ? _explorerService.GetLocalizedHomeTitle() : title;
+                reusableTab = new TabItemViewModel(path, baseTitle, _explorerService);
+                targetViewModel.Tabs.Add(reusableTab);
+                createdTab = true;
             }
 
             IntPtr previousExplorerHwnd = targetViewModel.ExplorerHwnd;
@@ -281,19 +277,18 @@ namespace KjTabBar.Services
 
             if (_rebindExplorerWindow == null || !_rebindExplorerWindow(targetViewModel, newExplorerHwnd))
             {
+                if (createdTab)
+                {
+                    targetViewModel.Tabs.Remove(reusableTab);
+                }
                 return false;
             }
 
-            if (!string.Equals(reusableTab.Path, path, StringComparison.OrdinalIgnoreCase))
+            targetViewModel.SelectTab(reusableTab);
+            if (createdTab)
             {
-                string title = _explorerService.GetFolderName(path);
-                reusableTab.Path = path;
-                reusableTab.BaseTitle = string.IsNullOrEmpty(title) ? _explorerService.GetLocalizedHomeTitle() : title;
-                reusableTab.Title = reusableTab.BaseTitle;
                 targetViewModel.UpdateTabTitles();
             }
-
-            targetViewModel.SelectTab(reusableTab);
 
             _forceSetForegroundWindow(newExplorerHwnd);
 

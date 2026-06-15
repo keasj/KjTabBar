@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
+using KjTabBar.Helpers;
 using KjTabBar.ViewModels;
 
 namespace KjTabBar.Models
@@ -25,21 +27,57 @@ namespace KjTabBar.Models
             }
 
             bool isControlPanelRootPath = _explorerService.IsControlPanelRootPath(path);
+            string normalizedPath = _explorerService.NormalizeShellNamespacePath(path);
+            bool isPowerOptionsPath =
+                !string.IsNullOrEmpty(normalizedPath) &&
+                normalizedPath.Equals(_explorerService.PowerOptionsPath, StringComparison.OrdinalIgnoreCase);
+            StringBuilder debugBuilder = null;
+            if (_explorerService.IsControlPanelPath(path))
+            {
+                debugBuilder = new StringBuilder();
+                debugBuilder.AppendFormat(
+                    "CP search path={0} normalized={1} candidates={2} isRoot={3} isPowerOptions={4}",
+                    path ?? string.Empty,
+                    normalizedPath ?? string.Empty,
+                    candidates.Count,
+                    isControlPanelRootPath,
+                    isPowerOptionsPath);
+            }
 
-            TabBarViewModel activeControlPanelTarget = null;
-            TabBarViewModel firstControlPanelTarget = null;
+            TabBarViewModel soleControlPanelHost = null;
             TabBarViewModel foregroundControlPanelHost = null;
             TabBarViewModel previousForegroundControlPanelHost = null;
             for (int i = 0; i < candidates.Count; i++)
             {
                 TabBarViewModel viewModel = candidates[i];
                 bool hasAnyControlPanelTab = HasAnyControlPanelTab(viewModel);
+                bool hasEquivalentControlPanelTab = HasEquivalentControlPanelTab(viewModel, path);
                 bool isForegroundRelated =
                     isForegroundRelatedWindow != null &&
                     isForegroundRelatedWindow(viewModel.ExplorerHwnd);
                 bool wasForegroundRelated =
                     wasForegroundRelatedWindow != null &&
                     wasForegroundRelatedWindow(viewModel.ExplorerHwnd);
+                if (debugBuilder != null)
+                {
+                    debugBuilder.AppendFormat(
+                        " | hwnd={0} hasAnyCp={1} hasEquivalent={2} isFg={3} wasFg={4} active={5}",
+                        viewModel.ExplorerHwnd,
+                        hasAnyControlPanelTab,
+                        hasEquivalentControlPanelTab,
+                        isForegroundRelated,
+                        wasForegroundRelated,
+                        HasActiveControlPanelTab(viewModel));
+                }
+
+                if (!isControlPanelRootPath &&
+                    isPowerOptionsPath &&
+                    hasAnyControlPanelTab &&
+                    soleControlPanelHost == null &&
+                    candidates.Count == 1)
+                {
+                    soleControlPanelHost = viewModel;
+                }
 
                 if (!isControlPanelRootPath &&
                     foregroundControlPanelHost == null &&
@@ -57,7 +95,7 @@ namespace KjTabBar.Models
                     previousForegroundControlPanelHost = viewModel;
                 }
 
-                if (!HasEquivalentControlPanelTab(viewModel, path))
+                if (!hasEquivalentControlPanelTab)
                 {
                     continue;
                 }
@@ -71,43 +109,50 @@ namespace KjTabBar.Models
                 {
                     return viewModel;
                 }
-
-                if (activeControlPanelTarget == null)
-                {
-                    TabItemViewModel activeTab = viewModel.ActiveTab;
-                    if (activeTab != null && _explorerService.IsControlPanelPath(activeTab.Path))
-                    {
-                        activeControlPanelTarget = viewModel;
-                    }
-                }
-
-                if (firstControlPanelTarget == null)
-                {
-                    firstControlPanelTarget = viewModel;
-                }
             }
 
             if (isControlPanelRootPath)
             {
+                if (debugBuilder != null)
+                {
+                    AppLogger.LogInfo("ControlPanelTabSearch", debugBuilder.ToString() + " => result=<null root>");
+                }
                 return null;
-            }
-
-            if (activeControlPanelTarget != null)
-            {
-                return activeControlPanelTarget;
             }
 
             if (foregroundControlPanelHost != null)
             {
+                if (debugBuilder != null)
+                {
+                    AppLogger.LogInfo("ControlPanelTabSearch", debugBuilder.ToString() + string.Format(" => result={0} reason=foregroundHost", foregroundControlPanelHost.ExplorerHwnd));
+                }
                 return foregroundControlPanelHost;
             }
 
             if (previousForegroundControlPanelHost != null)
             {
+                if (debugBuilder != null)
+                {
+                    AppLogger.LogInfo("ControlPanelTabSearch", debugBuilder.ToString() + string.Format(" => result={0} reason=previousForegroundHost", previousForegroundControlPanelHost.ExplorerHwnd));
+                }
                 return previousForegroundControlPanelHost;
             }
 
-            return firstControlPanelTarget;
+            if (soleControlPanelHost != null)
+            {
+                if (debugBuilder != null)
+                {
+                    AppLogger.LogInfo("ControlPanelTabSearch", debugBuilder.ToString() + string.Format(" => result={0} reason=soleControlPanelHost", soleControlPanelHost.ExplorerHwnd));
+                }
+                return soleControlPanelHost;
+            }
+
+            if (debugBuilder != null)
+            {
+                AppLogger.LogInfo("ControlPanelTabSearch", debugBuilder.ToString() + " => result=<null>");
+            }
+
+            return null;
         }
 
         public bool HasAnyControlPanelTab(TabBarViewModel viewModel)

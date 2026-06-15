@@ -59,9 +59,18 @@ namespace KjTabBar.Services
                 return;
             }
 
-            if (result.Action == AbsorptionAction.CreateNewTabBar && validTarget != null)
+            if (result.IsControlPanelPath)
             {
-                return;
+                AppLogger.LogInfo(
+                    "ExplorerWindowOutcomeCoordinator",
+                    string.Format(
+                        "CP outcome hwnd={0} action={1} resolvedPath={2} validTarget={3} controlPanelTarget={4} retryCount={5}",
+                        hwnd,
+                        result.Action,
+                        result.ResolvedPath ?? string.Empty,
+                        validTarget != null ? validTarget.ExplorerHwnd.ToString() : string.Empty,
+                        controlPanelTarget != null ? controlPanelTarget.ExplorerHwnd.ToString() : string.Empty,
+                        retryCount));
             }
 
             switch (result.Action)
@@ -81,6 +90,11 @@ namespace KjTabBar.Services
                     break;
 
                 case AbsorptionAction.CreateNewTabBar:
+                    if (validTarget != null)
+                    {
+                        return;
+                    }
+
                     _windowTracking.ClearAbsorptionState(hwnd);
                     TryCreateNewTabBar(hwnd, result.ResolvedPath, result.UseResolvedPathOnCreate);
                     break;

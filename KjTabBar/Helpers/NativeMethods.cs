@@ -113,6 +113,9 @@ namespace KjTabBar.Helpers
         [DllImport("user32.dll")]
         public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr ProcessId);
 
+        [DllImport("user32.dll")]
+        public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
         [DllImport("kernel32.dll")]
         public static extern uint GetCurrentThreadId();
 
@@ -208,6 +211,7 @@ namespace KjTabBar.Helpers
         public const uint SWP_NOACTIVATE = 0x0010;
 
         public const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+        public const uint EVENT_SYSTEM_MOVESIZEEND = 0x000B;
         public const uint EVENT_OBJECT_SHOW = 0x8002;
         public const uint EVENT_OBJECT_DESTROY = 0x8001;
         public const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
@@ -427,5 +431,16 @@ namespace KjTabBar.Helpers
 
         [DllImport("shell32.dll", ExactSpelling = true)]
         public static extern void ILFree(IntPtr pidl);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+
+        public const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
+
+        [DllImport("user32.dll")]
+        public static extern uint GetDpiForWindow(IntPtr hwnd);
+
+        [DllImport("shcore.dll")]
+        public static extern int GetDpiForMonitor(IntPtr hmonitor, uint dpiType, out uint dpiX, out uint dpiY);
     }
 }

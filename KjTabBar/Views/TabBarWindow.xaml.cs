@@ -24,6 +24,9 @@ namespace KjTabBar.Views
         private DispatcherTimer _positionTimer;
         private DispatcherTimer _syncTimer;
         private IntPtr _myHwnd;
+        private IntPtr _locationHook = IntPtr.Zero;
+        private IntPtr _trackedExplorerHwnd = IntPtr.Zero;
+        private NativeMethods.WinEventDelegate _locationEventCallback;
 
         // ドラッグ用変数
         private Point _dragStartPoint;
@@ -65,6 +68,7 @@ namespace KjTabBar.Views
             if (vm != null)
             {
                 SetupTabsWithAddButton(vm);
+                RegisterLocationHook(vm.ExplorerHwnd);
             }
 
             _positionTimer = new DispatcherTimer();
@@ -205,6 +209,7 @@ namespace KjTabBar.Views
             {
                 WindowInteropHelper helper = new WindowInteropHelper(this);
                 helper.Owner = explorerHwnd;
+                RegisterLocationHook(explorerHwnd);
                 UpdatePosition();
             }
         }
@@ -299,6 +304,7 @@ namespace KjTabBar.Views
             PreviewDragOver -= TabBarWindow_DragOver;
             PreviewDrop -= TabBarWindow_Drop;
             ThemeManager.Instance.ThemeChanged -= ThemeManager_ThemeChanged;
+            UnregisterLocationHook();
             StopTimers();
             DetachDynamicUiResources();
             IDisposable disposableVm = DataContext as IDisposable;
@@ -409,15 +415,16 @@ namespace KjTabBar.Views
                     TabItemViewModel tab = (TabItemViewModel)element.DataContext;
                     if (tab != null)
                     {
+                        string draggedPath = tab.Path;
                         DragDropEffects effect = DragDrop.DoDragDrop(element, tab, DragDropEffects.Move);
-                        OpenDraggedTabInNewWindowIfDroppedOutside(effect, tab);
+                        OpenDraggedTabInNewWindowIfDroppedOutside(effect, tab, draggedPath);
                     }
                     _isDragging = false;
                 }
             }
         }
 
-        private void OpenDraggedTabInNewWindowIfDroppedOutside(DragDropEffects effect, TabItemViewModel tab)
+        private void OpenDraggedTabInNewWindowIfDroppedOutside(DragDropEffects effect, TabItemViewModel tab, string draggedPath)
         {
             TabBarViewModel vm = GetVM();
             if (tab == null || vm == null || _explorerService == null)
@@ -440,6 +447,7 @@ namespace KjTabBar.Views
             TabExternalDragOpenDecider.TryOpenInNewWindowAndCloseSourceTab(
                 effect,
                 tab,
+                draggedPath,
                 vm,
                 OpenPathInNewWindow,
                 cursorPoint,
@@ -553,6 +561,80 @@ namespace KjTabBar.Views
             {
                 NativeMethods.ForceSetForegroundWindow(vm.ExplorerHwnd);
             }
+        }
+
+        private void UnregisterLocationHook()
+        {
+            _trackedExplorerHwnd = IntPtr.Zero;
+            if (_locationHook != IntPtr.Zero)
+            {
+                try
+                {
+                    NativeMethods.UnhookWinEvent(_locationHook);
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.LogError("TabBarWindow", "Failed to unhook location event hook.", ex);
+                }
+                _locationHook = IntPtr.Zero;
+                _locationEventCallback = null;
+            }
+        }
+
+        private void RegisterLocationHook(IntPtr explorerHwnd)
+        {
+            UnregisterLocationHook();
+            if (explorerHwnd == IntPtr.Zero) return;
+            _trackedExplorerHwnd = explorerHwnd;
+
+            try
+            {
+                uint processId;
+                NativeMethods.GetWindowThreadProcessId(explorerHwnd, out processId);
+                if (processId == 0) return;
+
+                _locationEventCallback = LocationEventCallback;
+                _locationHook = NativeMethods.SetWinEventHook(
+                    NativeMethods.EVENT_OBJECT_LOCATIONCHANGE,
+                    NativeMethods.EVENT_OBJECT_LOCATIONCHANGE,
+                    IntPtr.Zero,
+                    _locationEventCallback,
+                    processId,
+                    0,
+                    NativeMethods.WINEVENT_OUTOFCONTEXT);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("TabBarWindow", "Failed to register location event hook.", ex);
+            }
+        }
+
+        private void LocationEventCallback(
+            IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
+            int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
+        {
+            try
+            {
+                if (!ShouldHandleLocationChangeEvent(eventType, hwnd, idObject, _trackedExplorerHwnd)) return;
+                if (Dispatcher == null || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    UpdatePosition();
+                }));
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("TabBarWindow", "Error in LocationEventCallback.", ex);
+            }
+        }
+
+        internal static bool ShouldHandleLocationChangeEvent(uint eventType, IntPtr hwnd, int idObject, IntPtr trackedExplorerHwnd)
+        {
+            return eventType == NativeMethods.EVENT_OBJECT_LOCATIONCHANGE &&
+                   idObject == 0 &&
+                   hwnd != IntPtr.Zero &&
+                   hwnd == trackedExplorerHwnd;
         }
     }
 }

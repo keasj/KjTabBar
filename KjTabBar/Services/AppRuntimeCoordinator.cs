@@ -19,6 +19,7 @@ namespace KjTabBar.Services
         public WinEventHookRegistration ShowEventHook { get; set; }
         public ExplorerWindowTrackingState WindowTracking { get; set; }
         public WinEventHookRegistration ForegroundEventHook { get; set; }
+        public WinEventHookRegistration MoveSizeEndEventHook { get; set; }
         public Mutex Mutex { get; set; }
     }
 
@@ -44,6 +45,7 @@ namespace KjTabBar.Services
 
             mutex.Dispose();
             mutex = null;
+
             return false;
         }
 
@@ -106,6 +108,21 @@ namespace KjTabBar.Services
             if (context.ExplorerService != null)
             {
                 context.ExplorerService.ReleaseCachedComObjects();
+
+                if (ComThreadService.IsCreated)
+                {
+                    try
+                    {
+                        ComThreadService.Instance.InvokeAsync(() =>
+                        {
+                            context.ExplorerService.ReleaseCachedComObjects();
+                        }).Wait(1000);
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.LogError("App", "Failed to release worker COM cache during shutdown.", ex);
+                    }
+                }
             }
 
             if (context.TabBars != null)
@@ -115,6 +132,7 @@ namespace KjTabBar.Services
 
             DisposeIfPresent(context.TrayIconService);
             DisposeIfPresent(context.ShowEventHook);
+            DisposeIfPresent(context.MoveSizeEndEventHook);
 
             try
             {

@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Interop;
 using KjTabBar.Helpers;
 using KjTabBar.Models;
 using KjTabBar.ViewModels;
@@ -12,6 +13,7 @@ namespace KjTabBar.Views
         private readonly TabBarWindow _window;
         private readonly IExplorerService _explorerService;
         private double _dpiScale = 1.0;
+        private IntPtr _windowHwnd = IntPtr.Zero;
 
         public double DpiScale
         {
@@ -61,6 +63,43 @@ namespace KjTabBar.Views
             return false;
         }
 
+        private IntPtr GetWindowHandle()
+        {
+            if (_windowHwnd == IntPtr.Zero)
+            {
+                _windowHwnd = new WindowInteropHelper(_window).Handle;
+            }
+            return _windowHwnd;
+        }
+
+        private double GetDpiScaleForWindow(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return 1.0;
+            try
+            {
+                uint dpi = NativeMethods.GetDpiForWindow(hwnd);
+                if (dpi != 0)
+                {
+                    return dpi / 96.0;
+                }
+
+                IntPtr hMonitor = NativeMethods.MonitorFromWindow(hwnd, NativeMethods.MONITOR_DEFAULTTONEAREST);
+                if (hMonitor != IntPtr.Zero)
+                {
+                    uint dpiX, dpiY;
+                    if (NativeMethods.GetDpiForMonitor(hMonitor, 0, out dpiX, out dpiY) == 0)
+                    {
+                        return dpiX / 96.0;
+                    }
+                }
+            }
+            catch
+            {
+                // Fallback to internal _dpiScale if shcore.dll is unavailable or monitor API fails
+            }
+            return _dpiScale;
+        }
+
         public void UpdatePosition(IntPtr explorerHwnd, TabBarViewModel vm)
         {
             if (vm == null) return;
@@ -84,13 +123,48 @@ namespace KjTabBar.Views
             NativeMethods.RECT contentRect = _explorerService.GetExplorerWindowRect(explorerHwnd);
             if (contentRect.Width <= 0) return;
 
-            double expectedLeft = contentRect.Left / _dpiScale;
-            double expectedTop = contentRect.Top / _dpiScale - _window.ActualHeight;
-            double expectedWidth = contentRect.Width / _dpiScale;
+            IntPtr myHwnd = GetWindowHandle();
+            if (myHwnd == IntPtr.Zero) return;
 
-            if (Math.Abs(_window.Left - expectedLeft) > 0.1) _window.Left = expectedLeft;
-            if (Math.Abs(_window.Top - expectedTop) > 0.1) _window.Top = expectedTop;
-            if (Math.Abs(_window.Width - expectedWidth) > 0.1) _window.Width = expectedWidth;
+            double actualHeight = _window.ActualHeight;
+            if (actualHeight <= 0)
+            {
+                _window.UpdateLayout();
+                actualHeight = _window.ActualHeight;
+                if (actualHeight <= 0)
+                {
+                    actualHeight = double.IsNaN(_window.Height) ? 30.0 : _window.Height;
+                }
+            }
+
+            double currentDpi = GetDpiScaleForWindow(explorerHwnd);
+            int expectedHeightPhysical = (int)Math.Round(actualHeight * currentDpi);
+            int expectedLeftPhysical = contentRect.Left;
+            int expectedTopPhysical = contentRect.Top - expectedHeightPhysical;
+            int expectedWidthPhysical = contentRect.Width;
+
+            NativeMethods.RECT myRect;
+            if (NativeMethods.GetWindowRect(myHwnd, out myRect))
+            {
+                int currentWidth = myRect.Right - myRect.Left;
+                int currentHeight = myRect.Bottom - myRect.Top;
+                if (myRect.Left == expectedLeftPhysical &&
+                    myRect.Top == expectedTopPhysical &&
+                    currentWidth == expectedWidthPhysical &&
+                    currentHeight == expectedHeightPhysical)
+                {
+                    return;
+                }
+            }
+
+            NativeMethods.SetWindowPos(
+                myHwnd,
+                IntPtr.Zero,
+                expectedLeftPhysical,
+                expectedTopPhysical,
+                expectedWidthPhysical,
+                expectedHeightPhysical,
+                NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
         }
     }
 }

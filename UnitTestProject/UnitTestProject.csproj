@@ -80,6 +80,7 @@
     <Compile Include="ExplorerTabTargetResolverTests.cs" />
     <Compile Include="AppMonitorCycleCoordinatorTests.cs" />
     <Compile Include="TabExternalDragOpenDeciderTests.cs" />
+    <Compile Include="TabBarWindowLocationHookTests.cs" />
     <Compile Include="LineEndingPolicyTests.cs" />
     <Compile Include="LanguageResourceServiceTests.cs" />
     <Compile Include="ShellLocationNameResolverTests.cs" />
