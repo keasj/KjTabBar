@@ -20,6 +20,18 @@
     <system:String x:Key="MenuSettings">設定...</system:String>
     <system:String x:Key="MenuCopyHere">ここにコピー(&amp;C)</system:String>
     <system:String x:Key="MenuMoveHere">ここに移動(&amp;M)</system:String>
+    <system:String x:Key="MenuShortcutHere">ショートカットをここに作成(&amp;S)</system:String>
+    <system:String x:Key="MenuSymlinkHere">シンボリックリンクをここに作成(&amp;L)</system:String>
     
+    <system:String x:Key="AddTabButtonToolTip">新しいタブ (フォルダを選択)</system:String>
+    <system:String x:Key="AddTabDialogDescription">タブに追加するフォルダを選択してください</system:String>
+    <system:String x:Key="AbsorbZoneLabel">吸収</system:String>
+    <system:String x:Key="AbsorbZoneToolTip">Explorer ウィンドウをここで離すとタブへ吸収します。</system:String>
+    <system:String x:Key="SaveSettingsErrorTitle">保存エラー</system:String>
+    <system:String x:Key="SaveSettingsErrorMessage">設定の保存に失敗しました。</system:String>
+    <system:String x:Key="FileOperationErrorTitle">操作エラー</system:String>
+    <system:String x:Key="FileOperationCompleteErrorMessage">ファイル操作を完了できませんでした。</system:String>
+    <system:String x:Key="FileOperationStartErrorMessage">ファイル操作の開始に失敗しました。</system:String>
+
     <system:String x:Key="TrayMenuExit">終了</system:String>
 </ResourceDictionary>

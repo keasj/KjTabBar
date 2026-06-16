@@ -1,4 +1,6 @@
 using System;
+using System.Threading.Tasks;
+using System.Windows.Threading;
 using KjTabBar.Helpers;
 using KjTabBar.Views;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -11,7 +13,7 @@ namespace UnitTestProject
         [TestMethod]
         public void ShouldHandleLocationChangeEvent_ReturnsTrue_ForTrackedExplorerWindowMove()
         {
-            bool result = TabBarWindow.ShouldHandleLocationChangeEvent(
+            bool result = TabBarWindowRuntimeCoordinator.ShouldHandleLocationChangeEvent(
                 NativeMethods.EVENT_OBJECT_LOCATIONCHANGE,
                 (IntPtr)10,
                 0,
@@ -23,7 +25,7 @@ namespace UnitTestProject
         [TestMethod]
         public void ShouldHandleLocationChangeEvent_ReturnsFalse_ForChildObjectMove()
         {
-            bool result = TabBarWindow.ShouldHandleLocationChangeEvent(
+            bool result = TabBarWindowRuntimeCoordinator.ShouldHandleLocationChangeEvent(
                 NativeMethods.EVENT_OBJECT_LOCATIONCHANGE,
                 (IntPtr)10,
                 1,
@@ -35,13 +37,136 @@ namespace UnitTestProject
         [TestMethod]
         public void ShouldHandleLocationChangeEvent_ReturnsFalse_ForDifferentExplorerWindow()
         {
-            bool result = TabBarWindow.ShouldHandleLocationChangeEvent(
+            bool result = TabBarWindowRuntimeCoordinator.ShouldHandleLocationChangeEvent(
                 NativeMethods.EVENT_OBJECT_LOCATIONCHANGE,
                 (IntPtr)11,
                 0,
                 (IntPtr)10);
 
             Assert.IsFalse(result);
+        }
+
+        [TestMethod]
+        public void GetPositionTimerInterval_ReturnsFastInterval_WhenLocationHookIsMissing()
+        {
+            TimeSpan result = TabBarWindowRuntimeCoordinator.GetPositionTimerInterval(IntPtr.Zero);
+
+            Assert.AreEqual(TimeSpan.FromMilliseconds(50), result);
+        }
+
+        [TestMethod]
+        public void GetPositionTimerInterval_ReturnsFallbackInterval_WhenLocationHookIsRegistered()
+        {
+            TimeSpan result = TabBarWindowRuntimeCoordinator.GetPositionTimerInterval((IntPtr)10);
+
+            Assert.AreEqual(TimeSpan.FromMilliseconds(500), result);
+        }
+
+        [TestMethod]
+        public void ShouldRepositionAfterRenderSizeChange_ReturnsTrue_WhenLoadedAndHeightChanged()
+        {
+            bool result = TabBarWindowRuntimeCoordinator.ShouldRepositionAfterRenderSizeChange(true, true);
+
+            Assert.IsTrue(result);
+        }
+
+        [TestMethod]
+        public void ShouldRepositionAfterRenderSizeChange_ReturnsFalse_WhenHeightDidNotChange()
+        {
+            bool result = TabBarWindowRuntimeCoordinator.ShouldRepositionAfterRenderSizeChange(true, false);
+
+            Assert.IsFalse(result);
+        }
+
+        [TestMethod]
+        public void ShouldRepositionAfterRenderSizeChange_ReturnsFalse_WhenNotLoaded()
+        {
+            bool result = TabBarWindowRuntimeCoordinator.ShouldRepositionAfterRenderSizeChange(false, true);
+
+            Assert.IsFalse(result);
+        }
+
+        [TestMethod]
+        public void HandlePositionTimerTick_ClosesWindow_WhenExplorerIsGone()
+        {
+            int closeCalls = 0;
+            int updateCalls = 0;
+            TabBarWindowRuntimeCoordinator coordinator = CreateCoordinator(
+                delegate { return false; },
+                delegate { updateCalls++; },
+                delegate { closeCalls++; });
+
+            coordinator.HandlePositionTimerTick();
+
+            Assert.AreEqual(1, closeCalls);
+            Assert.AreEqual(0, updateCalls);
+        }
+
+        [TestMethod]
+        public void HandlePositionTimerTick_Repositions_WhenExplorerIsAlive()
+        {
+            int closeCalls = 0;
+            int updateCalls = 0;
+            TabBarWindowRuntimeCoordinator coordinator = CreateCoordinator(
+                delegate { return true; },
+                delegate { updateCalls++; },
+                delegate { closeCalls++; });
+
+            coordinator.HandlePositionTimerTick();
+
+            Assert.AreEqual(0, closeCalls);
+            Assert.AreEqual(1, updateCalls);
+        }
+
+        [TestMethod]
+        public async Task HandleSyncTimerTickAsync_DoesNotOverlapConcurrentSyncs()
+        {
+            int syncCalls = 0;
+            TaskCompletionSource<bool> gate = new TaskCompletionSource<bool>();
+            TabBarWindowRuntimeCoordinator coordinator = CreateCoordinator(
+                delegate { return true; },
+                delegate { },
+                delegate { },
+                async delegate
+                {
+                    syncCalls++;
+                    await gate.Task;
+                });
+
+            Task first = coordinator.HandleSyncTimerTickAsync();
+            Task second = coordinator.HandleSyncTimerTickAsync();
+
+            await Task.Delay(10);
+            gate.SetResult(true);
+            await Task.WhenAll(first, second);
+
+            Assert.AreEqual(1, syncCalls);
+        }
+
+        private static TabBarWindowRuntimeCoordinator CreateCoordinator(
+            Func<bool> isExplorerAlive,
+            Action updatePosition,
+            Action closeWindow)
+        {
+            return CreateCoordinator(
+                isExplorerAlive,
+                updatePosition,
+                closeWindow,
+                delegate { return Task.CompletedTask; });
+        }
+
+        private static TabBarWindowRuntimeCoordinator CreateCoordinator(
+            Func<bool> isExplorerAlive,
+            Action updatePosition,
+            Action closeWindow,
+            Func<Task> syncAsync)
+        {
+            return new TabBarWindowRuntimeCoordinator(
+                Dispatcher.CurrentDispatcher,
+                isExplorerAlive,
+                updatePosition,
+                syncAsync,
+                closeWindow);
         }
     }
 }

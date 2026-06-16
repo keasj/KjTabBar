@@ -26,7 +26,7 @@ namespace KjTabBar.Services
             }
             if (string.IsNullOrEmpty(exitText))
             {
-                exitText = "終了";
+                exitText = "Exit";
             }
 
             System.Windows.Forms.ToolStripMenuItem exitItem = new System.Windows.Forms.ToolStripMenuItem(exitText);

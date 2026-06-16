@@ -254,16 +254,10 @@ namespace KjTabBar.Services
                 return false;
             }
 
-            bool createdTab = false;
-            TabItemViewModel reusableTab = targetViewModel.FindTabByPath(path);
-            if (reusableTab == null)
-            {
-                string title = _explorerService.GetFolderName(path);
-                string baseTitle = string.IsNullOrEmpty(title) ? _explorerService.GetLocalizedHomeTitle() : title;
-                reusableTab = new TabItemViewModel(path, baseTitle, _explorerService);
-                targetViewModel.Tabs.Add(reusableTab);
-                createdTab = true;
-            }
+            string title = _explorerService.GetFolderName(path);
+            string baseTitle = string.IsNullOrEmpty(title) ? _explorerService.GetLocalizedHomeTitle() : title;
+            TabItemViewModel reusableTab = new TabItemViewModel(path, baseTitle, _explorerService);
+            targetViewModel.Tabs.Add(reusableTab);
 
             IntPtr previousExplorerHwnd = targetViewModel.ExplorerHwnd;
             NativeMethods.RECT previousExplorerRect = _explorerService.GetExplorerWindowRect(previousExplorerHwnd);
@@ -277,18 +271,12 @@ namespace KjTabBar.Services
 
             if (_rebindExplorerWindow == null || !_rebindExplorerWindow(targetViewModel, newExplorerHwnd))
             {
-                if (createdTab)
-                {
-                    targetViewModel.Tabs.Remove(reusableTab);
-                }
+                targetViewModel.Tabs.Remove(reusableTab);
                 return false;
             }
 
             targetViewModel.SelectTab(reusableTab);
-            if (createdTab)
-            {
-                targetViewModel.UpdateTabTitles();
-            }
+            targetViewModel.UpdateTabTitles();
 
             _forceSetForegroundWindow(newExplorerHwnd);
 

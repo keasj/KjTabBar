@@ -97,7 +97,7 @@ namespace UnitTestProject
         }
 
         [TestMethod]
-        public void AbsorbExplorerWindow_ReusesExistingControlPanelTab_WhenEquivalentTabExists()
+        public void AbsorbExplorerWindow_AddsControlPanelTab_WhenEquivalentTabAlreadyExists()
         {
             MockExplorerService explorerService = new MockExplorerService();
             explorerService.IsControlPanelPathFunc = delegate (string path)
@@ -127,8 +127,10 @@ namespace UnitTestProject
             bool absorbed = service.AbsorbExplorerWindow((IntPtr)201, targetViewModel, explorerService.PowerOptionsPath, true, true, delegate (IntPtr hwnd) { });
 
             Assert.IsTrue(absorbed);
-            Assert.AreEqual(3, targetViewModel.Tabs.Count);
+            Assert.AreEqual(4, targetViewModel.Tabs.Count);
             Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.ActiveTab.Path);
+            Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.Tabs[2].Path);
+            Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.Tabs[3].Path);
             Assert.AreEqual((IntPtr)201, foregroundHwnd);
             Assert.AreEqual((IntPtr)201, targetViewModel.ExplorerHwnd);
             Assert.AreEqual((IntPtr)100, closedHwnd);

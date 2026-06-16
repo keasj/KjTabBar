@@ -15,6 +15,8 @@ Instead of hooking into or modifying Explorer itself, it places an independent t
   - Reorder tabs with left-button drag
   - Drag a tab out of the tab bar and drop it outside the Explorer window to move that tab into a new window and close the source tab
   - Move or copy files and folders onto tabs by dropping items from outside
+  - Drag an independent Explorer window onto the dedicated merge zone at the right edge of the tab bar to absorb it as a new tab
+  - Control Panel items such as Power Options are absorbed as separate tabs even when an equivalent tab already exists
   - Show a context menu on right-drag drop such as "Copy here", "Move here", and "Create symbolic link here"
   - Symbolic links are created with the current standard-user privileges; if privileges are insufficient, the app shows guidance instead of retrying as administrator.
 - **Seamless tracking and UI integration**
@@ -39,6 +41,7 @@ Instead of hooking into or modifying Explorer itself, it places an independent t
    - Each tab shows a per-path icon, including shell-specific icons for special folders and Control Panel sub-items.
    - Right-click a tab to access actions such as `Duplicate Tab`, `Open in New Window`, `Copy Path`, and `Close Tab`.
    - Drag a tab outside the tab bar and drop it outside Explorer to reopen that tab as a separate window and close the original tab.
+   - To merge an independent Explorer window, drag it onto the dedicated `Merge` zone at the far right of the tab bar and release it there.
 5. **Settings**
    - Right-click the background area of the tab bar and choose `Settings...` to change options such as the tab font size.
 6. To exit, right-click the task tray icon and choose `Exit`.

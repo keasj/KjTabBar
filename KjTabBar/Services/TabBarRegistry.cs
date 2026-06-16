@@ -122,9 +122,6 @@ namespace KjTabBar.Services
                 TabBarViewModel viewModel;
                 if (!TryGetAliveTabBarViewModel(kvp, out viewModel))
                 {
-                    AppLogger.LogInfo(
-                        "TabBarRegistry",
-                        string.Format("FindValidTarget skipped entry key={0}", kvp.Key));
                     continue;
                 }
 
@@ -138,13 +135,6 @@ namespace KjTabBar.Services
                     return viewModel;
                 }
             }
-
-            AppLogger.LogInfo(
-                "TabBarRegistry",
-                string.Format(
-                    "FindValidTarget returning={0} count={1}",
-                    firstValidTarget != null ? firstValidTarget.ExplorerHwnd.ToString() : string.Empty,
-                    _tabBars.Count));
 
             return firstValidTarget;
         }
@@ -181,10 +171,6 @@ namespace KjTabBar.Services
                 }
             }
 
-            AppLogger.LogInfo(
-                "TabBarRegistry",
-                string.Format("TryFindAliveViewModel missed explorerHwnd={0} count={1}", explorerHwnd, _tabBars.Count));
-
             return false;
         }
 
@@ -195,33 +181,16 @@ namespace KjTabBar.Services
             {
                 if (!entry.Value.IsExplorerAlive())
                 {
-                    AppLogger.LogInfo(
-                        "TabBarRegistry",
-                        string.Format("TryGetAliveTabBarViewModel explorer not alive key={0}", entry.Key));
                     return false;
                 }
 
                 viewModel = entry.Value.DataContext as TabBarViewModel;
                 if (viewModel == null)
                 {
-                    AppLogger.LogInfo(
-                        "TabBarRegistry",
-                        string.Format("TryGetAliveTabBarViewModel no DataContext key={0}", entry.Key));
                     return false;
                 }
 
-                bool isWindow = NativeMethods.IsWindow(viewModel.ExplorerHwnd);
-                if (!isWindow)
-                {
-                    AppLogger.LogInfo(
-                        "TabBarRegistry",
-                        string.Format(
-                            "TryGetAliveTabBarViewModel invalid ExplorerHwnd key={0} vm={1}",
-                            entry.Key,
-                            viewModel.ExplorerHwnd));
-                }
-
-                return isWindow;
+                return NativeMethods.IsWindow(viewModel.ExplorerHwnd);
             }
             catch (Exception ex)
             {

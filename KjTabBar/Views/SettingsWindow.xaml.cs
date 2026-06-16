@@ -58,9 +58,11 @@ namespace KjTabBar.Views
                 string errorMessage;
                 if (!vm.SaveSettings(out errorMessage))
                 {
+                    string errorTitle = TryFindResource("SaveSettingsErrorTitle") as string ?? "Save Error";
+                    string errorPrefix = TryFindResource("SaveSettingsErrorMessage") as string ?? "Failed to save settings.";
                     MessageBox.Show(
-                        string.IsNullOrEmpty(errorMessage) ? "設定の保存に失敗しました。" : "設定の保存に失敗しました。\n\n" + errorMessage,
-                        "保存エラー",
+                        string.IsNullOrEmpty(errorMessage) ? errorPrefix : errorPrefix + "\n\n" + errorMessage,
+                        errorTitle,
                         MessageBoxButton.OK,
                         MessageBoxImage.Error);
                     return;

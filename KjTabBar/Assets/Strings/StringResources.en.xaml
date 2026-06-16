@@ -20,6 +20,18 @@
     <system:String x:Key="MenuSettings">Settings...</system:String>
     <system:String x:Key="MenuCopyHere">Copy Here(&amp;C)</system:String>
     <system:String x:Key="MenuMoveHere">Move Here(&amp;M)</system:String>
+    <system:String x:Key="MenuShortcutHere">Create Shortcut Here(&amp;S)</system:String>
+    <system:String x:Key="MenuSymlinkHere">Create Symbolic Link Here(&amp;L)</system:String>
     
+    <system:String x:Key="AddTabButtonToolTip">New Tab (Select Folder)</system:String>
+    <system:String x:Key="AddTabDialogDescription">Select a folder to add as a tab.</system:String>
+    <system:String x:Key="AbsorbZoneLabel">Merge</system:String>
+    <system:String x:Key="AbsorbZoneToolTip">Drop an Explorer window here to merge it into tabs.</system:String>
+    <system:String x:Key="SaveSettingsErrorTitle">Save Error</system:String>
+    <system:String x:Key="SaveSettingsErrorMessage">Failed to save settings.</system:String>
+    <system:String x:Key="FileOperationErrorTitle">Operation Error</system:String>
+    <system:String x:Key="FileOperationCompleteErrorMessage">The file operation could not be completed.</system:String>
+    <system:String x:Key="FileOperationStartErrorMessage">Failed to start the file operation.</system:String>
+
     <system:String x:Key="TrayMenuExit">Exit</system:String>
 </ResourceDictionary>

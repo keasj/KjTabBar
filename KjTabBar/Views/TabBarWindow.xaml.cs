@@ -5,9 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
-using System.Windows.Threading;
 using System.Windows.Data;
-using System.Threading.Tasks;
 using KjTabBar.Helpers;
 using KjTabBar.Models;
 using KjTabBar.ViewModels;
@@ -21,12 +19,7 @@ namespace KjTabBar.Views
         internal ExplorerWindowTrackingState WindowTrackingState { get; set; }
         private IExplorerService _explorerService => ExplorerService;
 
-        private DispatcherTimer _positionTimer;
-        private DispatcherTimer _syncTimer;
         private IntPtr _myHwnd;
-        private IntPtr _locationHook = IntPtr.Zero;
-        private IntPtr _trackedExplorerHwnd = IntPtr.Zero;
-        private NativeMethods.WinEventDelegate _locationEventCallback;
 
         // ドラッグ用変数
         private Point _dragStartPoint;
@@ -37,6 +30,7 @@ namespace KjTabBar.Views
         private TabBarWindowPositioner _positioner;
         private TabBarWindowContextMenuBuilder _contextMenuBuilder;
         private TabBarWindowDragDropHandler _dragDropHandler;
+        private TabBarWindowRuntimeCoordinator _runtimeCoordinator;
 
         public TabBarWindow()
         {
@@ -45,6 +39,15 @@ namespace KjTabBar.Views
             PreviewDragEnter += TabBarWindow_DragEnter;
             PreviewDragOver += TabBarWindow_DragOver;
             PreviewDrop += TabBarWindow_Drop;
+        }
+
+        protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
+        {
+            base.OnRenderSizeChanged(sizeInfo);
+            if (_runtimeCoordinator != null)
+            {
+                _runtimeCoordinator.HandleRenderSizeChanged(IsLoaded, sizeInfo.HeightChanged);
+            }
         }
 
         private void TabBarWindow_Loaded(object sender, RoutedEventArgs e)
@@ -59,6 +62,12 @@ namespace KjTabBar.Views
 
             WindowInteropHelper helper = new WindowInteropHelper(this);
             _myHwnd = helper.Handle;
+            _runtimeCoordinator = new TabBarWindowRuntimeCoordinator(
+                Dispatcher,
+                IsExplorerAliveCore,
+                UpdatePosition,
+                SyncWithExplorerAsync,
+                Close);
 
             // テーマ適用
             ApplyTheme();
@@ -68,20 +77,8 @@ namespace KjTabBar.Views
             if (vm != null)
             {
                 SetupTabsWithAddButton(vm);
-                RegisterLocationHook(vm.ExplorerHwnd);
+                _runtimeCoordinator.Start(vm.ExplorerHwnd);
             }
-
-            _positionTimer = new DispatcherTimer();
-            _positionTimer.Interval = TimeSpan.FromMilliseconds(50);
-            _positionTimer.Tick += PositionTimer_Tick;
-            _positionTimer.Start();
-
-            _syncTimer = new DispatcherTimer();
-            _syncTimer.Interval = TimeSpan.FromMilliseconds(300);
-            _syncTimer.Tick += SyncTimer_Tick;
-            _syncTimer.Start();
-
-            UpdatePosition();
         }
 
         private void SetupTabsWithAddButton(TabBarViewModel vm)
@@ -102,7 +99,7 @@ namespace KjTabBar.Views
             _addTabButton.Style = (Style)FindResource("AddTabBtn");
             _addTabButton.Click += AddTab_Click;
             _addTabButton.Margin = new Thickness(2, 2, 0, 0);
-            _addTabButton.ToolTip = "新しいタブ (フォルダを選択)";
+            _addTabButton.ToolTip = TryFindResource("AddTabButtonToolTip") as string ?? "New Tab (Select Folder)";
             composite.Add(_addTabButton);
 
             TabItemsControl.ItemsSource = composite;
@@ -173,7 +170,10 @@ namespace KjTabBar.Views
             {
                 _positioner.DpiScale = newDpi.DpiScaleX;
             }
-            UpdatePosition();
+            if (_runtimeCoordinator != null)
+            {
+                _runtimeCoordinator.HandleDpiChanged();
+            }
         }
 
         private TabBarViewModel GetVM()
@@ -181,13 +181,27 @@ namespace KjTabBar.Views
             return DataContext as TabBarViewModel;
         }
 
+        internal bool IsPointOverAbsorbZone(NativeMethods.POINT screenPoint)
+        {
+            if (AbsorbDropZone == null || !IsLoaded || !AbsorbDropZone.IsVisible)
+            {
+                return false;
+            }
+
+            Point topLeft = AbsorbDropZone.PointToScreen(new Point(0, 0));
+            Point bottomRight = AbsorbDropZone.PointToScreen(new Point(AbsorbDropZone.ActualWidth, AbsorbDropZone.ActualHeight));
+
+            return screenPoint.X >= topLeft.X &&
+                   screenPoint.X < bottomRight.X &&
+                   screenPoint.Y >= topLeft.Y &&
+                   screenPoint.Y < bottomRight.Y;
+        }
+
         // ====== エクスプローラー状態チェック ======
 
         public bool IsExplorerAlive()
         {
-            TabBarViewModel vm = GetVM();
-            if (vm == null || _positioner == null) return false;
-            return _positioner.IsExplorerAlive(vm.ExplorerHwnd);
+            return IsExplorerAliveCore();
         }
 
         internal void RebindExplorer(IntPtr explorerHwnd)
@@ -209,23 +223,11 @@ namespace KjTabBar.Views
             {
                 WindowInteropHelper helper = new WindowInteropHelper(this);
                 helper.Owner = explorerHwnd;
-                RegisterLocationHook(explorerHwnd);
-                UpdatePosition();
+                if (_runtimeCoordinator != null)
+                {
+                    _runtimeCoordinator.RebindExplorer(explorerHwnd);
+                }
             }
-        }
-
-        private bool IsExplorerMinimized()
-        {
-            TabBarViewModel vm = GetVM();
-            if (vm == null || _positioner == null) return true;
-            return _positioner.IsExplorerMinimized(vm.ExplorerHwnd);
-        }
-
-        private bool IsExplorerOrSelfForeground()
-        {
-            TabBarViewModel vm = GetVM();
-            if (vm == null || _positioner == null) return false;
-            return _positioner.IsExplorerOrSelfForeground(vm.ExplorerHwnd, _myHwnd);
         }
 
         // ====== 位置とタイマー ======
@@ -235,52 +237,6 @@ namespace KjTabBar.Views
             TabBarViewModel vm = GetVM();
             if (vm == null || _positioner == null) return;
             _positioner.UpdatePosition(vm.ExplorerHwnd, vm);
-        }
-
-        private void PositionTimer_Tick(object sender, EventArgs e)
-        {
-            if (!IsExplorerAlive())
-            {
-                StopTimers();
-                Close();
-                return;
-            }
-            UpdatePosition();
-        }
-
-        private async void SyncTimer_Tick(object sender, EventArgs e)
-        {
-            TabBarViewModel vm = GetVM();
-            if (vm != null)
-            {
-                try
-                {
-                    await vm.SyncWithExplorerAsync();
-                }
-                catch (TaskCanceledException)
-                {
-                }
-                catch (Exception ex)
-                {
-                    AppLogger.LogError("TabBarWindow", "SyncWithExplorerAsync failed.", ex);
-                }
-            }
-        }
-
-        private void StopTimers()
-        {
-            if (_positionTimer != null)
-            {
-                _positionTimer.Tick -= PositionTimer_Tick;
-                _positionTimer.Stop();
-                _positionTimer = null;
-            }
-            if (_syncTimer != null)
-            {
-                _syncTimer.Tick -= SyncTimer_Tick;
-                _syncTimer.Stop();
-                _syncTimer = null;
-            }
         }
 
         private void DetachDynamicUiResources()
@@ -304,8 +260,7 @@ namespace KjTabBar.Views
             PreviewDragOver -= TabBarWindow_DragOver;
             PreviewDrop -= TabBarWindow_Drop;
             ThemeManager.Instance.ThemeChanged -= ThemeManager_ThemeChanged;
-            UnregisterLocationHook();
-            StopTimers();
+            DisposeRuntimeCoordinator();
             DetachDynamicUiResources();
             IDisposable disposableVm = DataContext as IDisposable;
             if (disposableVm != null)
@@ -326,7 +281,7 @@ namespace KjTabBar.Views
             string title = TryFindResource("AddTabDialogDescription") as string;
             if (string.IsNullOrEmpty(title))
             {
-                title = "タブに追加するフォルダを選択してください";
+                title = "Select a folder to add as a tab.";
             }
 
             string selectedPath = ShellFolderPicker.BrowseForFolder(title, _explorerService);
@@ -563,78 +518,35 @@ namespace KjTabBar.Views
             }
         }
 
-        private void UnregisterLocationHook()
+        private bool IsExplorerAliveCore()
         {
-            _trackedExplorerHwnd = IntPtr.Zero;
-            if (_locationHook != IntPtr.Zero)
+            TabBarViewModel vm = GetVM();
+            if (vm == null || _positioner == null)
             {
-                try
-                {
-                    NativeMethods.UnhookWinEvent(_locationHook);
-                }
-                catch (Exception ex)
-                {
-                    AppLogger.LogError("TabBarWindow", "Failed to unhook location event hook.", ex);
-                }
-                _locationHook = IntPtr.Zero;
-                _locationEventCallback = null;
+                return false;
             }
+
+            return _positioner.IsExplorerAlive(vm.ExplorerHwnd);
         }
 
-        private void RegisterLocationHook(IntPtr explorerHwnd)
+        private async System.Threading.Tasks.Task SyncWithExplorerAsync()
         {
-            UnregisterLocationHook();
-            if (explorerHwnd == IntPtr.Zero) return;
-            _trackedExplorerHwnd = explorerHwnd;
-
-            try
+            TabBarViewModel vm = GetVM();
+            if (vm == null)
             {
-                uint processId;
-                NativeMethods.GetWindowThreadProcessId(explorerHwnd, out processId);
-                if (processId == 0) return;
+                return;
+            }
 
-                _locationEventCallback = LocationEventCallback;
-                _locationHook = NativeMethods.SetWinEventHook(
-                    NativeMethods.EVENT_OBJECT_LOCATIONCHANGE,
-                    NativeMethods.EVENT_OBJECT_LOCATIONCHANGE,
-                    IntPtr.Zero,
-                    _locationEventCallback,
-                    processId,
-                    0,
-                    NativeMethods.WINEVENT_OUTOFCONTEXT);
-            }
-            catch (Exception ex)
-            {
-                AppLogger.LogError("TabBarWindow", "Failed to register location event hook.", ex);
-            }
+            await vm.SyncWithExplorerAsync();
         }
 
-        private void LocationEventCallback(
-            IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
-            int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
+        private void DisposeRuntimeCoordinator()
         {
-            try
+            if (_runtimeCoordinator != null)
             {
-                if (!ShouldHandleLocationChangeEvent(eventType, hwnd, idObject, _trackedExplorerHwnd)) return;
-                if (Dispatcher == null || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
-
-                Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    UpdatePosition();
-                }));
+                _runtimeCoordinator.Dispose();
+                _runtimeCoordinator = null;
             }
-            catch (Exception ex)
-            {
-                AppLogger.LogError("TabBarWindow", "Error in LocationEventCallback.", ex);
-            }
-        }
-
-        internal static bool ShouldHandleLocationChangeEvent(uint eventType, IntPtr hwnd, int idObject, IntPtr trackedExplorerHwnd)
-        {
-            return eventType == NativeMethods.EVENT_OBJECT_LOCATIONCHANGE &&
-                   idObject == 0 &&
-                   hwnd != IntPtr.Zero &&
-                   hwnd == trackedExplorerHwnd;
         }
     }
 }

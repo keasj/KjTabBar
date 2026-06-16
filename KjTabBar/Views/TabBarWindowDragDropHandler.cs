@@ -158,39 +158,48 @@ namespace KjTabBar.Views
                         _wasRightDrag = false;
                         if (isRightDrag)
                         {
+                            int finishState = 0;
+                            Action finishOnce = delegate
+                            {
+                                if (Interlocked.Exchange(ref finishState, 1) == 0)
+                                {
+                                    onFinished?.Invoke();
+                                }
+                            };
+
                             ContextMenu menu = new ContextMenu();
                             _contextMenuBuilder.ApplyFluentMenuStyle(menu);
-                            MenuItem copyItem = new MenuItem() { Header = _window.TryFindResource("MenuCopyHere") as string ?? "ここにコピー(&C)" };
-                            copyItem.Click += (s, ev) => ExecuteFileOperation(paths, targetTab.Path, NativeMethods.FO_COPY, onFinished);
+                            MenuItem copyItem = new MenuItem() { Header = _window.TryFindResource("MenuCopyHere") as string ?? "Copy Here(&C)" };
+                            copyItem.Click += (s, ev) => ExecuteFileOperation(paths, targetTab.Path, NativeMethods.FO_COPY, finishOnce);
                             menu.Items.Add(copyItem);
 
-                            MenuItem moveItem = new MenuItem() { Header = _window.TryFindResource("MenuMoveHere") as string ?? "ここに移動(&M)" };
-                            moveItem.Click += (s, ev) => ExecuteFileOperation(paths, targetTab.Path, NativeMethods.FO_MOVE, onFinished);
+                            MenuItem moveItem = new MenuItem() { Header = _window.TryFindResource("MenuMoveHere") as string ?? "Move Here(&M)" };
+                            moveItem.Click += (s, ev) => ExecuteFileOperation(paths, targetTab.Path, NativeMethods.FO_MOVE, finishOnce);
                             menu.Items.Add(moveItem);
 
-                            MenuItem shortcutItem = new MenuItem() { Header = _window.TryFindResource("MenuShortcutHere") as string ?? "ショートカットをここに作成(&S)" };
+                            MenuItem shortcutItem = new MenuItem() { Header = _window.TryFindResource("MenuShortcutHere") as string ?? "Create Shortcut Here(&S)" };
                             shortcutItem.Click += (s, ev) =>
                             {
                                 _explorerService.CreateShortcuts(paths, targetTab.Path, new WindowInteropHelper(_window).Handle);
-                                onFinished?.Invoke();
+                                finishOnce();
                             };
                             menu.Items.Add(shortcutItem);
 
-                            MenuItem symlinkItem = new MenuItem() { Header = _window.TryFindResource("MenuSymlinkHere") as string ?? "シンボリックリンクをここに作成(&L)" };
+                            MenuItem symlinkItem = new MenuItem() { Header = _window.TryFindResource("MenuSymlinkHere") as string ?? "Create Symbolic Link Here(&L)" };
                             symlinkItem.Click += (s, ev) =>
                             {
                                 _explorerService.CreateSymbolicLinks(paths, targetTab.Path, new WindowInteropHelper(_window).Handle);
-                                onFinished?.Invoke();
+                                finishOnce();
                             };
                             menu.Items.Add(symlinkItem);
 
                             menu.Items.Add(new Separator());
 
-                            MenuItem cancelItem = new MenuItem() { Header = _window.TryFindResource("SettingsButtonCancel") as string ?? "キャンセル" };
-                            cancelItem.Click += (s, ev) => onFinished?.Invoke();
+                            MenuItem cancelItem = new MenuItem() { Header = _window.TryFindResource("SettingsButtonCancel") as string ?? "Cancel" };
+                            cancelItem.Click += (s, ev) => finishOnce();
                             menu.Items.Add(cancelItem);
 
-                            menu.Closed += (s, ev) => onFinished?.Invoke();
+                            menu.Closed += (s, ev) => finishOnce();
 
                             menu.PlacementTarget = targetTabBd;
                             menu.IsOpen = true;
@@ -372,9 +381,11 @@ namespace KjTabBar.Views
                         AppLogger.LogInfo("TabBarWindowDragDropHandler", "SHFileOperation reported failure or cancellation.");
                         _window.Dispatcher.BeginInvoke(new Action(() =>
                         {
+                            string errorMessage = _window.TryFindResource("FileOperationCompleteErrorMessage") as string ?? "The file operation could not be completed.";
+                            string errorTitle = _window.TryFindResource("FileOperationErrorTitle") as string ?? "Operation Error";
                             MessageBox.Show(
-                                "ファイル操作を完了できませんでした。",
-                                "操作エラー",
+                                errorMessage,
+                                errorTitle,
                                 MessageBoxButton.OK,
                                 MessageBoxImage.Error);
                         }));
@@ -390,9 +401,11 @@ namespace KjTabBar.Views
                     AppLogger.LogError("TabBarWindowDragDropHandler", "ExecuteFileOperation failed.", ex);
                     _window.Dispatcher.BeginInvoke(new Action(() =>
                     {
+                        string errorMessage = _window.TryFindResource("FileOperationStartErrorMessage") as string ?? "Failed to start the file operation.";
+                        string errorTitle = _window.TryFindResource("FileOperationErrorTitle") as string ?? "Operation Error";
                         MessageBox.Show(
-                            "ファイル操作の開始に失敗しました。",
-                            "操作エラー",
+                            errorMessage,
+                            errorTitle,
                             MessageBoxButton.OK,
                             MessageBoxImage.Error);
                         onFinished?.Invoke();

@@ -1,4 +1,6 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 using KjTabBar.Helpers;
 using KjTabBar.Services;
 
@@ -9,6 +11,7 @@ namespace KjTabBar.Models
         private static readonly TimeSpan MaintenanceInterval = TimeSpan.FromSeconds(60);
         private readonly IExplorerService _explorerService;
         private DateTime _lastMaintenanceUtc = DateTime.MinValue;
+        private int _gcMaintenanceRunning;
 
         public MemoryMaintenanceService(IExplorerService explorerService)
         {
@@ -37,14 +40,34 @@ namespace KjTabBar.Models
                 });
 
                 System.Runtime.InteropServices.Marshal.CleanupUnusedObjectsInCurrentContext();
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-                GC.Collect();
+                StartBackgroundGarbageCollection();
             }
             catch (Exception ex)
             {
                 AppLogger.LogError("MemoryMaintenanceService", "Failed to perform periodic memory maintenance.", ex);
             }
+        }
+
+        private void StartBackgroundGarbageCollection()
+        {
+            if (Interlocked.Exchange(ref _gcMaintenanceRunning, 1) != 0)
+            {
+                return;
+            }
+
+            _ = Task.Run((Action)delegate
+            {
+                try
+                {
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                    GC.Collect();
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _gcMaintenanceRunning, 0);
+                }
+            });
         }
     }
 }

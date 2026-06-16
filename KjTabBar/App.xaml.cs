@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -17,51 +17,37 @@ namespace KjTabBar
     {
         private IExplorerService _explorerService = new Models.ExplorerManager();
         private System.Threading.Mutex _mutex;
-        private DispatcherTimer _monitorTimer;
         private TabBarRegistry _tabBars = new TabBarRegistry();
         private ExplorerWindowTrackingState _windowTracking = new ExplorerWindowTrackingState();
         private AppRuntimeCoordinator _appRuntimeCoordinator = new AppRuntimeCoordinator();
         private AppServiceFactory _appServiceFactory = new AppServiceFactory();
+        private AppBootstrapper _appBootstrapper;
 
         private DesktopForegroundTracker _desktopForegroundTracker = new DesktopForegroundTracker();
-        private WinEventHookRegistration _foregroundEventHook;
         private TrayIconService _trayIconService = new TrayIconService();
         private TabPersistenceService _tabPersistence = new TabPersistenceService();
-        private ControlPanelTabSearch _controlPanelTabSearch;
-        private ExplorerLaunchTracker _explorerLaunchTracker;
-        private ExplorerWindowEvaluationService _explorerWindowEvaluationService;
-        private ExplorerWindowInteractionService _explorerWindowInteractionService;
-        private ExplorerWindowMonitorCoordinator _explorerWindowMonitorCoordinator;
-        private ExplorerWindowOutcomeCoordinator _explorerWindowOutcomeCoordinator;
-        private ExplorerWindowProcessingCoordinator _explorerWindowProcessingCoordinator;
-        private ExplorerTabTargetResolver _explorerTabTargetResolver;
-        private AppUiDispatcherAdapter _appUiDispatcherAdapter;
-        private AppMonitorCycleCoordinator _appMonitorCycleCoordinator;
         private LanguageResourceService _languageResourceService = new LanguageResourceService();
-        private MemoryMaintenanceService _memoryMaintenance;
-        private WinEventHookRegistration _showEventHook;
-        private WinEventHookRegistration _moveSizeEndEventHook;
+        private AppBootstrapResult _bootstrapResult;
 
         private static readonly TimeSpan MaxHiddenDuration = TimeSpan.FromSeconds(2);
-        private DesktopPathClassifier _desktopPathClassifier;
-
-
 
         private void Application_Exit(object sender, ExitEventArgs e)
         {
             _appRuntimeCoordinator.Shutdown(new AppRuntimeContext
             {
-                SaveTarget = _appUiDispatcherAdapter != null ? _appUiDispatcherAdapter.FindValidTabBarTarget() : null,
+                SaveTarget = _bootstrapResult != null && _bootstrapResult.Services != null
+                    ? _bootstrapResult.Services.AppUiDispatcherAdapter.FindValidTabBarTarget()
+                    : null,
                 TabPersistence = _tabPersistence,
-                MonitorTimer = _monitorTimer,
+                MonitorTimer = _bootstrapResult != null ? _bootstrapResult.MonitorTimer : null,
                 MonitorTickHandler = MonitorTimer_Tick,
                 ExplorerService = _explorerService,
                 TabBars = _tabBars,
                 TrayIconService = _trayIconService,
-                ShowEventHook = _showEventHook,
-                MoveSizeEndEventHook = _moveSizeEndEventHook,
+                ShowEventHook = _bootstrapResult != null ? _bootstrapResult.ShowEventHook : null,
+                MoveSizeEndEventHook = _bootstrapResult != null ? _bootstrapResult.MoveSizeEndEventHook : null,
                 WindowTracking = _windowTracking,
-                ForegroundEventHook = _foregroundEventHook,
+                ForegroundEventHook = _bootstrapResult != null ? _bootstrapResult.ForegroundEventHook : null,
                 Mutex = _mutex
             });
         }
@@ -86,42 +72,40 @@ namespace KjTabBar
                 }
             }
 
-            if (!_appRuntimeCoordinator.TryAcquireSingleInstanceMutex("KjTabBar_Application_Mutex", out _mutex))
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
+            if (_appBootstrapper == null)
+            {
+                _appBootstrapper = new AppBootstrapper(_appRuntimeCoordinator, _appServiceFactory);
+            }
+
+            _bootstrapResult = _appBootstrapper.Initialize(new AppBootstrapContext
+            {
+                ExplorerService = _explorerService,
+                TabBars = _tabBars,
+                WindowTracking = _windowTracking,
+                DesktopForegroundTracker = _desktopForegroundTracker,
+                TabPersistence = _tabPersistence,
+                Dispatcher = Dispatcher,
+                GetUserSettings = delegate { return UserSettings.Current; },
+                RegisterTabBar = _tabBars.Add,
+                MaxHiddenDuration = MaxHiddenDuration,
+                TrayIconService = _trayIconService,
+                TryFindResource = TryFindResource,
+                Shutdown = Shutdown,
+                ForegroundEventCallback = ForegroundEventCallback,
+                ShowEventCallback = ShowEventCallback,
+                MoveSizeEndEventCallback = MoveSizeEndEventCallback,
+                MonitorTickHandler = MonitorTimer_Tick
+            });
+
+            if (_bootstrapResult == null)
             {
                 Shutdown();
                 return;
             }
 
-            ShutdownMode = ShutdownMode.OnExplicitShutdown;
-
-            AppServiceBundle bundle = _appServiceFactory.Create(
-                _explorerService,
-                _tabBars,
-                _windowTracking,
-                _desktopForegroundTracker,
-                _tabPersistence,
-                Dispatcher,
-                delegate { return UserSettings.Current; },
-                _tabBars.Add,
-                MaxHiddenDuration);
-            _memoryMaintenance = bundle.MemoryMaintenance;
-            _controlPanelTabSearch = bundle.ControlPanelTabSearch;
-            _explorerTabTargetResolver = bundle.ExplorerTabTargetResolver;
-            _desktopPathClassifier = bundle.DesktopPathClassifier;
-            _explorerLaunchTracker = bundle.ExplorerLaunchTracker;
-            _appUiDispatcherAdapter = bundle.AppUiDispatcherAdapter;
-            _explorerWindowEvaluationService = bundle.ExplorerWindowEvaluationService;
-            _explorerWindowInteractionService = bundle.ExplorerWindowInteractionService;
-            _explorerWindowMonitorCoordinator = bundle.ExplorerWindowMonitorCoordinator;
-            _explorerWindowOutcomeCoordinator = bundle.ExplorerWindowOutcomeCoordinator;
-            _explorerWindowProcessingCoordinator = bundle.ExplorerWindowProcessingCoordinator;
-            _appMonitorCycleCoordinator = bundle.AppMonitorCycleCoordinator;
-
-            _trayIconService.Initialize(name => TryFindResource(name), Shutdown);
-            _foregroundEventHook = _appRuntimeCoordinator.TryRegisterWinEventHook("foreground", NativeMethods.EVENT_SYSTEM_FOREGROUND, NativeMethods.EVENT_SYSTEM_FOREGROUND, ForegroundEventCallback, "Failed to set up foreground hook. Falling back to polling.");
-            _showEventHook = _appRuntimeCoordinator.TryRegisterWinEventHook("show", NativeMethods.EVENT_OBJECT_SHOW, NativeMethods.EVENT_OBJECT_SHOW, ShowEventCallback, "Failed to set up show hook.");
-            _moveSizeEndEventHook = _appRuntimeCoordinator.TryRegisterWinEventHook("movesizeend", NativeMethods.EVENT_SYSTEM_MOVESIZEEND, NativeMethods.EVENT_SYSTEM_MOVESIZEEND, MoveSizeEndEventCallback, "Failed to set up movesizeend hook.");
-            _monitorTimer = _appRuntimeCoordinator.CreateMonitorTimer(TimeSpan.FromMilliseconds(500), MonitorTimer_Tick);
+            _mutex = _bootstrapResult.Mutex;
 
             ThemeManager.Instance.StartMonitoring();
 
@@ -153,7 +137,10 @@ namespace KjTabBar
             {
                 if (eventType != NativeMethods.EVENT_OBJECT_SHOW) return;
                 if (idObject != 0) return;
-                _explorerWindowMonitorCoordinator.HandleShowEvent(hwnd, _appUiDispatcherAdapter.FindValidTabBarTarget, _explorerTabTargetResolver.HasActiveControlPanelTab);
+                _bootstrapResult.Services.ExplorerWindowMonitorCoordinator.HandleShowEvent(
+                    hwnd,
+                    _bootstrapResult.Services.AppUiDispatcherAdapter.FindValidTabBarTarget,
+                    _bootstrapResult.Services.ExplorerTabTargetResolver.HasActiveControlPanelTab);
             }
             catch (Exception ex)
             {
@@ -172,7 +159,7 @@ namespace KjTabBar
 
                 StringBuilder className = new StringBuilder(256);
                 NativeMethods.GetClassName(hwnd, className, className.Capacity);
-                _explorerLaunchTracker.UpdateForegroundState(hwnd, className.ToString());
+                _bootstrapResult.Services.ExplorerLaunchTracker.UpdateForegroundState(hwnd, className.ToString());
             }
             catch (Exception ex)
             {
@@ -195,7 +182,9 @@ namespace KjTabBar
 
         private void MonitorTimer_TickCore()
         {
-            List<ExplorerWindowProcessRequest> requests = _appMonitorCycleCoordinator.RunCycle(_appUiDispatcherAdapter.FindValidTabBarTarget, DateTime.UtcNow);
+            List<ExplorerWindowProcessRequest> requests = _bootstrapResult.Services.AppMonitorCycleCoordinator.RunCycle(
+                _bootstrapResult.Services.AppUiDispatcherAdapter.FindValidTabBarTarget,
+                DateTime.UtcNow);
             for (int i = 0; i < requests.Count; i++)
             {
                 try
@@ -212,13 +201,13 @@ namespace KjTabBar
 
         private async Task ProcessNewExplorerWindowAsync(IntPtr hwnd, TabBarViewModel validTarget)
         {
-            await _explorerWindowProcessingCoordinator.ProcessAsync(
+            await _bootstrapResult.Services.ExplorerWindowProcessingCoordinator.ProcessAsync(
                 hwnd,
                 validTarget,
-                _appUiDispatcherAdapter.FindControlPanelTabBarTarget,
-                _appUiDispatcherAdapter.FindValidTabBarTarget,
-                _appUiDispatcherAdapter.HasEquivalentControlPanelTab,
-                _appUiDispatcherAdapter.HasActiveControlPanelTab,
+                _bootstrapResult.Services.AppUiDispatcherAdapter.FindControlPanelTabBarTarget,
+                _bootstrapResult.Services.AppUiDispatcherAdapter.FindValidTabBarTarget,
+                _bootstrapResult.Services.AppUiDispatcherAdapter.HasEquivalentControlPanelTab,
+                _bootstrapResult.Services.AppUiDispatcherAdapter.HasActiveControlPanelTab,
                 _tabBars.Contains,
                 delegate (IntPtr targetHwnd)
                 {
@@ -240,7 +229,9 @@ namespace KjTabBar
                 NativeMethods.GetClassName(hwnd, className, className.Capacity);
                 if (className.ToString() != "CabinetWClass") return;
 
-                TabBarViewModel activeTabBarVM = _appUiDispatcherAdapter?.FindValidTabBarTarget();
+                TabBarViewModel activeTabBarVM = _bootstrapResult != null && _bootstrapResult.Services != null
+                    ? _bootstrapResult.Services.AppUiDispatcherAdapter.FindValidTabBarTarget()
+                    : null;
                 if (activeTabBarVM == null) return;
                 if (hwnd == activeTabBarVM.ExplorerHwnd) return;
 
@@ -248,36 +239,27 @@ namespace KjTabBar
                 if (_tabBars.TryGetTabBarWindow(activeTabBarVM.ExplorerHwnd, out window))
                 {
                     NativeMethods.POINT mousePos;
-                    if (NativeMethods.GetCursorPos(out mousePos))
+                    if (NativeMethods.GetCursorPos(out mousePos) && window.IsPointOverAbsorbZone(mousePos))
                     {
-                        var helper = new System.Windows.Interop.WindowInteropHelper(window);
-                        IntPtr tabBarHwnd = helper.Handle;
-                        if (tabBarHwnd != IntPtr.Zero && NativeMethods.GetWindowRect(tabBarHwnd, out NativeMethods.RECT rect))
+                        _ = ComThreadService.Instance.InvokeAsync(() =>
                         {
-                            if (mousePos.X >= rect.Left && mousePos.X <= rect.Right &&
-                                mousePos.Y >= rect.Top && mousePos.Y <= rect.Bottom)
+                            string path = _explorerService.GetCurrentPath(hwnd);
+                            if (!string.IsNullOrEmpty(path))
                             {
-                                _ = ComThreadService.Instance.InvokeAsync(() =>
+                                Dispatcher.BeginInvoke(new Action(() =>
                                 {
-                                    string path = _explorerService.GetCurrentPath(hwnd);
-                                    if (!string.IsNullOrEmpty(path))
-                                    {
-                                        Dispatcher.BeginInvoke(new Action(() =>
-                                        {
-                                            bool isControlPanel = _explorerService.IsControlPanelPath(path);
-                                            _explorerWindowInteractionService.AbsorbExplorerWindow(
-                                                hwnd,
-                                                activeTabBarVM,
-                                                path,
-                                                allowSpecialPath: true,
-                                                isControlPanelPath: isControlPanel,
-                                                ignoreExplorerWindow: null
-                                            );
-                                        }));
-                                    }
-                                });
+                                    bool isControlPanel = _explorerService.IsControlPanelPath(path);
+                                    _bootstrapResult.Services.ExplorerWindowInteractionService.AbsorbExplorerWindow(
+                                        hwnd,
+                                        activeTabBarVM,
+                                        path,
+                                        allowSpecialPath: true,
+                                        isControlPanelPath: isControlPanel,
+                                        ignoreExplorerWindow: null
+                                    );
+                                }));
                             }
-                        }
+                        });
                     }
                 }
             }
