@@ -61,6 +61,21 @@ namespace KjTabBar
 
         public static string GetProcessOwnerSid(int processId)
         {
+            if (processId == Process.GetCurrentProcess().Id)
+            {
+                try
+                {
+                    using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
+                    {
+                        return identity.User != null ? identity.User.Value : null;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.LogError("SetupEnvironmentResolver", "Current process SID resolution failed.", ex);
+                }
+            }
+
             string sid = TryGetProcessOwnerSidDirectly(processId);
             if (!string.IsNullOrEmpty(sid))
             {

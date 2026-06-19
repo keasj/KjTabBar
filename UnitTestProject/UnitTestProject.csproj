@@ -73,10 +73,12 @@
     <Compile Include="ExplorerAbsorptionLogicTests.cs" />
     <Compile Include="ExplorerAbsorptionDecisionMakerTests.cs" />
     <Compile Include="ExplorerLaunchTrackerTests.cs" />
+    <Compile Include="ExplorerHostSwitchCoordinatorTests.cs" />
     <Compile Include="ExplorerWindowInteractionServiceTests.cs" />
     <Compile Include="ExplorerWindowMonitorCoordinatorTests.cs" />
     <Compile Include="ExplorerWindowOutcomeCoordinatorTests.cs" />
     <Compile Include="ExplorerWindowProcessingCoordinatorTests.cs" />
+    <Compile Include="ExplorerWindowTrackingStateTests.cs" />
     <Compile Include="ExplorerTabTargetResolverTests.cs" />
     <Compile Include="AppMonitorCycleCoordinatorTests.cs" />
     <Compile Include="TabExternalDragOpenDeciderTests.cs" />

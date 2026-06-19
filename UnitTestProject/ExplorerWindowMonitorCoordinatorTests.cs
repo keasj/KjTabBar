@@ -100,6 +100,53 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void HandleShowEvent_HidesAndSkips_InternalHostSwitchLaunchWindow()
+        {
+            TabBarRegistry tabBars = new TabBarRegistry();
+            ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState();
+            DesktopForegroundTracker foregroundTracker = new DesktopForegroundTracker();
+            ExplorerLaunchTracker launchTracker = new ExplorerLaunchTracker(
+                foregroundTracker,
+                trackingState,
+                delegate (IntPtr hwnd) { return false; },
+                delegate (IntPtr hwnd) { return false; },
+                delegate { return (IntPtr)100; },
+                delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return true; });
+
+            bool movedOffscreen = false;
+            ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                tabBars,
+                trackingState,
+                foregroundTracker,
+                launchTracker,
+                delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return new NativeMethods.RECT(); },
+                delegate (IntPtr hwnd) { movedOffscreen = true; },
+                delegate { return new DateTime(2026, 6, 17, 0, 0, 0, DateTimeKind.Utc); });
+
+            trackingState.RegisterInternalHostSwitchLaunchRequest();
+
+            coordinator.HandleShowEvent(
+                (IntPtr)240,
+                delegate { return null; },
+                delegate (TabBarViewModel vm) { return false; });
+
+            Assert.IsTrue(trackingState.HiddenPendingAbsorb.ContainsKey((IntPtr)240));
+            Assert.IsTrue(trackingState.InternalHostSwitchLaunchWindows.Contains((IntPtr)240));
+            Assert.IsTrue(movedOffscreen);
+
+            List<ExplorerWindowProcessRequest> requests = coordinator.PrepareProcessRequests(
+                new List<IntPtr> { (IntPtr)240 },
+                delegate { return new TabBarViewModel((IntPtr)100, new MockUserSettings(), new MockExplorerService()); });
+
+            Assert.AreEqual(0, requests.Count);
+            Assert.IsFalse(trackingState.ProcessingExplorerWindows.Contains((IntPtr)240));
+        }
+
+        [TestMethod]
         public void HandleShowEvent_RegistersControlPanelCandidate_WhenManagedWindowWasPreviousForeground()
         {
             TabBarRegistry tabBars = new TabBarRegistry();
@@ -263,6 +310,32 @@ namespace UnitTestProject
             Assert.IsTrue(trackingState.IgnoredWindows.Contains((IntPtr)12));
             Assert.IsTrue(trackingState.ExplicitIndependentLaunchWindows.Contains((IntPtr)12));
             Assert.IsFalse(trackingState.ProcessingExplorerWindows.Contains((IntPtr)12));
+        }
+
+        [TestMethod]
+        public void PrepareProcessRequests_SkipsParkedExplorerOriginValue()
+        {
+            ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState();
+            trackingState.RememberParkedExplorerOrigin((IntPtr)20, (IntPtr)10);
+
+            ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                new TabBarRegistry(),
+                trackingState,
+                new DesktopForegroundTracker(),
+                CreateLaunchTracker(trackingState),
+                delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return null; },
+                delegate (IntPtr hwnd) { },
+                delegate { return DateTime.UtcNow; });
+
+            List<ExplorerWindowProcessRequest> requests = coordinator.PrepareProcessRequests(
+                new List<IntPtr> { (IntPtr)10, (IntPtr)20 },
+                delegate { return null; });
+
+            Assert.AreEqual(1, requests.Count);
+            Assert.AreEqual((IntPtr)20, requests[0].ExplorerHwnd);
+            Assert.IsFalse(trackingState.ProcessingExplorerWindows.Contains((IntPtr)10));
         }
 
         [TestMethod]

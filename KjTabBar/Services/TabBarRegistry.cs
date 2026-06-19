@@ -117,6 +117,7 @@ namespace KjTabBar.Services
         public TabBarViewModel FindValidTarget(Func<IntPtr, bool> isForegroundRelatedWindow)
         {
             TabBarViewModel firstValidTarget = null;
+            int aliveCount = 0;
             foreach (KeyValuePair<IntPtr, TabBarWindow> kvp in _tabBars)
             {
                 TabBarViewModel viewModel;
@@ -125,6 +126,7 @@ namespace KjTabBar.Services
                     continue;
                 }
 
+                aliveCount++;
                 if (firstValidTarget == null)
                 {
                     firstValidTarget = viewModel;
@@ -132,10 +134,22 @@ namespace KjTabBar.Services
 
                 if (isForegroundRelatedWindow != null && isForegroundRelatedWindow(viewModel.ExplorerHwnd))
                 {
+                    AppLogger.LogInfo(
+                        "TabBarRegistry",
+                        string.Format(
+                            "FindValidTarget result={0} reason=foreground aliveCount={1}",
+                            viewModel.ExplorerHwnd,
+                            aliveCount));
                     return viewModel;
                 }
             }
 
+            AppLogger.LogInfo(
+                "TabBarRegistry",
+                string.Format(
+                    "FindValidTarget result={0} reason=fallback aliveCount={1}",
+                    firstValidTarget != null ? firstValidTarget.ExplorerHwnd.ToString() : string.Empty,
+                    aliveCount));
             return firstValidTarget;
         }
 

@@ -12,6 +12,25 @@ namespace UnitTestProject
     public class ExplorerWindowInteractionServiceTests
     {
         [TestMethod]
+        public void CleanupClosedWindows_PreservesParkedExplorerOrigin_WhenParkedWindowIsStillAliveButNotEnumerated()
+        {
+            ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState(
+                delegate (IntPtr hwnd)
+                {
+                    return hwnd == (IntPtr)100 || hwnd == (IntPtr)200;
+                });
+            trackingState.RememberParkedExplorerOrigin((IntPtr)200, (IntPtr)100);
+
+            trackingState.CleanupClosedWindows(new System.Collections.Generic.List<IntPtr> { (IntPtr)200 });
+
+            IntPtr parkedOrigin;
+            bool found = trackingState.TryGetParkedExplorerOrigin((IntPtr)200, out parkedOrigin);
+
+            Assert.IsTrue(found);
+            Assert.AreEqual((IntPtr)100, parkedOrigin);
+        }
+
+        [TestMethod]
         public void GetDesktopVirtualPathFromWindowTitle_ReturnsMappedPath()
         {
             MockExplorerService explorerService = new MockExplorerService();
@@ -133,7 +152,8 @@ namespace UnitTestProject
             Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.Tabs[3].Path);
             Assert.AreEqual((IntPtr)201, foregroundHwnd);
             Assert.AreEqual((IntPtr)201, targetViewModel.ExplorerHwnd);
-            Assert.AreEqual((IntPtr)100, closedHwnd);
+            Assert.AreEqual(IntPtr.Zero, closedHwnd);
+            Assert.AreEqual((IntPtr)100, trackingState.ParkedExplorerOrigins[(IntPtr)201]);
         }
 
         [TestMethod]
@@ -171,7 +191,8 @@ namespace UnitTestProject
             Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.Tabs[2].Path);
             Assert.AreEqual((IntPtr)202, foregroundHwnd);
             Assert.AreEqual((IntPtr)202, targetViewModel.ExplorerHwnd);
-            Assert.AreEqual((IntPtr)100, closedHwnd);
+            Assert.AreEqual(IntPtr.Zero, closedHwnd);
+            Assert.AreEqual((IntPtr)100, trackingState.ParkedExplorerOrigins[(IntPtr)202]);
         }
 
         [TestMethod]
@@ -218,6 +239,7 @@ namespace UnitTestProject
             Assert.AreEqual(0, movedRect.Top);
             Assert.AreEqual(800, movedRect.Width);
             Assert.AreEqual(600, movedRect.Height);
+            Assert.AreEqual((IntPtr)205, targetViewModel.ExplorerHwnd);
         }
 
         [TestMethod]
@@ -258,7 +280,8 @@ namespace UnitTestProject
             Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.Tabs[3].Path);
             Assert.AreEqual((IntPtr)203, foregroundHwnd);
             Assert.AreEqual((IntPtr)203, targetViewModel.ExplorerHwnd);
-            Assert.AreEqual((IntPtr)100, closedHwnd);
+            Assert.AreEqual(IntPtr.Zero, closedHwnd);
+            Assert.AreEqual((IntPtr)100, trackingState.ParkedExplorerOrigins[(IntPtr)203]);
         }
 
         [TestMethod]
@@ -306,7 +329,8 @@ namespace UnitTestProject
             Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.Tabs[2].Path);
             Assert.AreEqual((IntPtr)204, foregroundHwnd);
             Assert.AreEqual((IntPtr)204, targetViewModel.ExplorerHwnd);
-            Assert.AreEqual((IntPtr)100, closedHwnd);
+            Assert.AreEqual(IntPtr.Zero, closedHwnd);
+            Assert.AreEqual((IntPtr)100, trackingState.ParkedExplorerOrigins[(IntPtr)204]);
         }
 
         [TestMethod]
@@ -342,7 +366,8 @@ namespace UnitTestProject
             Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.ActiveTab.Path);
             Assert.AreEqual((IntPtr)201, foregroundHwnd);
             Assert.AreEqual((IntPtr)201, targetViewModel.ExplorerHwnd);
-            Assert.AreEqual((IntPtr)100, closedHwnd);
+            Assert.AreEqual(IntPtr.Zero, closedHwnd);
+            Assert.AreEqual((IntPtr)100, trackingState.ParkedExplorerOrigins[(IntPtr)201]);
         }
 
         [TestMethod]

@@ -120,6 +120,17 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void NormalizeShellNamespacePath_Strips_Embedded_Null_Suffix_From_ControlPanel_Item_Path()
+        {
+            ShellPathNormalizer normalizer = CreateNormalizer();
+
+            string normalized = normalizer.NormalizeShellNamespacePath(
+                "::{025A5937-A6BE-4686-A844-36FE4BEC8B6D}\0\\::{00000000-0000-0000-0000-000000000000}");
+
+            Assert.AreEqual("::{025A5937-A6BE-4686-A844-36FE4BEC8B6D}", normalized);
+        }
+
+        [TestMethod]
         public void GetNavigableShellPath_Resolves_Home_And_ControlPanel()
         {
             ShellPathNormalizer normalizer = CreateNormalizer();

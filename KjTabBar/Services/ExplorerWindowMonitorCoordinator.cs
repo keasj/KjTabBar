@@ -84,6 +84,24 @@ namespace KjTabBar.Services
 
             if (_getClassName(rootHwnd) != "CabinetWClass") return;
 
+            if (_windowTracking.TryConsumeInternalHostSwitchLaunchRequest())
+            {
+                NativeMethods.RECT? hostSwitchRect = _getWindowRect(rootHwnd);
+                DateTime hostSwitchHiddenUtc = _getUtcNow();
+                if (hostSwitchRect.HasValue)
+                {
+                    _windowTracking.AddHiddenPendingWindow(rootHwnd, hostSwitchRect.Value, hostSwitchHiddenUtc);
+                    _moveWindowOffscreen(rootHwnd);
+                }
+                else
+                {
+                    _windowTracking.HiddenPendingAbsorb[rootHwnd] = hostSwitchHiddenUtc;
+                }
+
+                _windowTracking.MarkInternalHostSwitchLaunchWindow(rootHwnd);
+                return;
+            }
+
             if (_windowTracking.TryConsumeExplicitIndependentLaunchRequest())
             {
                 _windowTracking.IgnoreExplicitIndependentLaunchWindow(rootHwnd);
@@ -138,6 +156,14 @@ namespace KjTabBar.Services
             {
                 IntPtr hwnd = explorerWindows[i];
                 if (_tabBars.Contains(hwnd)) continue;
+                if (_windowTracking.IsParkedExplorerOriginValue(hwnd))
+                {
+                    AppLogger.LogInfo(
+                        "ExplorerWindowMonitorCoordinator",
+                        string.Format("PrepareProcessRequests skipParkedOriginValue hwnd={0}", hwnd));
+                    continue;
+                }
+                if (_windowTracking.InternalHostSwitchLaunchWindows.Contains(hwnd)) continue;
                 if (_windowTracking.ProcessingExplorerWindows.Contains(hwnd)) continue;
 
                 TabBarViewModel validTarget = findValidTarget != null ? findValidTarget() : null;

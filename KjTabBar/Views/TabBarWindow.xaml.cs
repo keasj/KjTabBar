@@ -17,9 +17,11 @@ namespace KjTabBar.Views
     {
         public IExplorerService ExplorerService { get; set; }
         internal ExplorerWindowTrackingState WindowTrackingState { get; set; }
+        internal ExplorerHostSwitchCoordinator ExplorerHostSwitchCoordinator { get; set; }
         private IExplorerService _explorerService => ExplorerService;
 
         private IntPtr _myHwnd;
+        private IntPtr _pendingOwnerExplorerHwnd;
 
         // ドラッグ用変数
         private Point _dragStartPoint;
@@ -115,7 +117,7 @@ namespace KjTabBar.Views
             TabBarViewModel vm = GetVM();
             if (vm != null)
             {
-                helper.Owner = vm.ExplorerHwnd;
+                UpdateOwnerWindow(vm.ExplorerHwnd);
             }
 
             if (!IsRunningElevated())
@@ -221,8 +223,7 @@ namespace KjTabBar.Views
 
             if (IsLoaded)
             {
-                WindowInteropHelper helper = new WindowInteropHelper(this);
-                helper.Owner = explorerHwnd;
+                UpdateOwnerWindow(explorerHwnd);
                 if (_runtimeCoordinator != null)
                 {
                     _runtimeCoordinator.RebindExplorer(explorerHwnd);
@@ -237,6 +238,7 @@ namespace KjTabBar.Views
             TabBarViewModel vm = GetVM();
             if (vm == null || _positioner == null) return;
             _positioner.UpdatePosition(vm.ExplorerHwnd, vm);
+            ApplyPendingOwnerWindowIfReady();
         }
 
         private void DetachDynamicUiResources()
@@ -320,7 +322,18 @@ namespace KjTabBar.Views
                     return;
                 }
 
+                if (ExplorerHostSwitchCoordinator != null &&
+                    !ExplorerHostSwitchCoordinator.PrepareForPath(vm, tab.Path))
+                {
+                    ReturnFocusToExplorer();
+                    return;
+                }
+
                 vm.SelectTab(tab);
+                if (ExplorerHostSwitchCoordinator != null)
+                {
+                    ExplorerHostSwitchCoordinator.CompletePendingReveal();
+                }
             }
             ReturnFocusToExplorer();
             e.Handled = true;
@@ -527,6 +540,45 @@ namespace KjTabBar.Views
             }
 
             return _positioner.IsExplorerAlive(vm.ExplorerHwnd);
+        }
+
+        private void UpdateOwnerWindow(IntPtr explorerHwnd)
+        {
+            WindowInteropHelper helper = new WindowInteropHelper(this);
+            if (explorerHwnd == IntPtr.Zero)
+            {
+                helper.Owner = IntPtr.Zero;
+                _pendingOwnerExplorerHwnd = IntPtr.Zero;
+                return;
+            }
+
+            if (NativeMethods.IsWindowVisible(explorerHwnd))
+            {
+                helper.Owner = explorerHwnd;
+                _pendingOwnerExplorerHwnd = IntPtr.Zero;
+                AppLogger.LogInfo("TabBarWindow", string.Format("UpdateOwnerWindow applied owner={0}", explorerHwnd));
+                return;
+            }
+
+            helper.Owner = IntPtr.Zero;
+            _pendingOwnerExplorerHwnd = explorerHwnd;
+            AppLogger.LogInfo("TabBarWindow", string.Format("UpdateOwnerWindow deferred owner={0}", explorerHwnd));
+        }
+
+        private void ApplyPendingOwnerWindowIfReady()
+        {
+            if (_pendingOwnerExplorerHwnd == IntPtr.Zero ||
+                !NativeMethods.IsWindow(_pendingOwnerExplorerHwnd) ||
+                !NativeMethods.IsWindowVisible(_pendingOwnerExplorerHwnd))
+            {
+                return;
+            }
+
+            WindowInteropHelper helper = new WindowInteropHelper(this);
+            helper.Owner = _pendingOwnerExplorerHwnd;
+            NativeMethods.ShowWindow(_myHwnd, NativeMethods.SW_SHOW);
+            AppLogger.LogInfo("TabBarWindow", string.Format("ApplyPendingOwnerWindowIfReady applied owner={0}", _pendingOwnerExplorerHwnd));
+            _pendingOwnerExplorerHwnd = IntPtr.Zero;
         }
 
         private async System.Threading.Tasks.Task SyncWithExplorerAsync()

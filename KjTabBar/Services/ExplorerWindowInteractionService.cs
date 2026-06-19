@@ -131,6 +131,13 @@ namespace KjTabBar.Services
             TabBarWindow tabBarWindow = _createTabBarWindow();
             tabBarWindow.ExplorerService = _explorerService;
             tabBarWindow.WindowTrackingState = _windowTracking;
+            tabBarWindow.ExplorerHostSwitchCoordinator = new ExplorerHostSwitchCoordinator(
+                _explorerService,
+                _windowTracking,
+                _rebindExplorerWindow,
+                _showExplorerWindow,
+                _moveExplorerWindow,
+                _postCloseWindow);
             tabBarWindow.DataContext = viewModel;
             _showTabBarWindow(tabBarWindow);
 
@@ -260,17 +267,22 @@ namespace KjTabBar.Services
             targetViewModel.Tabs.Add(reusableTab);
 
             IntPtr previousExplorerHwnd = targetViewModel.ExplorerHwnd;
-            NativeMethods.RECT previousExplorerRect = _explorerService.GetExplorerWindowRect(previousExplorerHwnd);
-            if (_windowTracking.HiddenPendingAbsorb.ContainsKey(newExplorerHwnd))
+            NativeMethods.RECT previousExplorerRect = GetWindowBoundsForMove(previousExplorerHwnd);
+            bool hadHiddenPending = _windowTracking.HiddenPendingAbsorb.ContainsKey(newExplorerHwnd);
+            NativeMethods.RECT hiddenOriginalRect = default(NativeMethods.RECT);
+            bool hadHiddenOriginalRect = _windowTracking.HiddenOriginalRects.TryGetValue(newExplorerHwnd, out hiddenOriginalRect);
+            if (hadHiddenPending)
             {
-                _windowTracking.RestoreHiddenWindow(newExplorerHwnd);
-                _showExplorerWindow(newExplorerHwnd);
+                NativeMethods.ShowWindow(newExplorerHwnd, NativeMethods.SW_HIDE);
+                _windowTracking.HiddenPendingAbsorb.Remove(newExplorerHwnd);
+                _windowTracking.HiddenOriginalRects.Remove(newExplorerHwnd);
             }
 
             AlignExplorerWindowToPreviousRect(newExplorerHwnd, previousExplorerRect);
 
             if (_rebindExplorerWindow == null || !_rebindExplorerWindow(targetViewModel, newExplorerHwnd))
             {
+                RestorePreparedExplorerWindow(newExplorerHwnd, hadHiddenPending, hadHiddenOriginalRect, hiddenOriginalRect);
                 targetViewModel.Tabs.Remove(reusableTab);
                 return false;
             }
@@ -282,8 +294,20 @@ namespace KjTabBar.Services
 
             if (previousExplorerHwnd != IntPtr.Zero && previousExplorerHwnd != newExplorerHwnd)
             {
-                _windowTracking.IgnoreWindow(previousExplorerHwnd);
-                _postCloseWindow(previousExplorerHwnd);
+                _windowTracking.RememberParkedExplorerOrigin(newExplorerHwnd, previousExplorerHwnd);
+                NativeMethods.ShowWindow(previousExplorerHwnd, NativeMethods.SW_HIDE);
+                AppLogger.LogInfo(
+                    "ExplorerWindowInteractionService",
+                    string.Format(
+                        "TryRebindControlPanelTab parkedPreviousHost previous={0} controlPanel={1} path={2}",
+                        previousExplorerHwnd,
+                        newExplorerHwnd,
+                        path ?? string.Empty));
+            }
+
+            if (hadHiddenPending)
+            {
+                _showExplorerWindow(newExplorerHwnd);
             }
 
             return true;
@@ -346,6 +370,17 @@ namespace KjTabBar.Services
             _moveExplorerWindow(explorerHwnd, previousExplorerRect);
         }
 
+        private NativeMethods.RECT GetWindowBoundsForMove(IntPtr explorerHwnd)
+        {
+            NativeMethods.RECT rect;
+            if (explorerHwnd != IntPtr.Zero && NativeMethods.GetWindowRect(explorerHwnd, out rect))
+            {
+                return rect;
+            }
+
+            return _explorerService.GetExplorerWindowRect(explorerHwnd);
+        }
+
         private static void MoveExplorerWindowCore(IntPtr explorerHwnd, NativeMethods.RECT rect)
         {
             if (explorerHwnd == IntPtr.Zero || rect.Width <= 0 || rect.Height <= 0)
@@ -361,6 +396,32 @@ namespace KjTabBar.Services
             StringBuilder titleBuilder = new StringBuilder(512);
             NativeMethods.GetWindowText(hwnd, titleBuilder, titleBuilder.Capacity);
             return titleBuilder.ToString();
+        }
+
+        private static void RestorePreparedExplorerWindow(
+            IntPtr explorerHwnd,
+            bool hadHiddenPending,
+            bool hadHiddenOriginalRect,
+            NativeMethods.RECT hiddenOriginalRect)
+        {
+            if (explorerHwnd == IntPtr.Zero || !hadHiddenPending || !NativeMethods.IsWindow(explorerHwnd))
+            {
+                return;
+            }
+
+            if (hadHiddenOriginalRect && hiddenOriginalRect.Width > 0 && hiddenOriginalRect.Height > 0)
+            {
+                NativeMethods.SetWindowPos(
+                    explorerHwnd,
+                    IntPtr.Zero,
+                    hiddenOriginalRect.Left,
+                    hiddenOriginalRect.Top,
+                    0,
+                    0,
+                    NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER);
+            }
+
+            NativeMethods.ShowWindow(explorerHwnd, NativeMethods.SW_SHOW);
         }
     }
 }

@@ -11,8 +11,6 @@ namespace UnitTestProject
         public string ProgramsAndFeaturesPath { get; set; } = @"ProgramsAndFeaturesPath";
         public string PowerOptionsPath { get; set; } = @"PowerOptionsPath";
 
-        public List<IntPtr> FindExplorerWindows() => new List<IntPtr>();
-        public virtual string GetCurrentPath(IntPtr explorerHwnd) => @"C:\MockPath";
         public virtual string GetFolderName(string path) => "MockFolder";
         public string GetLocalizedControlPanelTitle() => "Control Panel";
         public string GetLocalizedHomeTitle() => "Home";
@@ -26,9 +24,13 @@ namespace UnitTestProject
         public Func<string, bool> IsTransientShellPlaceholderPathFunc { get; set; }
         public Func<string, string> NormalizeKnownPathFunc { get; set; }
         public Func<string, string> NormalizeShellNamespacePathFunc { get; set; }
+        public Func<List<IntPtr>> FindExplorerWindowsFunc { get; set; }
+        public Func<IntPtr, string> GetCurrentPathFunc { get; set; }
         public bool OpenInNewWindowResult { get; set; } = true;
         public string OpenedInNewWindowPath { get; private set; }
 
+        public List<IntPtr> FindExplorerWindows() => FindExplorerWindowsFunc != null ? FindExplorerWindowsFunc() : new List<IntPtr>();
+        public virtual string GetCurrentPath(IntPtr explorerHwnd) => GetCurrentPathFunc != null ? GetCurrentPathFunc(explorerHwnd) : @"C:\MockPath";
         public bool IsControlPanelPath(string path) => IsControlPanelPathFunc != null ? IsControlPanelPathFunc(path) : path == AllControlPanelPath;
         public bool IsControlPanelRootPath(string path) => IsControlPanelRootPathFunc != null ? IsControlPanelRootPathFunc(path) : false;
         public bool IsTabPathCurrentlyAvailable(string path) => true;

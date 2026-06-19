@@ -1,4 +1,4 @@
-﻿﻿using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -40,7 +40,19 @@ namespace KjTabBar.ViewModels
                 return;
             }
 
+            IntPtr previousExplorerHwnd = _explorerHwnd;
             _explorerHwnd = explorerHwnd;
+            if (previousExplorerHwnd != explorerHwnd)
+            {
+                _navigationTracker.NotifyExplorerHostChanged();
+            }
+            AppLogger.LogInfo(
+                "TabBarViewModel",
+                string.Format(
+                    "SetExplorerHwnd previous={0} current={1} activeTab={2}",
+                    previousExplorerHwnd,
+                    _explorerHwnd,
+                    ActiveTab != null ? ActiveTab.Path ?? string.Empty : string.Empty));
         }
 
         internal TabNavigationStateTracker NavigationTracker
@@ -587,6 +599,14 @@ namespace KjTabBar.ViewModels
             }
 
             string currentPath = _explorerService.GetCurrentPath(_explorerHwnd);
+            AppLogger.LogInfo(
+                "TabBarViewModel",
+                string.Format(
+                    "SelectTab explorer={0} currentPath={1} targetPath={2} activeBefore={3}",
+                    _explorerHwnd,
+                    currentPath ?? string.Empty,
+                    path ?? string.Empty,
+                    previousActiveTab != null ? previousActiveTab.Path ?? string.Empty : string.Empty));
             if (PathEquals(currentPath, path))
             {
                 if (tab != _activeTab)
@@ -608,6 +628,12 @@ namespace KjTabBar.ViewModels
 
             if (_explorerService.Navigate(_explorerHwnd, path))
             {
+                AppLogger.LogInfo(
+                    "TabBarViewModel",
+                    string.Format(
+                        "SelectTab navigateStarted explorer={0} targetPath={1}",
+                        _explorerHwnd,
+                        path ?? string.Empty));
                 _navigationTracker.StartNavigation(
                     NormalizeTabPath(path),
                     (previousActiveTab != null && previousActiveTab != tab) ? previousActiveTab : null,
@@ -616,6 +642,12 @@ namespace KjTabBar.ViewModels
             }
             else
             {
+                AppLogger.LogInfo(
+                    "TabBarViewModel",
+                    string.Format(
+                        "SelectTab navigateRejected explorer={0} targetPath={1}",
+                        _explorerHwnd,
+                        path ?? string.Empty));
                 _navigationTracker.ClearPending();
 
                 if (previousActiveTab != null && previousActiveTab != tab)

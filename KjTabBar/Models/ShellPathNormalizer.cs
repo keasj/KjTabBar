@@ -554,6 +554,17 @@ namespace KjTabBar.Models
                 return normalizedControlPanelItemPath;
             }
 
+            int embeddedNullIndex = normalizedNamespacePath.IndexOf('\0');
+            if (embeddedNullIndex >= 0)
+            {
+                string normalizedNamespacePrefix = NormalizeBasicShellNamespacePath(
+                    normalizedNamespacePath.Substring(0, embeddedNullIndex));
+                if (!string.IsNullOrEmpty(normalizedNamespacePrefix))
+                {
+                    return normalizedNamespacePrefix;
+                }
+            }
+
             return normalizedNamespacePath;
         }
 

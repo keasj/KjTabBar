@@ -92,10 +92,28 @@ namespace KjTabBar.Services
                 case AbsorptionAction.CreateNewTabBar:
                     if (validTarget != null)
                     {
+                        if (result.IsControlPanelPath)
+                        {
+                            AppLogger.LogInfo(
+                                "ExplorerWindowOutcomeCoordinator",
+                                string.Format(
+                                    "CreateNewTabBar skipped hwnd={0} because validTarget={1}",
+                                    hwnd,
+                                    validTarget.ExplorerHwnd));
+                        }
                         return;
                     }
 
                     _windowTracking.ClearAbsorptionState(hwnd);
+                    if (result.IsControlPanelPath)
+                    {
+                        AppLogger.LogInfo(
+                            "ExplorerWindowOutcomeCoordinator",
+                            string.Format(
+                                "CreateNewTabBar proceeding hwnd={0} because validTarget=<null> controlPanelTarget={1}",
+                                hwnd,
+                                controlPanelTarget != null ? controlPanelTarget.ExplorerHwnd.ToString() : string.Empty));
+                    }
                     TryCreateNewTabBar(hwnd, result.ResolvedPath, result.UseResolvedPathOnCreate);
                     break;
 

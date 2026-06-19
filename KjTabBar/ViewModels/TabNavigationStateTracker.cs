@@ -7,6 +7,7 @@ namespace KjTabBar.ViewModels
     {
         private static readonly TimeSpan ExplorerPathPollInterval = TimeSpan.FromMilliseconds(300);
         private static readonly TimeSpan CancelledNavigationGracePeriod = TimeSpan.FromSeconds(15);
+        private static readonly TimeSpan ExplorerHostSwitchGracePeriod = TimeSpan.FromMilliseconds(750);
 
         private string _navigatingToPath;
         private DateTime _navigateStartTime;
@@ -17,6 +18,7 @@ namespace KjTabBar.ViewModels
         private DateTime _cancelledNavigationUtc = DateTime.MinValue;
         private DateTime _lastExplorerPathPollUtc = DateTime.MinValue;
         private string _cachedExplorerPath;
+        private DateTime _lastExplorerHostSwitchUtc = DateTime.MinValue;
 
         public string NavigatingToPath => _navigatingToPath;
         public DateTime NavigateStartTime => _navigateStartTime;
@@ -98,5 +100,22 @@ namespace KjTabBar.ViewModels
         }
 
         public string CachedExplorerPath => _cachedExplorerPath;
+
+        public void NotifyExplorerHostChanged()
+        {
+            _lastExplorerHostSwitchUtc = DateTime.UtcNow;
+            _lastExplorerPathPollUtc = DateTime.MinValue;
+            _cachedExplorerPath = null;
+        }
+
+        public bool IsExplorerHostSwitchGraceActive(DateTime nowUtc)
+        {
+            if (_lastExplorerHostSwitchUtc == DateTime.MinValue)
+            {
+                return false;
+            }
+
+            return (nowUtc - _lastExplorerHostSwitchUtc) < ExplorerHostSwitchGracePeriod;
+        }
     }
 }

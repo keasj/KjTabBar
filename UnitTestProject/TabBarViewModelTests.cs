@@ -266,6 +266,73 @@ namespace UnitTestProject
             Assert.AreEqual(@"C:\SavedB", vm.Tabs[1].Path);
         }
 
+        [TestMethod]
+        public void NavigationTracker_ActivatesExplorerHostSwitchGracePeriod()
+        {
+            TabNavigationStateTracker tracker = new TabNavigationStateTracker();
+
+            tracker.NotifyExplorerHostChanged();
+
+            Assert.IsTrue(tracker.IsExplorerHostSwitchGraceActive(DateTime.UtcNow));
+            Assert.IsFalse(tracker.IsExplorerHostSwitchGraceActive(DateTime.UtcNow.AddSeconds(1)));
+        }
+
+        [TestMethod]
+        public void SelectTab_DoesNotNavigate_When_ControlPanelItemDiffers_Only_By_EmbeddedNullSuffix()
+        {
+            ControlPanelAliasExplorerService mockExplorer = new ControlPanelAliasExplorerService();
+            MockUserSettings mockSettings = new MockUserSettings();
+            TabBarViewModel vm = new TabBarViewModel((IntPtr)123, mockSettings, mockExplorer);
+
+            vm.InsertTabWithPath(mockExplorer.PowerOptionsPath, 1, true);
+            mockExplorer.NavigateCallCount = 0;
+
+            vm.SelectTab(vm.Tabs[1]);
+
+            Assert.AreEqual(0, mockExplorer.NavigateCallCount);
+            Assert.AreEqual(mockExplorer.PowerOptionsPath, vm.ActiveTab.Path);
+        }
+
+        [TestMethod]
+        public void SyncWithExplorerAsync_UpdatesActiveControlPanelTab_InsteadOfJumpingToExistingControlPanelRootTab()
+        {
+            SynchronizerControlPanelExplorerService mockExplorer = new SynchronizerControlPanelExplorerService();
+            MockUserSettings mockSettings = new MockUserSettings();
+            TabBarViewModel vm = new TabBarViewModel((IntPtr)123, mockSettings, mockExplorer);
+
+            vm.InsertTabWithPath(mockExplorer.AllControlPanelPath, 1, true);
+            mockExplorer.CurrentPath = mockExplorer.PowerOptionsPath;
+            vm.SelectTab(vm.Tabs[0]);
+
+            mockExplorer.CurrentPath = mockExplorer.AllControlPanelPath;
+            vm.SyncWithExplorerAsync().GetAwaiter().GetResult();
+
+            Assert.AreEqual(mockExplorer.AllControlPanelPath, vm.ActiveTab.Path);
+            Assert.AreEqual(vm.Tabs[0], vm.ActiveTab);
+            Assert.AreEqual(mockExplorer.AllControlPanelPath, vm.Tabs[0].Path);
+            Assert.AreEqual(mockExplorer.AllControlPanelPath, vm.Tabs[1].Path);
+        }
+
+        [TestMethod]
+        public void SyncWithExplorerAsync_UpdatesActiveTabPath_InsteadOfJumpingToExistingMatchingTab()
+        {
+            SynchronizerControlPanelExplorerService mockExplorer = new SynchronizerControlPanelExplorerService();
+            MockUserSettings mockSettings = new MockUserSettings();
+            TabBarViewModel vm = new TabBarViewModel((IntPtr)123, mockSettings, mockExplorer);
+
+            vm.InsertTabWithPath(@"C:\Data", 1, false);
+            mockExplorer.CurrentPath = mockExplorer.PowerOptionsPath;
+            vm.SelectTab(vm.Tabs[0]);
+
+            mockExplorer.CurrentPath = @"C:\Data";
+            vm.SyncWithExplorerAsync().GetAwaiter().GetResult();
+
+            Assert.AreEqual(@"C:\Data", vm.ActiveTab.Path);
+            Assert.AreEqual(vm.Tabs[0], vm.ActiveTab);
+            Assert.AreEqual(@"C:\Data", vm.Tabs[0].Path);
+            Assert.AreEqual(@"C:\Data", vm.Tabs[1].Path);
+        }
+
         private class CustomMockExplorerService : MockExplorerService
         {
             public override string GetFolderName(string path)
@@ -306,6 +373,102 @@ namespace UnitTestProject
             {
                 LastNavigatedPath = path;
                 return true;
+            }
+        }
+
+        private sealed class ControlPanelAliasExplorerService : MockExplorerService
+        {
+            private readonly ShellPathNormalizer _normalizer;
+
+            public ControlPanelAliasExplorerService()
+            {
+                AllControlPanelPath = "::{26EE0668-A00A-44D7-9371-BEB064C98683}";
+                HomeFolderPath = "::{679F85CB-0220-4080-B29B-5540CC05AAB6}";
+                ProgramsAndFeaturesPath = "::{26EE0668-A00A-44D7-9371-BEB064C98683}\\0\\::{7B81BE6A-CE2B-4676-A29E-EB907A5126C5}";
+                PowerOptionsPath = "::{025A5937-A6BE-4686-A844-36FE4BEC8B6D}";
+
+                ShellLocationNameResolver locationResolver = new ShellLocationNameResolver(
+                    AllControlPanelPath,
+                    HomeFolderPath,
+                    ProgramsAndFeaturesPath,
+                    PowerOptionsPath,
+                    delegate (string title) { return null; });
+                _normalizer = new ShellPathNormalizer(
+                    AllControlPanelPath,
+                    HomeFolderPath,
+                    ProgramsAndFeaturesPath,
+                    PowerOptionsPath,
+                    delegate { return "コントロール パネル"; },
+                    delegate { return "ホーム"; },
+                    delegate { return "ネットワーク"; },
+                    delegate { return "ごみ箱"; },
+                    delegate { return "PC"; },
+                    delegate { return @"C:\Users\TestUser"; },
+                    locationResolver,
+                    delegate (string path) { return null; });
+
+                IsControlPanelPathFunc = delegate (string path) { return _normalizer.IsControlPanelPath(path); };
+                NormalizeKnownPathFunc = delegate (string path) { return _normalizer.NormalizeKnownPath(path); };
+            }
+
+            public int NavigateCallCount { get; set; }
+
+            public override string GetCurrentPath(IntPtr explorerHwnd)
+            {
+                return PowerOptionsPath + '\0' + "\\::{00000000-0000-0000-0000-000000000000}";
+            }
+
+            public override bool Navigate(IntPtr explorerHwnd, string path)
+            {
+                NavigateCallCount++;
+                return true;
+            }
+
+            public override string GetFolderName(string path)
+            {
+                return "Power Options";
+            }
+        }
+
+        private sealed class SynchronizerControlPanelExplorerService : MockExplorerService
+        {
+            public SynchronizerControlPanelExplorerService()
+            {
+                AllControlPanelPath = "::{21EC2020-3AEA-1069-A2DD-08002B30309D}";
+                PowerOptionsPath = "::{025A5937-A6BE-4686-A844-36FE4BEC8B6D}";
+                CurrentPath = PowerOptionsPath;
+                IsControlPanelPathFunc = delegate (string path)
+                {
+                    return string.Equals(path, AllControlPanelPath, StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(path, PowerOptionsPath, StringComparison.OrdinalIgnoreCase);
+                };
+                IsControlPanelRootPathFunc = delegate (string path)
+                {
+                    return string.Equals(path, AllControlPanelPath, StringComparison.OrdinalIgnoreCase);
+                };
+                NormalizeKnownPathFunc = delegate (string path) { return path; };
+            }
+
+            public string CurrentPath { get; set; }
+
+            public override string GetCurrentPath(IntPtr explorerHwnd)
+            {
+                return CurrentPath;
+            }
+
+            public override string GetFolderName(string path)
+            {
+                if (string.Equals(path, AllControlPanelPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return "Control Panel";
+                }
+
+                if (string.Equals(path, PowerOptionsPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return "Power Options";
+                }
+
+                return path;
             }
         }
     }
