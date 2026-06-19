@@ -203,8 +203,8 @@
         {
         "Name" = "8:Microsoft Visual Studio"
         "ProductName" = "8:KjTabBar"
-        "ProductCode" = "8:{D08D0F8F-1017-4C6B-BC58-C9929E78D117}"
-        "PackageCode" = "8:{CD1F22E8-0482-431C-9B8E-CB764B08943B}"
+        "ProductCode" = "8:{B7E2F492-1CF1-4FE4-835F-18158D041C59}"
+        "PackageCode" = "8:{6C135037-F6E3-4106-8714-7DDA3E292C17}"
         "UpgradeCode" = "8:{C3A4D5D7-A7B5-4DBF-8DD4-65050E7326C9}"
         "AspNetVersion" = "8:4.0.30319.0"
         "RestartWWWService" = "11:FALSE"

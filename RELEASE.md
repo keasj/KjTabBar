@@ -27,13 +27,19 @@ Update these files before building:
   - `AssemblyFileVersion("x.y.z.w")`
 - `Setup\Setup.vdproj`
   - `ProductVersion = "8:x.y.z"`
+  - `ProductCode = "8:{new-guid}"`
+  - `PackageCode = "8:{new-guid}"`
 - `Setup\Setup_en.vdproj`
   - `ProductVersion = "8:x.y.z"`
+  - `ProductCode = "8:{new-guid}"`
+  - `PackageCode = "8:{new-guid}"`
 
 Example for `v1.1.3.0`:
 
 - Assembly version: `1.1.3.0`
 - Setup product version: `1.1.3`
+- Setup `ProductCode` and `PackageCode`: new GUID values for each release build
+- Keep `UpgradeCode` unchanged so `RemovePreviousVersions` can upgrade older installs
 
 ## 3. Build the Application
 
