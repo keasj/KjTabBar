@@ -20,6 +20,13 @@ If authentication is missing, log in again:
 
 ## 2. Update Version Numbers
 
+Important MSI upgrade rule:
+
+- Every installer release must get new `ProductCode` and `PackageCode` GUID values in both setup projects.
+- Keep `UpgradeCode` unchanged. It is the stable family identifier used by `RemovePreviousVersions`.
+- If `ProductVersion` changes but `ProductCode` stays the same, Windows Installer can show: "Another version of this product is already installed."
+- Generate fresh GUIDs with `[guid]::NewGuid().ToString().ToUpper()`.
+
 Update these files before building:
 
 - `KjTabBar\Properties\AssemblyInfo.cs`
@@ -38,8 +45,9 @@ Example for `v1.1.3.0`:
 
 - Assembly version: `1.1.3.0`
 - Setup product version: `1.1.3`
-- Setup `ProductCode` and `PackageCode`: new GUID values for each release build
+- Setup `ProductCode` and `PackageCode`: new GUID values for each setup project and each release build
 - Keep `UpgradeCode` unchanged so `RemovePreviousVersions` can upgrade older installs
+- Before publishing, inspect the built MSI `Property` table and confirm `ProductVersion`, `ProductCode`, and `UpgradeCode`.
 
 ## 3. Build the Application
 
@@ -135,7 +143,29 @@ Copy-Item 'Setup\Release\Setup.msi' '.\_release\KjTabBar-v1.1.3.0-setup.msi' -Fo
   '.\_release\KjTabBar-v1.1.3.0-setup.exe' `
   '.\_release\KjTabBar-v1.1.3.0-setup.msi'
 ```
-## 9. Verify the Published Release
+## 9. Verify the Built MSI Upgrade Metadata
+
+Before uploading assets, confirm the MSI contains the expected metadata:
+
+```powershell
+$installer = New-Object -ComObject WindowsInstaller.Installer
+$database = $installer.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $installer, @((Resolve-Path 'Setup\Release\Setup.msi').Path, 0))
+foreach ($prop in @('ProductCode','ProductVersion','UpgradeCode','ProductName')) {
+  $view = $database.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $database, @("SELECT ``Value`` FROM ``Property`` WHERE ``Property``='$prop'"))
+  $view.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $view, $null) | Out-Null
+  $record = $view.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $view, $null)
+  $value = if ($record -ne $null) { $record.GetType().InvokeMember('StringData', 'GetProperty', $null, $record, @(1)) } else { '<missing>' }
+  "$prop=$value"
+}
+```
+
+Expected checks:
+
+- `ProductVersion` matches the setup version, for example `1.1.8`.
+- `ProductCode` differs from the previous release.
+- `UpgradeCode` matches the previous release.
+
+## 10. Verify the Published Release
 
 Confirm the release contents:
 
@@ -149,7 +179,7 @@ The asset list should contain:
 - `KjTabBar-v1.1.3.0-setup.exe`
 - `KjTabBar-v1.1.3.0-setup.msi`
 
-## 10. Notes for Codex Sessions
+## 11. Notes for Codex Sessions
 
 - `gh` may fail to read keyring credentials inside a sandboxed session. If that happens, run the GitHub CLI commands outside the sandbox or with approval.
 - Keep text files in CRLF format. The repository pre-commit hook checks line endings.
