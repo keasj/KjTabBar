@@ -29,15 +29,6 @@ namespace KjTabBar.Services
 
                 // UIスレッドをブロックしないよう、COMアクセスをバックグラウンドスレッドで行う
                 string currentPath = await ComThreadService.Instance.InvokeAsync(() => GetCurrentPathForSync(forcePathPoll));
-                AppLogger.LogInfo(
-                    "TabBarExplorerSynchronizer",
-                    string.Format(
-                        "Sync explorer={0} currentPath={1} activeTab={2} navigatingTo={3}",
-                        _viewModel.ExplorerHwnd,
-                        currentPath ?? string.Empty,
-                        _viewModel.ActiveTab != null ? _viewModel.ActiveTab.Path ?? string.Empty : string.Empty,
-                        _viewModel.NavigationTracker.NavigatingToPath ?? string.Empty));
-
                 if (_viewModel.ActiveTab == null) return;
 
                 if (_viewModel.NavigationTracker.NavigatingToPath == null &&
@@ -45,13 +36,6 @@ namespace KjTabBar.Services
                     !string.IsNullOrEmpty(currentPath) &&
                     !_viewModel.PathEquals(_viewModel.ActiveTab.Path, currentPath))
                 {
-                    AppLogger.LogInfo(
-                        "TabBarExplorerSynchronizer",
-                        string.Format(
-                            "Sync deferredDuringHostSwitch explorer={0} currentPath={1} activeTab={2}",
-                            _viewModel.ExplorerHwnd,
-                            currentPath ?? string.Empty,
-                            _viewModel.ActiveTab != null ? _viewModel.ActiveTab.Path ?? string.Empty : string.Empty));
                     return;
                 }
 

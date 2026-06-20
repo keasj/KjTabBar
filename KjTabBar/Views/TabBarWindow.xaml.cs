@@ -315,13 +315,6 @@ namespace KjTabBar.Views
             TabBarViewModel vm = GetVM();
             if (vm != null && tab != null)
             {
-                if (!string.IsNullOrEmpty(tab.Path) && !_explorerService.IsTabPathCurrentlyAvailable(tab.Path))
-                {
-                    vm.CloseTab(tab);
-                    ReturnFocusToExplorer();
-                    return;
-                }
-
                 if (ExplorerHostSwitchCoordinator != null &&
                     !ExplorerHostSwitchCoordinator.PrepareForPath(vm, tab.Path))
                 {

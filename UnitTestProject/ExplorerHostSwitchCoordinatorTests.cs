@@ -177,6 +177,60 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void PrepareForPath_DoesNotQueryCurrentPath_WhenActiveTabAlreadyMatchesNormalTarget()
+        {
+            MockExplorerService explorerService = new MockExplorerService();
+            explorerService.IsControlPanelPathFunc = delegate (string path)
+            {
+                return path == explorerService.PowerOptionsPath;
+            };
+            int getCurrentPathCallCount = 0;
+            explorerService.GetCurrentPathFunc = delegate (IntPtr hwnd)
+            {
+                getCurrentPathCallCount++;
+                return @"C:\Initial";
+            };
+
+            ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState();
+            trackingState.RememberParkedExplorerOrigin((IntPtr)200, (IntPtr)100);
+
+            bool rebindCalled = false;
+            ExplorerHostSwitchCoordinator coordinator = new ExplorerHostSwitchCoordinator(
+                explorerService,
+                trackingState,
+                delegate (TabBarViewModel vm, IntPtr hwnd)
+                {
+                    rebindCalled = true;
+                    return true;
+                },
+                delegate (IntPtr hwnd) { },
+                delegate (IntPtr hwnd, NativeMethods.RECT rect) { },
+                delegate (IntPtr hwnd) { },
+                delegate (IntPtr hwnd) { return true; },
+                delegate { return explorerService.FindExplorerWindows(); },
+                delegate (IntPtr hwnd) { return explorerService.GetCurrentPath(hwnd); },
+                delegate (string path) { return explorerService.OpenInNewWindow(path); },
+                delegate (int millisecondsTimeout) { });
+
+            TabBarViewModel viewModel = new TabBarViewModel((IntPtr)200, new MockUserSettings(), explorerService);
+            viewModel.InsertTabWithPath(@"C:\Work", 1, false);
+            viewModel.SelectTab(viewModel.Tabs[1]);
+            getCurrentPathCallCount = 0;
+            explorerService.GetCurrentPathFunc = delegate (IntPtr hwnd)
+            {
+                Assert.Fail("GetCurrentPath should not be called when the active tab already indicates a normal host.");
+                return null;
+            };
+
+            bool prepared = coordinator.PrepareForPath(viewModel, @"C:\Users\Test");
+
+            Assert.IsTrue(prepared);
+            Assert.IsFalse(rebindCalled);
+            Assert.AreEqual((IntPtr)200, viewModel.ExplorerHwnd);
+            Assert.AreEqual(0, getCurrentPathCallCount);
+        }
+
+        [TestMethod]
         public void PrepareForPath_SwitchesToFreshExplorerHost_WhenCurrentHostIsControlPanel()
         {
             MockExplorerService explorerService = new MockExplorerService();

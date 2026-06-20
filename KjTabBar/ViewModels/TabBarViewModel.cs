@@ -585,7 +585,6 @@ namespace KjTabBar.ViewModels
 
             if (!_explorerService.IsTabPathCurrentlyAvailable(path))
             {
-                CloseTab(tab);
                 return;
             }
 
@@ -598,7 +597,7 @@ namespace KjTabBar.ViewModels
                 return;
             }
 
-            string currentPath = _explorerService.GetCurrentPath(_explorerHwnd);
+            string currentPath = GetCurrentPathForSelection();
             AppLogger.LogInfo(
                 "TabBarViewModel",
                 string.Format(
@@ -690,6 +689,18 @@ namespace KjTabBar.ViewModels
         internal void UpdateTabTitles()
         {
             TabTitleDisambiguator.UpdateTitles(_tabs, _explorerService);
+        }
+
+        private string GetCurrentPathForSelection()
+        {
+            DateTime nowUtc = DateTime.UtcNow;
+            string cachedPath;
+            if (_navigationTracker.TryGetRecentCachedExplorerPath(nowUtc, out cachedPath))
+            {
+                return cachedPath;
+            }
+
+            return _explorerService.GetCurrentPath(_explorerHwnd);
         }
 
         private string ShortenTitle(string title, int maxLen)

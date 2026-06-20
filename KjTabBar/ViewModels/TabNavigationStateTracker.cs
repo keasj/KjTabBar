@@ -101,6 +101,17 @@ namespace KjTabBar.ViewModels
 
         public string CachedExplorerPath => _cachedExplorerPath;
 
+        public bool TryGetRecentCachedExplorerPath(DateTime nowUtc, out string path)
+        {
+            path = _cachedExplorerPath;
+            if (string.IsNullOrEmpty(path))
+            {
+                return false;
+            }
+
+            return !ShouldPoll(nowUtc, false);
+        }
+
         public void NotifyExplorerHostChanged()
         {
             _lastExplorerHostSwitchUtc = DateTime.UtcNow;

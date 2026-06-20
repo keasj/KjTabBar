@@ -33,7 +33,7 @@ namespace UnitTestProject
         public virtual string GetCurrentPath(IntPtr explorerHwnd) => GetCurrentPathFunc != null ? GetCurrentPathFunc(explorerHwnd) : @"C:\MockPath";
         public bool IsControlPanelPath(string path) => IsControlPanelPathFunc != null ? IsControlPanelPathFunc(path) : path == AllControlPanelPath;
         public bool IsControlPanelRootPath(string path) => IsControlPanelRootPathFunc != null ? IsControlPanelRootPathFunc(path) : false;
-        public bool IsTabPathCurrentlyAvailable(string path) => true;
+        public virtual bool IsTabPathCurrentlyAvailable(string path) => true;
         public bool IsTransientShellPlaceholderPath(string path) => IsTransientShellPlaceholderPathFunc != null ? IsTransientShellPlaceholderPathFunc(path) : false;
         public string MapLocationNameToKnownShellPath(string locationName) => locationName;
         public virtual bool Navigate(IntPtr explorerHwnd, string path) => true;

@@ -88,7 +88,7 @@ namespace KjTabBar.Services
 
             bool targetIsControlPanelPath = _explorerService.IsControlPanelPath(targetPath);
             IntPtr currentExplorerHwnd = viewModel.ExplorerHwnd;
-            bool currentIsControlPanelHost = IsControlPanelHost(currentExplorerHwnd, viewModel);
+            bool currentIsControlPanelHost = IsControlPanelHost(currentExplorerHwnd, viewModel, targetIsControlPanelPath);
             IntPtr parkedExplorerHwnd;
             AppLogger.LogInfo(
                 "ExplorerHostSwitchCoordinator",
@@ -173,11 +173,21 @@ namespace KjTabBar.Services
             }
         }
 
-        private bool IsControlPanelHost(IntPtr explorerHwnd, TabBarViewModel viewModel)
+        private bool IsControlPanelHost(IntPtr explorerHwnd, TabBarViewModel viewModel, bool targetIsControlPanelPath)
         {
             if (explorerHwnd == IntPtr.Zero || _explorerService == null)
             {
                 return false;
+            }
+
+            TabItemViewModel activeTab = viewModel != null ? viewModel.ActiveTab : null;
+            if (activeTab != null && !string.IsNullOrEmpty(activeTab.Path))
+            {
+                bool activeTabIsControlPanel = _explorerService.IsControlPanelPath(activeTab.Path);
+                if (activeTabIsControlPanel == targetIsControlPanelPath)
+                {
+                    return activeTabIsControlPanel;
+                }
             }
 
             string currentPath = _getCurrentPath != null ? _getCurrentPath(explorerHwnd) : null;
@@ -186,7 +196,6 @@ namespace KjTabBar.Services
                 return _explorerService.IsControlPanelPath(currentPath);
             }
 
-            TabItemViewModel activeTab = viewModel != null ? viewModel.ActiveTab : null;
             return activeTab != null && _explorerService.IsControlPanelPath(activeTab.Path);
         }
 

@@ -333,6 +333,48 @@ namespace UnitTestProject
             Assert.AreEqual(@"C:\Data", vm.Tabs[1].Path);
         }
 
+        [TestMethod]
+        public void SelectTab_UsesRecentCachedExplorerPath_WithoutRefreshingCurrentPath()
+        {
+            CachedPathExplorerService mockExplorer = new CachedPathExplorerService();
+            MockUserSettings mockSettings = new MockUserSettings();
+            TabBarViewModel vm = new TabBarViewModel((IntPtr)123, mockSettings, mockExplorer);
+
+            vm.InsertTabWithPath(@"C:\CachedTarget", 1, false);
+            mockExplorer.GetCurrentPathCallCount = 0;
+
+            object tracker = typeof(TabBarViewModel)
+                .GetProperty("NavigationTracker", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .GetValue(vm, null);
+            tracker.GetType()
+                .GetMethod("UpdateCache", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+                .Invoke(tracker, new object[] { @"C:\CachedTarget", DateTime.UtcNow });
+
+            vm.SelectTab(vm.Tabs[1]);
+
+            Assert.AreEqual(0, mockExplorer.GetCurrentPathCallCount);
+            Assert.AreEqual(1, mockExplorer.NavigateCallCount);
+        }
+
+        [TestMethod]
+        public void SelectTab_DoesNotCloseTab_When_PathIsTemporarilyUnavailable()
+        {
+            UnavailablePathExplorerService mockExplorer = new UnavailablePathExplorerService();
+            MockUserSettings mockSettings = new MockUserSettings();
+            TabBarViewModel vm = new TabBarViewModel((IntPtr)123, mockSettings, mockExplorer);
+
+            vm.InsertTabWithPath(@"Z:\SleepingDrive", 1, false);
+            TabItemViewModel originalActiveTab = vm.ActiveTab;
+            TabItemViewModel unavailableTab = vm.Tabs[1];
+
+            vm.SelectTab(unavailableTab);
+
+            Assert.AreEqual(2, vm.Tabs.Count);
+            Assert.AreSame(unavailableTab, vm.Tabs[1]);
+            Assert.AreSame(originalActiveTab, vm.ActiveTab);
+            Assert.AreEqual(0, mockExplorer.NavigateCallCount);
+        }
+
         private class CustomMockExplorerService : MockExplorerService
         {
             public override string GetFolderName(string path)
@@ -469,6 +511,50 @@ namespace UnitTestProject
                 }
 
                 return path;
+            }
+        }
+
+        private sealed class CachedPathExplorerService : MockExplorerService
+        {
+            public int GetCurrentPathCallCount { get; set; }
+            public int NavigateCallCount { get; set; }
+
+            public override string GetCurrentPath(IntPtr explorerHwnd)
+            {
+                GetCurrentPathCallCount++;
+                return @"C:\CurrentFromExplorer";
+            }
+
+            public override bool Navigate(IntPtr explorerHwnd, string path)
+            {
+                NavigateCallCount++;
+                return true;
+            }
+
+            public override string GetFolderName(string path)
+            {
+                return path;
+            }
+        }
+
+        private sealed class UnavailablePathExplorerService : MockExplorerService
+        {
+            public int NavigateCallCount { get; set; }
+
+            public override bool Navigate(IntPtr explorerHwnd, string path)
+            {
+                NavigateCallCount++;
+                return true;
+            }
+
+            public override string GetFolderName(string path)
+            {
+                return path;
+            }
+
+            public override bool IsTabPathCurrentlyAvailable(string path)
+            {
+                return !string.Equals(path, @"Z:\SleepingDrive", StringComparison.OrdinalIgnoreCase);
             }
         }
     }
