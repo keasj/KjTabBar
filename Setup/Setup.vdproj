@@ -799,7 +799,7 @@
         {
             "{5259A561-127C-4D43-A0A1-72F10C7B3BF8}:_41353C4D88514DFBB6A8572111DFFEDC"
             {
-            "SourcePath" = "8:..\\KjTabBar\\obj\\Release\\net481\\KjTabBar.exe"
+            "SourcePath" = "8:..\\KjTabBar\\bin\\Release\\net481\\KjTabBar.exe"
             "TargetName" = "8:"
             "Tag" = "8:"
             "Folder" = "8:_4C9DB71831834548B4A73BC932818F17"
