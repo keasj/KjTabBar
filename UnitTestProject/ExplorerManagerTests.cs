@@ -248,6 +248,24 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void Resolve_Prefers_SpecialVirtualFolder_From_LocationName()
+        {
+            ShellCurrentPathResolver resolver = new ShellCurrentPathResolver(
+                delegate (string locationName)
+                {
+                    return locationName == "ホーム" ? "::{679F85CB-0220-4080-B29B-5540CC05AAB6}" : null;
+                },
+                delegate (string path) { return false; },
+                delegate (string path) { return path == "::{21EC2020-3AEA-1069-A2DD-08002B30309D}"; },
+                delegate (string path) { return null; },
+                delegate (string path) { return false; });
+
+            string resolved = resolver.Resolve("ignored", "ホーム", @"C:\Users\TestUser");
+
+            Assert.AreEqual("::{679F85CB-0220-4080-B29B-5540CC05AAB6}", resolved);
+        }
+
+        [TestMethod]
         public void Resolve_Prefers_ControlPanelRoot_From_LocationName()
         {
             ShellCurrentPathResolver resolver = new ShellCurrentPathResolver(

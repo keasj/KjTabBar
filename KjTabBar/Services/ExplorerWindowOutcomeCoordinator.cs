@@ -86,7 +86,17 @@ namespace KjTabBar.Services
                         (result.Action == AbsorptionAction.Absorb && result.IsControlPanelPath && controlPanelTarget != null)
                         ? controlPanelTarget
                         : validTarget;
-                    TryAbsorbExplorerWindow(hwnd, targetToUse, result.ResolvedPath, result.AllowSpecialPath, result.IsControlPanelPath);
+                    if (result.IsControlPanelPath)
+                    {
+                        AppLogger.LogInfo(
+                            "ExplorerWindowOutcomeCoordinator",
+                            string.Format(
+                                "CP absorb target hwnd={0} targetExplorer={1} activeTab={2}",
+                                hwnd,
+                                targetToUse != null ? targetToUse.ExplorerHwnd.ToString() : string.Empty,
+                                targetToUse != null && targetToUse.ActiveTab != null ? targetToUse.ActiveTab.Path ?? string.Empty : string.Empty));
+                    }
+                    TryAbsorbExplorerWindow(hwnd, targetToUse, result.ResolvedPath, result.AllowSpecialPath, result.IsControlPanelPath, result.WasManagedControlPanelLaunchSource);
                     break;
 
                 case AbsorptionAction.CreateNewTabBar:
@@ -124,11 +134,11 @@ namespace KjTabBar.Services
             }
         }
 
-        private void TryAbsorbExplorerWindow(IntPtr hwnd, TabBarViewModel targetViewModel, string path, bool allowSpecialPath, bool isControlPanelPath)
+        private void TryAbsorbExplorerWindow(IntPtr hwnd, TabBarViewModel targetViewModel, string path, bool allowSpecialPath, bool isControlPanelPath, bool wasManagedControlPanelLaunchSource)
         {
             try
             {
-                _interactionService.AbsorbExplorerWindow(hwnd, targetViewModel, path, allowSpecialPath, isControlPanelPath, _ignoreExplorerWindow);
+                _interactionService.AbsorbExplorerWindow(hwnd, targetViewModel, path, allowSpecialPath, isControlPanelPath, _ignoreExplorerWindow, wasManagedControlPanelLaunchSource);
             }
             catch (Exception ex)
             {
@@ -150,3 +160,4 @@ namespace KjTabBar.Services
         }
     }
 }
+

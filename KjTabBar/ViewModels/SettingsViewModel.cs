@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.ObjectModel;
 using System.Windows.Media;
 using KjTabBar.Helpers;
@@ -82,7 +82,7 @@ namespace KjTabBar.ViewModels
             {
                 AppLogger.LogError("SettingsViewModel", "Failed to read assembly metadata for settings window.", ex);
                 ProgramName = "KjTabBar";
-                Version = "v1.0.0.0";
+                Version = "v1.2.0.0";
             }
         }
 

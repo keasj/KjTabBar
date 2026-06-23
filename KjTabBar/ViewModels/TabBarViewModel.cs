@@ -405,6 +405,16 @@ namespace KjTabBar.ViewModels
 
         public void RestoreTabs(string[] paths)
         {
+            RestoreTabs(paths, null, null);
+        }
+
+        public void RestoreTabs(string[] paths, string activePath)
+        {
+            RestoreTabs(paths, activePath, null);
+        }
+
+        public void RestoreTabs(string[] paths, string activePath, int? activeIndex)
+        {
             if (paths == null || paths.Length == 0) return;
 
             string initialPath = null;
@@ -435,7 +445,22 @@ namespace KjTabBar.ViewModels
 
             if (!isFirstValidTab)
             {
-                if (!string.IsNullOrEmpty(initialPath))
+                TabItemViewModel activeTab = null;
+                if (activeIndex.HasValue && activeIndex.Value >= 0 && activeIndex.Value < _tabs.Count)
+                {
+                    activeTab = _tabs[activeIndex.Value];
+                }
+
+                if (activeTab == null && !string.IsNullOrEmpty(activePath))
+                {
+                    activeTab = FindTabByPath(activePath);
+                }
+
+                if (activeTab != null)
+                {
+                    SelectTab(activeTab);
+                }
+                else if (!string.IsNullOrEmpty(initialPath))
                 {
                     TabItemViewModel targetTab = FindTabByPath(initialPath);
                     if (targetTab != null)
@@ -675,6 +700,44 @@ namespace KjTabBar.ViewModels
             {
                 await _synchronizer.SyncWithExplorerAsync();
             }
+        }
+
+        internal bool RemoveUnavailableInactiveTabs(Func<string, bool> isTabPathCurrentlyAvailable, string currentPath)
+        {
+            if (isTabPathCurrentlyAvailable == null)
+            {
+                return false;
+            }
+
+            bool removed = false;
+            for (int i = _tabs.Count - 1; i >= 0; i--)
+            {
+                TabItemViewModel tab = _tabs[i];
+                if (tab == null || tab == _activeTab || string.IsNullOrEmpty(tab.Path))
+                {
+                    continue;
+                }
+
+                if (PathEquals(tab.Path, currentPath))
+                {
+                    continue;
+                }
+
+                if (isTabPathCurrentlyAvailable(tab.Path))
+                {
+                    continue;
+                }
+
+                _tabs.RemoveAt(i);
+                removed = true;
+            }
+
+            if (removed)
+            {
+                ActiveTabIndex = GetTabIndex(_activeTab);
+            }
+
+            return removed;
         }
 
         internal bool PathEquals(string path1, string path2)

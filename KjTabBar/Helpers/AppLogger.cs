@@ -1,8 +1,10 @@
-using System;
+﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace KjTabBar.Helpers
 {
@@ -12,7 +14,18 @@ namespace KjTabBar.Helpers
         private static readonly Dictionary<string, DateTime> ThrottledLogTimes = new Dictionary<string, DateTime>(StringComparer.Ordinal);
         private static readonly Regex WindowsPathRegex = new Regex("(?i)(?:[a-z]:\\\\|\\\\\\\\)[^\\r\\n\\\"'<>|]+", RegexOptions.Compiled | RegexOptions.CultureInvariant);
         private static readonly Regex SidRegex = new Regex(@"\bS-\d-(?:\d+-){1,14}\d+\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        private static readonly ConcurrentQueue<string> PendingLogEntries = new ConcurrentQueue<string>();
+        private static readonly AutoResetEvent PendingLogSignal = new AutoResetEvent(false);
+        private static readonly Thread LogWriterThread = new Thread(ProcessPendingLogEntries);
         private const int MaxLoggedTextLength = 2048;
+
+        static AppLogger()
+        {
+            LogWriterThread.IsBackground = true;
+            LogWriterThread.Name = "KjTabBar_LogWriter";
+            LogWriterThread.Start();
+            AppDomain.CurrentDomain.ProcessExit += CurrentDomain_ProcessExit;
+        }
 
         public static void LogInfo(string source, string message)
         {
@@ -47,6 +60,17 @@ namespace KjTabBar.Helpers
             }
 
             Write("ERROR", source, message, exception);
+        }
+
+        public static void Flush()
+        {
+            try
+            {
+                FlushPendingLogEntries();
+            }
+            catch
+            {
+            }
         }
 
         internal static string SanitizeForLog(string text)
@@ -106,14 +130,6 @@ namespace KjTabBar.Helpers
         {
             try
             {
-                string logDirectory = GetLogDirectory();
-                if (string.IsNullOrEmpty(logDirectory))
-                {
-                    return;
-                }
-
-                Directory.CreateDirectory(logDirectory);
-                string logPath = Path.Combine(logDirectory, "KjTabBar.log");
                 StringBuilder builder = new StringBuilder();
                 builder.Append(DateTime.UtcNow.ToString("o"));
                 builder.Append(" [");
@@ -138,13 +154,65 @@ namespace KjTabBar.Helpers
                     }
                 }
 
-                lock (SyncRoot)
-                {
-                    File.AppendAllText(logPath, builder.ToString() + Environment.NewLine, Encoding.UTF8);
-                }
+                PendingLogEntries.Enqueue(builder.ToString() + Environment.NewLine);
+                PendingLogSignal.Set();
             }
             catch
             {
+            }
+        }
+
+        private static void CurrentDomain_ProcessExit(object sender, EventArgs e)
+        {
+            try
+            {
+                FlushPendingLogEntries();
+            }
+            catch
+            {
+            }
+        }
+
+        private static void ProcessPendingLogEntries()
+        {
+            while (true)
+            {
+                try
+                {
+                    PendingLogSignal.WaitOne();
+                    FlushPendingLogEntries();
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private static void FlushPendingLogEntries()
+        {
+            string logDirectory = GetLogDirectory();
+            if (string.IsNullOrEmpty(logDirectory))
+            {
+                return;
+            }
+
+            Directory.CreateDirectory(logDirectory);
+            string logPath = Path.Combine(logDirectory, "KjTabBar.log");
+            StringBuilder batchBuilder = new StringBuilder();
+            string entry;
+            while (PendingLogEntries.TryDequeue(out entry))
+            {
+                batchBuilder.Append(entry);
+            }
+
+            if (batchBuilder.Length <= 0)
+            {
+                return;
+            }
+
+            lock (SyncRoot)
+            {
+                File.AppendAllText(logPath, batchBuilder.ToString(), Encoding.UTF8);
             }
         }
 

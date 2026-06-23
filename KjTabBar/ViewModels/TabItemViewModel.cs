@@ -112,16 +112,57 @@ namespace KjTabBar.ViewModels
                                 flags | NativeMethods.SHGFI_PIDL);
                         }
                     }
+                    // ホームフォルダ (クイックアクセス) の CLSID は仮想フォルダのため
+                    // SHParseDisplayName で解決できない場合がある。
+                    // 解決済みパスで再試行する。
+                    if ((result == IntPtr.Zero || fileInfo.hIcon == IntPtr.Zero) &&
+                        _explorerService != null &&
+                        string.Equals(normalizedPath, _explorerService.HomeFolderPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        string resolvedHomePath = _explorerService.GetResolvedHomeFolderPath();
+                        if (!string.IsNullOrEmpty(resolvedHomePath) &&
+                            !string.Equals(resolvedHomePath, normalizedPath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (fallbackPidl != IntPtr.Zero)
+                            {
+                                NativeMethods.ILFree(fallbackPidl);
+                                fallbackPidl = IntPtr.Zero;
+                            }
+                            uint homeDummy;
+                            int homeHr = NativeMethods.SHParseDisplayName(resolvedHomePath, IntPtr.Zero, out fallbackPidl, 0, out homeDummy);
+                            if (homeHr == 0 && fallbackPidl != IntPtr.Zero)
+                            {
+                                result = NativeMethods.SHGetFileInfo(
+                                    fallbackPidl,
+                                    0,
+                                    out fileInfo,
+                                    (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.SHFILEINFO)),
+                                    flags | NativeMethods.SHGFI_PIDL);
+                            }
+                        }
+                    }
                 }
                 else
                 {
-                    uint attrs = NativeMethods.FILE_ATTRIBUTE_DIRECTORY;
+                    // まず実際のファイルシステムからアイコンを取得する。
+                    // desktop.ini で設定されたカスタムアイコン（ダウンロード、デスクトップ等）が反映される。
                     result = NativeMethods.SHGetFileInfo(
                         normalizedPath,
-                        attrs,
+                        0,
                         out fileInfo,
                         (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.SHFILEINFO)),
-                        flags | NativeMethods.SHGFI_USEFILEATTRIBUTES);
+                        flags);
+                    // パスが一時的に利用不可の場合は汎用フォルダアイコンにフォールバックする。
+                    if (result == IntPtr.Zero || fileInfo.hIcon == IntPtr.Zero)
+                    {
+                        uint attrs = NativeMethods.FILE_ATTRIBUTE_DIRECTORY;
+                        result = NativeMethods.SHGetFileInfo(
+                            normalizedPath,
+                            attrs,
+                            out fileInfo,
+                            (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.SHFILEINFO)),
+                            flags | NativeMethods.SHGFI_USEFILEATTRIBUTES);
+                    }
                 }
 
                 if (result == IntPtr.Zero || fileInfo.hIcon == System.IntPtr.Zero)

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using KjTabBar.Helpers;
 using KjTabBar.Models;
@@ -22,6 +22,7 @@ namespace KjTabBar.Services
         private readonly Func<IntPtr, uint, IntPtr> _getAncestor;
         private readonly Func<IntPtr, NativeMethods.RECT?> _getWindowRect;
         private readonly Action<IntPtr> _moveWindowOffscreen;
+        private readonly Action<TabBarViewModel> _persistClosingTabBarState;
         private readonly Func<DateTime> _getUtcNow;
 
         public ExplorerWindowMonitorCoordinator(
@@ -38,6 +39,7 @@ namespace KjTabBar.Services
                   NativeMethods.GetAncestor,
                   GetWindowRectCore,
                   MoveWindowOffscreenCore,
+                  null,
                   delegate { return DateTime.UtcNow; })
         {
         }
@@ -51,17 +53,19 @@ namespace KjTabBar.Services
             Func<IntPtr, uint, IntPtr> getAncestor,
             Func<IntPtr, NativeMethods.RECT?> getWindowRect,
             Action<IntPtr> moveWindowOffscreen,
+            Action<TabBarViewModel> persistClosingTabBarState,
             Func<DateTime> getUtcNow)
         {
             _tabBars = tabBars;
             _windowTracking = windowTracking;
             _desktopForegroundTracker = desktopForegroundTracker;
             _explorerLaunchTracker = explorerLaunchTracker;
-            _getClassName = getClassName;
-            _getAncestor = getAncestor;
-            _getWindowRect = getWindowRect;
-            _moveWindowOffscreen = moveWindowOffscreen;
-            _getUtcNow = getUtcNow;
+            _getClassName = getClassName ?? GetClassNameCore;
+            _getAncestor = getAncestor ?? NativeMethods.GetAncestor;
+            _getWindowRect = getWindowRect ?? GetWindowRectCore;
+            _moveWindowOffscreen = moveWindowOffscreen ?? MoveWindowOffscreenCore;
+            _persistClosingTabBarState = persistClosingTabBarState;
+            _getUtcNow = getUtcNow ?? delegate { return DateTime.UtcNow; };
         }
 
         public void HandleShowEvent(IntPtr hwnd, Func<TabBarViewModel> findValidTarget, Func<TabBarViewModel, bool> hasActiveControlPanelTab)
@@ -149,7 +153,7 @@ namespace KjTabBar.Services
             List<ExplorerWindowProcessRequest> requests = new List<ExplorerWindowProcessRequest>();
 
             _windowTracking.AddHiddenPendingWindows(explorerWindows);
-            _tabBars.RemoveInvalidWindows(explorerWindows);
+            _tabBars.RemoveInvalidWindows(explorerWindows, _persistClosingTabBarState);
             _windowTracking.CleanupClosedWindows(explorerWindows);
 
             for (int i = 0; i < explorerWindows.Count; i++)

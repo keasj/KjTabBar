@@ -7,11 +7,15 @@ namespace KjTabBar.Models
     internal sealed class ExplorerWindowTrackingState
     {
         private static readonly TimeSpan ExplicitIndependentLaunchTimeout = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan RecentClosedManagedExplorerRectRetention = TimeSpan.FromSeconds(10);
         private readonly Func<IntPtr, bool> _isWindow;
         private readonly Action<IntPtr> _showWindow;
         private readonly Action<IntPtr> _closeWindow;
         private readonly List<DateTime> _explicitIndependentLaunchRequests = new List<DateTime>();
         private readonly List<DateTime> _internalHostSwitchLaunchRequests = new List<DateTime>();
+        private NativeMethods.RECT _recentClosedManagedExplorerRect;
+        private DateTime _recentClosedManagedExplorerRectUtc = DateTime.MinValue;
+        private bool _hasRecentClosedManagedExplorerRect;
 
         public HashSet<IntPtr> IgnoredWindows { get; private set; }
         public HashSet<IntPtr> InternalHostSwitchLaunchWindows { get; private set; }
@@ -109,6 +113,41 @@ namespace KjTabBar.Models
             DesktopLaunchCandidates.Remove(hwnd);
             DesktopInteractiveLaunchCandidates.Remove(hwnd);
             ControlPanelTabLaunchCandidates.Remove(hwnd);
+        }
+
+        public void RememberRecentClosedManagedExplorerRect(NativeMethods.RECT rect, DateTime closedUtc)
+        {
+            if (rect.Width <= 0 || rect.Height <= 0)
+            {
+                return;
+            }
+
+            _recentClosedManagedExplorerRect = rect;
+            _recentClosedManagedExplorerRectUtc = closedUtc;
+            _hasRecentClosedManagedExplorerRect = true;
+        }
+
+        public bool TryTakeRecentClosedManagedExplorerRect(DateTime utcNow, out NativeMethods.RECT rect)
+        {
+            rect = default(NativeMethods.RECT);
+            if (!_hasRecentClosedManagedExplorerRect)
+            {
+                return false;
+            }
+
+            if ((utcNow - _recentClosedManagedExplorerRectUtc) > RecentClosedManagedExplorerRectRetention)
+            {
+                _hasRecentClosedManagedExplorerRect = false;
+                _recentClosedManagedExplorerRectUtc = DateTime.MinValue;
+                _recentClosedManagedExplorerRect = default(NativeMethods.RECT);
+                return false;
+            }
+
+            rect = _recentClosedManagedExplorerRect;
+            _hasRecentClosedManagedExplorerRect = false;
+            _recentClosedManagedExplorerRectUtc = DateTime.MinValue;
+            _recentClosedManagedExplorerRect = default(NativeMethods.RECT);
+            return rect.Width > 0 && rect.Height > 0;
         }
 
         public void IgnoreWindow(IntPtr hwnd)
@@ -271,6 +310,35 @@ namespace KjTabBar.Models
                     "ClearParkedExplorerOrigin controlPanel={0} map={1}",
                     controlPanelExplorerHwnd,
                     GetParkedExplorerOriginsSnapshot()));
+        }
+
+        public void CloseParkedExplorerOrigin(IntPtr controlPanelExplorerHwnd)
+        {
+            IntPtr currentHwnd = controlPanelExplorerHwnd;
+            while (currentHwnd != IntPtr.Zero)
+            {
+                IntPtr originalExplorerHwnd;
+                if (TryGetParkedExplorerOrigin(currentHwnd, out originalExplorerHwnd))
+                {
+                    if (originalExplorerHwnd != IntPtr.Zero && _isWindow(originalExplorerHwnd))
+                    {
+                        try
+                        {
+                            _closeWindow(originalExplorerHwnd);
+                        }
+                        catch (Exception ex)
+                        {
+                            AppLogger.LogError("ExplorerWindowTrackingState", "Failed to close a parked explorer window on origin close.", ex);
+                        }
+                    }
+                    ClearParkedExplorerOrigin(currentHwnd);
+                    currentHwnd = originalExplorerHwnd;
+                }
+                else
+                {
+                    break;
+                }
+            }
         }
 
         public bool IsParkedExplorerOriginValue(IntPtr explorerHwnd)

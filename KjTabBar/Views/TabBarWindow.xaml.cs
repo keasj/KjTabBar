@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.IO;
 using System.Windows;
@@ -16,8 +16,10 @@ namespace KjTabBar.Views
     public partial class TabBarWindow : Window
     {
         public IExplorerService ExplorerService { get; set; }
+        internal Action<TabBarViewModel> PersistTabState { get; set; }
         internal ExplorerWindowTrackingState WindowTrackingState { get; set; }
         internal ExplorerHostSwitchCoordinator ExplorerHostSwitchCoordinator { get; set; }
+        public IntPtr ExplorerHwnd { get; private set; }
         private IExplorerService _explorerService => ExplorerService;
 
         private IntPtr _myHwnd;
@@ -41,6 +43,16 @@ namespace KjTabBar.Views
             PreviewDragEnter += TabBarWindow_DragEnter;
             PreviewDragOver += TabBarWindow_DragOver;
             PreviewDrop += TabBarWindow_Drop;
+            DataContextChanged += TabBarWindow_DataContextChanged;
+        }
+
+        private void TabBarWindow_DataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
+        {
+            TabBarViewModel vm = e.NewValue as TabBarViewModel;
+            if (vm != null)
+            {
+                ExplorerHwnd = vm.ExplorerHwnd;
+            }
         }
 
         protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
@@ -220,6 +232,7 @@ namespace KjTabBar.Views
             }
 
             vm.SetExplorerHwnd(explorerHwnd);
+            ExplorerHwnd = explorerHwnd;
 
             if (IsLoaded)
             {
@@ -262,6 +275,14 @@ namespace KjTabBar.Views
             PreviewDragOver -= TabBarWindow_DragOver;
             PreviewDrop -= TabBarWindow_Drop;
             ThemeManager.Instance.ThemeChanged -= ThemeManager_ThemeChanged;
+            PersistCurrentTabState(GetVM(), PersistTabState);
+            RememberRecentClosedManagedExplorerRect();
+
+            if (WindowTrackingState != null && ExplorerHwnd != IntPtr.Zero)
+            {
+                WindowTrackingState.CloseParkedExplorerOrigin(ExplorerHwnd);
+            }
+
             DisposeRuntimeCoordinator();
             DetachDynamicUiResources();
             IDisposable disposableVm = DataContext as IDisposable;
@@ -271,6 +292,41 @@ namespace KjTabBar.Views
             }
             DataContext = null;
             base.OnClosed(e);
+        }
+
+        internal static void PersistCurrentTabState(TabBarViewModel viewModel, Action<TabBarViewModel> persistTabState)
+        {
+            if (viewModel == null || persistTabState == null)
+            {
+                return;
+            }
+
+            try
+            {
+                persistTabState(viewModel);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("TabBarWindow", "Failed to persist tab state while closing the tab bar window.", ex);
+            }
+        }
+
+        private void RememberRecentClosedManagedExplorerRect()
+        {
+            if (WindowTrackingState == null || _positioner == null)
+            {
+                return;
+            }
+
+            NativeMethods.RECT? lastKnownExplorerRect = _positioner.LastKnownExplorerWindowRect;
+            if (!lastKnownExplorerRect.HasValue ||
+                lastKnownExplorerRect.Value.Width <= 0 ||
+                lastKnownExplorerRect.Value.Height <= 0)
+            {
+                return;
+            }
+
+            WindowTrackingState.RememberRecentClosedManagedExplorerRect(lastKnownExplorerRect.Value, DateTime.UtcNow);
         }
 
         // ====== イベントハンドラ ======
@@ -308,28 +364,65 @@ namespace KjTabBar.Views
             e.Handled = true;
         }
 
-        private void Tab_Click(object sender, MouseButtonEventArgs e)
+        private async void Tab_Click(object sender, MouseButtonEventArgs e)
         {
             FrameworkElement element = (FrameworkElement)sender;
             TabItemViewModel tab = (TabItemViewModel)element.DataContext;
             TabBarViewModel vm = GetVM();
             if (vm != null && tab != null)
             {
+                bool hostSwitchPrepared = false;
                 if (ExplorerHostSwitchCoordinator != null &&
-                    !ExplorerHostSwitchCoordinator.PrepareForPath(vm, tab.Path))
+                    !await ExplorerHostSwitchCoordinator.PrepareForPathAsync(vm, tab.Path))
                 {
                     ReturnFocusToExplorer();
                     return;
                 }
 
-                vm.SelectTab(tab);
-                if (ExplorerHostSwitchCoordinator != null)
+                hostSwitchPrepared = ExplorerHostSwitchCoordinator != null;
+                try
                 {
-                    ExplorerHostSwitchCoordinator.CompletePendingReveal();
+                    if (hostSwitchPrepared)
+                    {
+                        ExecuteTabSelectionWithPendingReveal(
+                            delegate { vm.SelectTab(tab); },
+                            ExplorerHostSwitchCoordinator.CompletePendingReveal);
+                    }
+                    else
+                    {
+                        vm.SelectTab(tab);
+                    }
+
+                    if (PersistTabState != null)
+                    {
+                        PersistTabState(vm);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.LogError("TabBarWindow", "Tab_Click failed while selecting a tab.", ex);
                 }
             }
             ReturnFocusToExplorer();
             e.Handled = true;
+        }
+
+        internal static void ExecuteTabSelectionWithPendingReveal(Action selectTabAction, Action completePendingReveal)
+        {
+            try
+            {
+                if (selectTabAction != null)
+                {
+                    selectTabAction();
+                }
+            }
+            finally
+            {
+                if (completePendingReveal != null)
+                {
+                    completePendingReveal();
+                }
+            }
         }
 
         private void TabBd_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
@@ -540,20 +633,26 @@ namespace KjTabBar.Views
             WindowInteropHelper helper = new WindowInteropHelper(this);
             if (explorerHwnd == IntPtr.Zero)
             {
-                helper.Owner = IntPtr.Zero;
+                NativeMethods.SetWindowLongPtr(helper.Handle, NativeMethods.GWL_HWNDPARENT, IntPtr.Zero);
                 _pendingOwnerExplorerHwnd = IntPtr.Zero;
                 return;
             }
 
             if (NativeMethods.IsWindowVisible(explorerHwnd))
             {
-                helper.Owner = explorerHwnd;
+                NativeMethods.SetWindowLongPtr(helper.Handle, NativeMethods.GWL_HWNDPARENT, explorerHwnd);
                 _pendingOwnerExplorerHwnd = IntPtr.Zero;
-                AppLogger.LogInfo("TabBarWindow", string.Format("UpdateOwnerWindow applied owner={0}", explorerHwnd));
+                AppLogger.LogInfo("TabBarWindow", string.Format("UpdateOwnerWindow applied Win32 owner={0}", explorerHwnd));
+
+                NativeMethods.SetWindowPos(
+                    helper.Handle,
+                    IntPtr.Zero,
+                    0, 0, 0, 0,
+                    NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
                 return;
             }
 
-            helper.Owner = IntPtr.Zero;
+            NativeMethods.SetWindowLongPtr(helper.Handle, NativeMethods.GWL_HWNDPARENT, IntPtr.Zero);
             _pendingOwnerExplorerHwnd = explorerHwnd;
             AppLogger.LogInfo("TabBarWindow", string.Format("UpdateOwnerWindow deferred owner={0}", explorerHwnd));
         }
@@ -568,9 +667,9 @@ namespace KjTabBar.Views
             }
 
             WindowInteropHelper helper = new WindowInteropHelper(this);
-            helper.Owner = _pendingOwnerExplorerHwnd;
+            NativeMethods.SetWindowLongPtr(helper.Handle, NativeMethods.GWL_HWNDPARENT, _pendingOwnerExplorerHwnd);
             NativeMethods.ShowWindow(_myHwnd, NativeMethods.SW_SHOW);
-            AppLogger.LogInfo("TabBarWindow", string.Format("ApplyPendingOwnerWindowIfReady applied owner={0}", _pendingOwnerExplorerHwnd));
+            AppLogger.LogInfo("TabBarWindow", string.Format("ApplyPendingOwnerWindowIfReady applied Win32 owner={0}", _pendingOwnerExplorerHwnd));
             _pendingOwnerExplorerHwnd = IntPtr.Zero;
         }
 
@@ -595,3 +694,5 @@ namespace KjTabBar.Views
         }
     }
 }
+
+

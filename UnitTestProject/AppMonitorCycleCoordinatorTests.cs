@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using KjTabBar.Models;
 using KjTabBar.Services;
@@ -36,6 +36,7 @@ namespace UnitTestProject
                 delegate (IntPtr hwnd, uint flags) { return hwnd; },
                 delegate (IntPtr hwnd) { return null; },
                 delegate (IntPtr hwnd) { },
+                null,
                 delegate { return DateTime.UtcNow; });
 
             TabPersistenceService tabPersistence = TestTabPersistenceFactory.Create();

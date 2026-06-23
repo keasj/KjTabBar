@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Windows.Threading;
 using KjTabBar.Models;
 
@@ -54,7 +54,23 @@ namespace KjTabBar.Services
                 windowTracking,
                 tabPersistence,
                 tabBars.RebindExplorerWindow);
-            bundle.ExplorerWindowMonitorCoordinator = new ExplorerWindowMonitorCoordinator(tabBars, windowTracking, desktopForegroundTracker, bundle.ExplorerLaunchTracker);
+            bundle.ExplorerWindowMonitorCoordinator = new ExplorerWindowMonitorCoordinator(
+                tabBars,
+                windowTracking,
+                desktopForegroundTracker,
+                bundle.ExplorerLaunchTracker,
+                null,
+                null,
+                null,
+                null,
+                delegate (ViewModels.TabBarViewModel viewModel)
+                {
+                    if (viewModel != null)
+                    {
+                        tabPersistence.SaveTabsIfChanged(viewModel, true);
+                    }
+                },
+                delegate { return DateTime.UtcNow; });
             bundle.ExplorerWindowOutcomeCoordinator = new ExplorerWindowOutcomeCoordinator(
                 windowTracking,
                 bundle.ExplorerWindowInteractionService,

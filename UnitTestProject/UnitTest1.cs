@@ -1,4 +1,4 @@
-using Microsoft.VisualStudio.TestTools.UnitTesting;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.IO;
 using KjTabBar;
@@ -119,6 +119,7 @@ namespace UnitTestProject
         public void TabPersistenceService_Uses_Custom_Path_Without_Touching_AppData_Default()
         {
             string tempFile = Path.Combine(Path.GetTempPath(), "KjTabBar.Tests." + Guid.NewGuid().ToString("N") + ".tabs.txt");
+            string activeTabFile = Path.Combine(Path.GetDirectoryName(tempFile), Path.GetFileNameWithoutExtension(tempFile) + ".active" + Path.GetExtension(tempFile));
             try
             {
                 MockExplorerService explorer = new MockExplorerService();
@@ -126,17 +127,24 @@ namespace UnitTestProject
                 TabBarViewModel vm = new TabBarViewModel(IntPtr.Zero, new MockUserSettings(), explorer);
                 vm.InsertTabWithPath(@"C:\SavedTab", 1);
 
-                persistence.SaveTabsIfChanged(vm);
+                persistence.SaveTabsIfChanged(vm, true);
 
                 Assert.IsTrue(File.Exists(tempFile));
+                Assert.IsTrue(File.Exists(activeTabFile));
                 string[] restoredPaths = ProtectedTextStorage.LoadLines(tempFile);
+                string[] restoredActivePath = ProtectedTextStorage.LoadLines(activeTabFile);
                 CollectionAssert.AreEqual(new string[] { @"C:\MockPath", @"C:\SavedTab" }, restoredPaths);
+                CollectionAssert.AreEqual(new string[] { "index=1", @"C:\SavedTab" }, restoredActivePath);
             }
             finally
             {
                 if (File.Exists(tempFile))
                 {
                     File.Delete(tempFile);
+                }
+                if (File.Exists(activeTabFile))
+                {
+                    File.Delete(activeTabFile);
                 }
             }
         }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using KjTabBar.Helpers;
 
 namespace KjTabBar.Services

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -9,7 +9,16 @@ namespace KjTabBar.Models
 {
     internal sealed class ShellWindowComInterop
     {
+        private sealed class CurrentPathCacheEntry
+        {
+            public string Path { get; set; }
+            public DateTime CachedAtUtc { get; set; }
+        }
+
         private static NativeMethods.EnumWindowsProc _enumWindowsProc = EnumWindowsCallback;
+        private static readonly object CurrentPathCacheSync = new object();
+        private static readonly Dictionary<IntPtr, CurrentPathCacheEntry> CurrentPathCache = new Dictionary<IntPtr, CurrentPathCacheEntry>();
+        private static readonly TimeSpan CurrentPathCacheDuration = TimeSpan.FromMilliseconds(100);
         private readonly ShellWindowCacheManager _cacheManager = new ShellWindowCacheManager();
 
         private readonly ShellExplorerWindowMatcher _shellExplorerWindowMatcher;
@@ -101,6 +110,12 @@ namespace KjTabBar.Models
 
         public string GetCurrentPath(IntPtr explorerHwnd)
         {
+            string cachedPath = TryGetCachedCurrentPath(explorerHwnd, DateTime.UtcNow);
+            if (cachedPath != null)
+            {
+                return cachedPath;
+            }
+
             string result = null;
             object windowsObject = null;
             if (!_cacheManager.TryCreateShellWindows(out windowsObject))
@@ -181,6 +196,8 @@ namespace KjTabBar.Models
                 ReleaseComObjectSafe(windowsObject);
                 _cacheManager.RunPeriodicComCleanup();
             }
+
+            UpdateCurrentPathCache(explorerHwnd, result, DateTime.UtcNow);
             return result;
         }
 
@@ -440,7 +457,67 @@ namespace KjTabBar.Models
                 ReleaseComObjectSafe(windowsObject);
                 _cacheManager.RunPeriodicComCleanup();
             }
+
+            if (navigated)
+            {
+                ClearCurrentPathCache(explorerHwnd);
+            }
             return navigated;
+        }
+
+        private static string TryGetCachedCurrentPath(IntPtr explorerHwnd, DateTime nowUtc)
+        {
+            if (explorerHwnd == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            lock (CurrentPathCacheSync)
+            {
+                CurrentPathCacheEntry entry;
+                if (!CurrentPathCache.TryGetValue(explorerHwnd, out entry))
+                {
+                    return null;
+                }
+
+                if ((nowUtc - entry.CachedAtUtc) > CurrentPathCacheDuration)
+                {
+                    CurrentPathCache.Remove(explorerHwnd);
+                    return null;
+                }
+
+                return entry.Path;
+            }
+        }
+
+        private static void UpdateCurrentPathCache(IntPtr explorerHwnd, string path, DateTime nowUtc)
+        {
+            if (explorerHwnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            lock (CurrentPathCacheSync)
+            {
+                CurrentPathCache[explorerHwnd] = new CurrentPathCacheEntry
+                {
+                    Path = path,
+                    CachedAtUtc = nowUtc
+                };
+            }
+        }
+
+        private static void ClearCurrentPathCache(IntPtr explorerHwnd)
+        {
+            if (explorerHwnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            lock (CurrentPathCacheSync)
+            {
+                CurrentPathCache.Remove(explorerHwnd);
+            }
         }
     }
 }

@@ -28,6 +28,17 @@ namespace KjTabBar.Services
         public void Add(IntPtr hwnd, TabBarWindow window)
         {
             _tabBars[hwnd] = window;
+            window.Closed += (s, e) =>
+            {
+                if (window.ExplorerHwnd != IntPtr.Zero)
+                {
+                    _tabBars.Remove(window.ExplorerHwnd);
+                }
+                else
+                {
+                    _tabBars.Remove(hwnd);
+                }
+            };
         }
 
         public bool RebindExplorerWindow(TabBarViewModel viewModel, IntPtr newExplorerHwnd)
@@ -74,7 +85,7 @@ namespace KjTabBar.Services
             _tabBars.Clear();
         }
 
-        public void RemoveInvalidWindows(List<IntPtr> explorerWindows)
+        public void RemoveInvalidWindows(List<IntPtr> explorerWindows, Action<TabBarViewModel> beforeClose = null)
         {
             List<IntPtr> toRemove = new List<IntPtr>();
             foreach (KeyValuePair<IntPtr, TabBarWindow> kvp in _tabBars)
@@ -84,7 +95,15 @@ namespace KjTabBar.Services
                 {
                     if (!ContainsWindow(explorerWindows, kvp.Key))
                     {
-                        shouldRemove = true;
+                        TabBarViewModel currentViewModel = kvp.Value.DataContext as TabBarViewModel;
+                        if (currentViewModel != null && ContainsWindow(explorerWindows, currentViewModel.ExplorerHwnd))
+                        {
+                            shouldRemove = false;
+                        }
+                        else
+                        {
+                            shouldRemove = !kvp.Value.IsExplorerAlive();
+                        }
                     }
                     else if (!kvp.Value.IsExplorerAlive())
                     {
@@ -108,6 +127,22 @@ namespace KjTabBar.Services
                 TabBarWindow window;
                 if (_tabBars.TryGetValue(toRemove[i], out window))
                 {
+                    if (beforeClose != null)
+                    {
+                        try
+                        {
+                            TabBarViewModel viewModel = window.DataContext as TabBarViewModel;
+                            if (viewModel != null)
+                            {
+                                beforeClose(viewModel);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            AppLogger.LogError("TabBarRegistry", "Failed to persist tab state before closing invalid tab bar window.", ex);
+                        }
+                    }
+
                     try { window.Close(); } catch (Exception ex) { AppLogger.LogError("TabBarRegistry", "Failed to close invalid tab bar window during cleanup.", ex); }
                     _tabBars.Remove(toRemove[i]);
                 }

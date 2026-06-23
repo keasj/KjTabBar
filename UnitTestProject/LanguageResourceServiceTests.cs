@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using KjTabBar.Services;
 using Microsoft.VisualStudio.TestTools.UnitTesting;

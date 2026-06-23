@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Windows.Threading;
 using KjTabBar.Helpers;
@@ -89,7 +89,7 @@ namespace KjTabBar.Services
             {
                 if (context.SaveTarget != null && context.TabPersistence != null)
                 {
-                    context.TabPersistence.SaveTabsIfChanged(context.SaveTarget);
+                    context.TabPersistence.SaveTabsIfChanged(context.SaveTarget, true);
                 }
             }
             catch

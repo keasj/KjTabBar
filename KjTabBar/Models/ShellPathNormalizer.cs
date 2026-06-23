@@ -21,6 +21,8 @@ namespace KjTabBar.Models
         private readonly Func<string> _getResolvedHomeFolderPath;
         private readonly ShellLocationNameResolver _shellLocationNameResolver;
         private readonly Func<string, string> _getFolderNameInternal;
+        private const string AlternateHomeFolderPath = "::{F874310E-B6B7-47DC-BC84-B9E6B38F5903}";
+        private const string Win11HomeFolderPath = "::{F87431B7-B615-448F-972C-469618B6A34D}";
 
         private readonly object _controlPanelItemTitleMapSync = new object();
         private Dictionary<string, string> _controlPanelItemPathsByTitle = null;
@@ -243,6 +245,14 @@ namespace KjTabBar.Models
             {
                 return true;
             }
+            if (normalizedPath.Equals(AlternateHomeFolderPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            if (normalizedPath.Equals(Win11HomeFolderPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
             if (normalizedPath.Equals("::{20D04FE0-3AEA-1069-A2D8-08002B30309D}", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
@@ -307,6 +317,11 @@ namespace KjTabBar.Models
             string normalizedPath = NormalizeShellPath(path);
             if (!string.IsNullOrEmpty(normalizedPath))
             {
+                if (normalizedPath.Equals(AlternateHomeFolderPath, StringComparison.OrdinalIgnoreCase) ||
+                    normalizedPath.Equals(Win11HomeFolderPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return _homeFolderPath;
+                }
                 return normalizedPath;
             }
 
@@ -320,7 +335,7 @@ namespace KjTabBar.Models
                 return path;
             }
 
-            string normalizedPath = NormalizeShellPath(path);
+            string normalizedPath = NormalizeKnownPath(path);
             if (string.IsNullOrEmpty(normalizedPath))
             {
                 return path;

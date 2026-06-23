@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Interop;
@@ -14,11 +14,17 @@ namespace KjTabBar.Views
         private readonly IExplorerService _explorerService;
         private double _dpiScale = 1.0;
         private IntPtr _windowHwnd = IntPtr.Zero;
+        private NativeMethods.RECT? _lastKnownExplorerWindowRect;
 
         public double DpiScale
         {
             get { return _dpiScale; }
             set { _dpiScale = value; }
+        }
+
+        public NativeMethods.RECT? LastKnownExplorerWindowRect
+        {
+            get { return _lastKnownExplorerWindowRect; }
         }
 
         public TabBarWindowPositioner(TabBarWindow window, IExplorerService explorerService)
@@ -122,6 +128,11 @@ namespace KjTabBar.Views
             // 位置を更新
             NativeMethods.RECT contentRect = _explorerService.GetExplorerWindowRect(explorerHwnd);
             if (contentRect.Width <= 0) return;
+            NativeMethods.RECT explorerWindowRect;
+            if (NativeMethods.GetWindowRect(explorerHwnd, out explorerWindowRect))
+            {
+                _lastKnownExplorerWindowRect = explorerWindowRect;
+            }
 
             IntPtr myHwnd = GetWindowHandle();
             if (myHwnd == IntPtr.Zero) return;

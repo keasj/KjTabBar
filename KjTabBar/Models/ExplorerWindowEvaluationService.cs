@@ -23,6 +23,7 @@ namespace KjTabBar.Models
         public bool AllowSpecialPath { get; set; }
         public bool IsControlPanelPath { get; set; }
         public bool UseResolvedPathOnCreate { get; set; }
+        public bool WasManagedControlPanelLaunchSource { get; set; }
     }
 
     internal sealed class ExplorerWindowEvaluationService
@@ -182,7 +183,8 @@ namespace KjTabBar.Models
                 IsControlPanelPath = resolvedIsControlPanelPath,
                 UseResolvedPathOnCreate =
                     action == AbsorptionAction.CreateNewTabBar &&
-                    shouldUseResolvedPathOnCreate
+                    shouldUseResolvedPathOnCreate,
+                WasManagedControlPanelLaunchSource = input.WasManagedControlPanelLaunchSource
             };
         }
     }

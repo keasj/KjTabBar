@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using KjTabBar.Models;
 using KjTabBar.ViewModels;

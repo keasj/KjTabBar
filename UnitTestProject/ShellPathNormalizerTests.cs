@@ -9,6 +9,7 @@ namespace UnitTestProject
     {
         private const string AllControlPanelPath = "::{26EE0668-A00A-44D7-9371-BEB064C98683}";
         private const string HomeFolderPath = "::{679F85CB-0220-4080-B29B-5540CC05AAB6}";
+        private const string AlternateHomeFolderPath = "::{F874310E-B6B7-47DC-BC84-B9E6B38F5903}";
         private const string ProgramsAndFeaturesPath = "::{26EE0668-A00A-44D7-9371-BEB064C98683}\\0\\::{7B81BE6A-CE2B-4676-A29E-EB907A5126C5}";
         private const string PowerOptionsPath = "::{26EE0668-A00A-44D7-9371-BEB064C98683}\\0\\::{025A5937-A6BE-4686-A844-36FE4BEC8B6D}";
 
@@ -65,6 +66,7 @@ namespace UnitTestProject
             ShellPathNormalizer normalizer = CreateNormalizer();
             Assert.IsTrue(normalizer.IsTransientShellPlaceholderPath("::{26EE0668-A00A-44D7-9371-BEB064C98683}"));
             Assert.IsTrue(normalizer.IsTransientShellPlaceholderPath("::{679F85CB-0220-4080-B29B-5540CC05AAB6}"));
+            Assert.IsTrue(normalizer.IsTransientShellPlaceholderPath(AlternateHomeFolderPath));
             Assert.IsTrue(normalizer.IsTransientShellPlaceholderPath("::{20D04FE0-3AEA-1069-A2D8-08002B30309D}"));
         }
 
@@ -117,6 +119,7 @@ namespace UnitTestProject
             ShellPathNormalizer normalizer = CreateNormalizer();
             Assert.AreEqual(@"C:\Windows", normalizer.NormalizeKnownPath(@"C:\Windows"));
             Assert.AreEqual(HomeFolderPath, normalizer.NormalizeKnownPath("shell:home"));
+            Assert.AreEqual(HomeFolderPath, normalizer.NormalizeKnownPath(AlternateHomeFolderPath));
         }
 
         [TestMethod]
@@ -135,6 +138,8 @@ namespace UnitTestProject
         {
             ShellPathNormalizer normalizer = CreateNormalizer();
             Assert.AreEqual(@"C:\Users\TestUser", normalizer.GetNavigableShellPath(HomeFolderPath));
+            Assert.AreEqual(@"C:\Users\TestUser", normalizer.GetNavigableShellPath(AlternateHomeFolderPath));
+            Assert.AreEqual(@"C:\Users\TestUser", normalizer.GetNavigableShellPath("::{F87431B7-B615-448F-972C-469618B6A34D}"));
             Assert.AreEqual("shell:controlpanel", normalizer.GetNavigableShellPath("shell:controlpanel"));
             Assert.AreEqual(AllControlPanelPath, normalizer.GetNavigableShellPath("shell:controlpanelfolder"));
         }

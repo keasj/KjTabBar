@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 using KjTabBar.Helpers;
 using KjTabBar.Models;
 using KjTabBar.ViewModels;
@@ -10,6 +11,8 @@ namespace KjTabBar.Services
     internal sealed class ExplorerHostSwitchCoordinator
     {
         private IntPtr _pendingRevealExplorerHwnd;
+        private bool _pendingRevealHasOriginalRect;
+        private NativeMethods.RECT _pendingRevealOriginalRect;
         private readonly IExplorerService _explorerService;
         private readonly ExplorerWindowTrackingState _windowTracking;
         private readonly Func<TabBarViewModel, IntPtr, bool> _rebindExplorerWindow;
@@ -19,8 +22,10 @@ namespace KjTabBar.Services
         private readonly Func<IntPtr, bool> _isWindow;
         private readonly Func<List<IntPtr>> _findExplorerWindows;
         private readonly Func<IntPtr, string> _getCurrentPath;
+        private readonly Func<IntPtr, NativeMethods.RECT?> _getWindowRect;
         private readonly Func<string, bool> _openInNewWindow;
         private readonly Action<int> _sleep;
+        private readonly Func<int, Task> _delayAsync;
 
         public ExplorerHostSwitchCoordinator(
             IExplorerService explorerService,
@@ -39,8 +44,10 @@ namespace KjTabBar.Services
                   NativeMethods.IsWindow,
                   delegate { return explorerService != null ? explorerService.FindExplorerWindows() : new List<IntPtr>(); },
                   delegate (IntPtr hwnd) { return explorerService != null ? explorerService.GetCurrentPath(hwnd) : null; },
+                  GetWindowRectCore,
                   delegate (string path) { return explorerService != null && explorerService.OpenInNewWindow(path); },
-                  Thread.Sleep)
+                  Thread.Sleep,
+                  null)
         {
         }
 
@@ -55,7 +62,39 @@ namespace KjTabBar.Services
             Func<List<IntPtr>> findExplorerWindows,
             Func<IntPtr, string> getCurrentPath,
             Func<string, bool> openInNewWindow,
-            Action<int> sleep)
+            Action<int> sleep,
+            Func<int, Task> delayAsync = null)
+            : this(
+                  explorerService,
+                  windowTracking,
+                  rebindExplorerWindow,
+                  showExplorerWindow,
+                  moveExplorerWindow,
+                  postCloseWindow,
+                  isWindow,
+                  findExplorerWindows,
+                  getCurrentPath,
+                  GetWindowRectCore,
+                  openInNewWindow,
+                  sleep,
+                  delayAsync)
+        {
+        }
+
+        internal ExplorerHostSwitchCoordinator(
+            IExplorerService explorerService,
+            ExplorerWindowTrackingState windowTracking,
+            Func<TabBarViewModel, IntPtr, bool> rebindExplorerWindow,
+            Action<IntPtr> showExplorerWindow,
+            Action<IntPtr, NativeMethods.RECT> moveExplorerWindow,
+            Action<IntPtr> postCloseWindow,
+            Func<IntPtr, bool> isWindow,
+            Func<List<IntPtr>> findExplorerWindows,
+            Func<IntPtr, string> getCurrentPath,
+            Func<IntPtr, NativeMethods.RECT?> getWindowRect,
+            Func<string, bool> openInNewWindow,
+            Action<int> sleep,
+            Func<int, Task> delayAsync = null)
         {
             _explorerService = explorerService;
             _windowTracking = windowTracking;
@@ -66,13 +105,22 @@ namespace KjTabBar.Services
             _isWindow = isWindow;
             _findExplorerWindows = findExplorerWindows;
             _getCurrentPath = getCurrentPath;
+            _getWindowRect = getWindowRect ?? GetWindowRectCore;
             _openInNewWindow = openInNewWindow;
             _sleep = sleep;
+            _delayAsync = delayAsync ?? CreateDelayAsync(sleep);
         }
 
         public bool PrepareForPath(TabBarViewModel viewModel, string targetPath)
         {
+            return PrepareForPathAsync(viewModel, targetPath).GetAwaiter().GetResult();
+        }
+
+        public async Task<bool> PrepareForPathAsync(TabBarViewModel viewModel, string targetPath)
+        {
             _pendingRevealExplorerHwnd = IntPtr.Zero;
+            _pendingRevealHasOriginalRect = false;
+            _pendingRevealOriginalRect = default(NativeMethods.RECT);
 
             if (viewModel == null || string.IsNullOrEmpty(targetPath))
             {
@@ -88,7 +136,7 @@ namespace KjTabBar.Services
 
             bool targetIsControlPanelPath = _explorerService.IsControlPanelPath(targetPath);
             IntPtr currentExplorerHwnd = viewModel.ExplorerHwnd;
-            bool currentIsControlPanelHost = IsControlPanelHost(currentExplorerHwnd, viewModel, targetIsControlPanelPath);
+            bool currentIsControlPanelHost = await IsControlPanelHostAsync(currentExplorerHwnd, viewModel, targetIsControlPanelPath);
             IntPtr parkedExplorerHwnd;
             AppLogger.LogInfo(
                 "ExplorerHostSwitchCoordinator",
@@ -105,7 +153,7 @@ namespace KjTabBar.Services
                     string.Format("PrepareForPath noParkedOrigin current={0}", currentExplorerHwnd));
                 if (currentIsControlPanelHost != targetIsControlPanelPath)
                 {
-                    return TrySwitchToFreshExplorerHost(viewModel, targetPath, currentExplorerHwnd);
+                    return await TrySwitchToFreshExplorerHostAsync(viewModel, targetPath, currentExplorerHwnd);
                 }
 
                 return true;
@@ -119,7 +167,7 @@ namespace KjTabBar.Services
                 _windowTracking.ClearParkedExplorerOrigin(currentExplorerHwnd);
                 if (currentIsControlPanelHost != targetIsControlPanelPath)
                 {
-                    return TrySwitchToFreshExplorerHost(viewModel, targetPath, currentExplorerHwnd);
+                    return await TrySwitchToFreshExplorerHostAsync(viewModel, targetPath, currentExplorerHwnd);
                 }
 
                 return true;
@@ -140,17 +188,9 @@ namespace KjTabBar.Services
                 return true;
             }
 
-            NativeMethods.RECT currentExplorerRect = GetWindowBoundsForMove(currentExplorerHwnd);
-
             try
             {
-                if (_moveExplorerWindow != null &&
-                    currentExplorerRect.Width > 0 &&
-                    currentExplorerRect.Height > 0)
-                {
-                    _moveExplorerWindow(parkedExplorerHwnd, currentExplorerRect);
-                }
-
+                NativeMethods.RECT? currentExplorerRect = _getWindowRect != null ? _getWindowRect(currentExplorerHwnd) : null;
                 if (!_rebindExplorerWindow(viewModel, parkedExplorerHwnd))
                 {
                     return false;
@@ -160,6 +200,18 @@ namespace KjTabBar.Services
                 _windowTracking.RememberParkedExplorerOrigin(parkedExplorerHwnd, currentExplorerHwnd);
                 NativeMethods.ShowWindow(currentExplorerHwnd, NativeMethods.SW_HIDE);
                 _pendingRevealExplorerHwnd = parkedExplorerHwnd;
+                if (currentExplorerRect.HasValue &&
+                    currentExplorerRect.Value.Width > 0 &&
+                    currentExplorerRect.Value.Height > 0)
+                {
+                    _pendingRevealHasOriginalRect = true;
+                    _pendingRevealOriginalRect = currentExplorerRect.Value;
+                }
+                else
+                {
+                    _pendingRevealHasOriginalRect = false;
+                    _pendingRevealOriginalRect = default(NativeMethods.RECT);
+                }
                 AppLogger.LogInfo(
                     "ExplorerHostSwitchCoordinator",
                     string.Format("PrepareForPath switchedToParkedHost current={0} parked={1}", currentExplorerHwnd, parkedExplorerHwnd));
@@ -173,7 +225,7 @@ namespace KjTabBar.Services
             }
         }
 
-        private bool IsControlPanelHost(IntPtr explorerHwnd, TabBarViewModel viewModel, bool targetIsControlPanelPath)
+        private async Task<bool> IsControlPanelHostAsync(IntPtr explorerHwnd, TabBarViewModel viewModel, bool targetIsControlPanelPath)
         {
             if (explorerHwnd == IntPtr.Zero || _explorerService == null)
             {
@@ -184,13 +236,13 @@ namespace KjTabBar.Services
             if (activeTab != null && !string.IsNullOrEmpty(activeTab.Path))
             {
                 bool activeTabIsControlPanel = _explorerService.IsControlPanelPath(activeTab.Path);
-                if (activeTabIsControlPanel == targetIsControlPanelPath)
+                if (!targetIsControlPanelPath && activeTabIsControlPanel == targetIsControlPanelPath)
                 {
                     return activeTabIsControlPanel;
                 }
             }
 
-            string currentPath = _getCurrentPath != null ? _getCurrentPath(explorerHwnd) : null;
+            string currentPath = await GetCurrentPathAsync(explorerHwnd);
             if (!string.IsNullOrEmpty(currentPath))
             {
                 return _explorerService.IsControlPanelPath(currentPath);
@@ -199,15 +251,15 @@ namespace KjTabBar.Services
             return activeTab != null && _explorerService.IsControlPanelPath(activeTab.Path);
         }
 
-        private bool TrySwitchToFreshExplorerHost(TabBarViewModel viewModel, string targetPath, IntPtr currentExplorerHwnd)
+        private async Task<bool> TrySwitchToFreshExplorerHostAsync(TabBarViewModel viewModel, string targetPath, IntPtr currentExplorerHwnd)
         {
             if (_openInNewWindow == null || _findExplorerWindows == null)
             {
                 return false;
             }
 
-            NativeMethods.RECT currentExplorerRect = GetWindowBoundsForMove(currentExplorerHwnd);
             HashSet<IntPtr> previousExplorerWindows = new HashSet<IntPtr>(_findExplorerWindows());
+            NativeMethods.RECT? currentExplorerRect = _getWindowRect != null ? _getWindowRect(currentExplorerHwnd) : null;
             AppLogger.LogInfo(
                 "ExplorerHostSwitchCoordinator",
                 string.Format(
@@ -224,7 +276,7 @@ namespace KjTabBar.Services
                 return false;
             }
 
-            IntPtr newExplorerHwnd = WaitForNewExplorerWindow(previousExplorerWindows, currentExplorerHwnd, targetPath);
+            IntPtr newExplorerHwnd = await WaitForNewExplorerWindowAsync(previousExplorerWindows, currentExplorerHwnd, targetPath);
             if (newExplorerHwnd == IntPtr.Zero)
             {
                 _windowTracking.CancelInternalHostSwitchLaunchRequest();
@@ -247,13 +299,6 @@ namespace KjTabBar.Services
                 _windowTracking.HiddenPendingAbsorb.Remove(newExplorerHwnd);
                 _windowTracking.HiddenOriginalRects.Remove(newExplorerHwnd);
 
-                if (_moveExplorerWindow != null &&
-                    currentExplorerRect.Width > 0 &&
-                    currentExplorerRect.Height > 0)
-                {
-                    _moveExplorerWindow(newExplorerHwnd, currentExplorerRect);
-                }
-
                 if (!_rebindExplorerWindow(viewModel, newExplorerHwnd))
                 {
                     RestorePreparedExplorerWindow(newExplorerHwnd, hadHiddenPending, hadHiddenOriginalRect, hiddenOriginalRect);
@@ -263,6 +308,18 @@ namespace KjTabBar.Services
                 _windowTracking.RememberParkedExplorerOrigin(newExplorerHwnd, currentExplorerHwnd);
                 NativeMethods.ShowWindow(currentExplorerHwnd, NativeMethods.SW_HIDE);
                 _pendingRevealExplorerHwnd = newExplorerHwnd;
+                if (currentExplorerRect.HasValue &&
+                    currentExplorerRect.Value.Width > 0 &&
+                    currentExplorerRect.Value.Height > 0)
+                {
+                    _pendingRevealHasOriginalRect = true;
+                    _pendingRevealOriginalRect = currentExplorerRect.Value;
+                }
+                else
+                {
+                    _pendingRevealHasOriginalRect = hadHiddenOriginalRect;
+                    _pendingRevealOriginalRect = hiddenOriginalRect;
+                }
                 AppLogger.LogInfo(
                     "ExplorerHostSwitchCoordinator",
                     string.Format(
@@ -280,7 +337,7 @@ namespace KjTabBar.Services
             }
         }
 
-        private IntPtr WaitForNewExplorerWindow(HashSet<IntPtr> previousExplorerWindows, IntPtr currentExplorerHwnd, string targetPath)
+        private async Task<IntPtr> WaitForNewExplorerWindowAsync(HashSet<IntPtr> previousExplorerWindows, IntPtr currentExplorerHwnd, string targetPath)
         {
             if (_findExplorerWindows == null)
             {
@@ -289,48 +346,16 @@ namespace KjTabBar.Services
 
             for (int retry = 0; retry < 20; retry++)
             {
-                List<IntPtr> explorerWindows = _findExplorerWindows();
-                for (int i = 0; i < explorerWindows.Count; i++)
+                IntPtr matchedExplorerHwnd = await Services.ComThreadService.Instance.InvokeAsync(() =>
+                    FindMatchingNewExplorerWindow(previousExplorerWindows, currentExplorerHwnd, targetPath, retry));
+                if (matchedExplorerHwnd != IntPtr.Zero)
                 {
-                    IntPtr hwnd = explorerWindows[i];
-                    if (hwnd == IntPtr.Zero || hwnd == currentExplorerHwnd || previousExplorerWindows.Contains(hwnd))
-                    {
-                        continue;
-                    }
-
-                    if (_isWindow != null && !_isWindow(hwnd))
-                    {
-                        continue;
-                    }
-
-                    string currentPath = _getCurrentPath != null ? _getCurrentPath(hwnd) : null;
-                    if (_explorerService == null || string.IsNullOrEmpty(currentPath))
-                    {
-                        continue;
-                    }
-
-                    string normalizedCurrentPath = _explorerService.NormalizeKnownPath(currentPath);
-                    string normalizedTargetPath = _explorerService.NormalizeKnownPath(targetPath);
-                    if (string.IsNullOrEmpty(normalizedCurrentPath) ||
-                        string.IsNullOrEmpty(normalizedTargetPath) ||
-                        !string.Equals(normalizedCurrentPath, normalizedTargetPath, StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    AppLogger.LogInfo(
-                        "ExplorerHostSwitchCoordinator",
-                        string.Format(
-                            "WaitForNewExplorerWindow matched hwnd={0} retry={1} currentPath={2}",
-                            hwnd,
-                            retry,
-                            currentPath ?? string.Empty));
-                    return hwnd;
+                    return matchedExplorerHwnd;
                 }
 
-                if (_sleep != null)
+                if (_delayAsync != null)
                 {
-                    _sleep(100);
+                    await _delayAsync(100);
                 }
             }
 
@@ -346,9 +371,21 @@ namespace KjTabBar.Services
 
             IntPtr pendingRevealExplorerHwnd = _pendingRevealExplorerHwnd;
             _pendingRevealExplorerHwnd = IntPtr.Zero;
+            bool pendingRevealHasOriginalRect = _pendingRevealHasOriginalRect;
+            NativeMethods.RECT pendingRevealOriginalRect = _pendingRevealOriginalRect;
+            _pendingRevealHasOriginalRect = false;
+            _pendingRevealOriginalRect = default(NativeMethods.RECT);
             AppLogger.LogInfo(
                 "ExplorerHostSwitchCoordinator",
                 string.Format("CompletePendingReveal hwnd={0}", pendingRevealExplorerHwnd));
+
+            if (pendingRevealHasOriginalRect &&
+                pendingRevealOriginalRect.Width > 0 &&
+                pendingRevealOriginalRect.Height > 0 &&
+                _moveExplorerWindow != null)
+            {
+                _moveExplorerWindow(pendingRevealExplorerHwnd, pendingRevealOriginalRect);
+            }
 
             if (_showExplorerWindow != null)
             {
@@ -382,15 +419,118 @@ namespace KjTabBar.Services
             NativeMethods.ShowWindow(explorerHwnd, NativeMethods.SW_SHOW);
         }
 
-        private NativeMethods.RECT GetWindowBoundsForMove(IntPtr explorerHwnd)
+        private IntPtr FindMatchingNewExplorerWindow(HashSet<IntPtr> previousExplorerWindows, IntPtr currentExplorerHwnd, string targetPath, int retry)
+        {
+            List<IntPtr> explorerWindows = _findExplorerWindows();
+            for (int i = 0; i < explorerWindows.Count; i++)
+            {
+                IntPtr hwnd = explorerWindows[i];
+                if (hwnd == IntPtr.Zero || hwnd == currentExplorerHwnd || previousExplorerWindows.Contains(hwnd))
+                {
+                    continue;
+                }
+
+                if (_isWindow != null && !_isWindow(hwnd))
+                {
+                    continue;
+                }
+
+                string currentPath = _getCurrentPath != null ? _getCurrentPath(hwnd) : null;
+                if (_explorerService == null || string.IsNullOrEmpty(currentPath))
+                {
+                    continue;
+                }
+
+                if (!AreEquivalentNewWindowPaths(currentPath, targetPath))
+                {
+                    continue;
+                }
+
+                AppLogger.LogInfo(
+                    "ExplorerHostSwitchCoordinator",
+                    string.Format(
+                        "WaitForNewExplorerWindow matched hwnd={0} retry={1} currentPath={2}",
+                        hwnd,
+                        retry,
+                        currentPath ?? string.Empty));
+                return hwnd;
+            }
+
+            return IntPtr.Zero;
+        }
+
+        private bool AreEquivalentNewWindowPaths(string currentPath, string targetPath)
+        {
+            if (_explorerService == null || string.IsNullOrEmpty(currentPath) || string.IsNullOrEmpty(targetPath))
+            {
+                return false;
+            }
+
+            string normalizedCurrentPath = _explorerService.NormalizeKnownPath(currentPath);
+            string normalizedTargetPath = _explorerService.NormalizeKnownPath(targetPath);
+            if (!string.IsNullOrEmpty(normalizedCurrentPath) &&
+                !string.IsNullOrEmpty(normalizedTargetPath) &&
+                string.Equals(normalizedCurrentPath, normalizedTargetPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            string resolvedHomePath = _explorerService.GetResolvedHomeFolderPath();
+            if (string.IsNullOrEmpty(resolvedHomePath))
+            {
+                return false;
+            }
+
+            string trimmedCurrentPath = currentPath.TrimEnd('\\');
+            string trimmedResolvedHomePath = resolvedHomePath.TrimEnd('\\');
+            if (!string.Equals(trimmedCurrentPath, trimmedResolvedHomePath, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string normalizedHomePath = _explorerService.NormalizeKnownPath(_explorerService.HomeFolderPath);
+            return string.Equals(targetPath.TrimEnd('\\'), trimmedResolvedHomePath, StringComparison.OrdinalIgnoreCase) ||
+                   (!string.IsNullOrEmpty(normalizedTargetPath) &&
+                    !string.IsNullOrEmpty(normalizedHomePath) &&
+                    string.Equals(normalizedTargetPath, normalizedHomePath, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static Func<int, Task> CreateDelayAsync(Action<int> sleep)
+        {
+            if (sleep != null)
+            {
+                return milliseconds =>
+                {
+                    sleep(milliseconds);
+                    return Task.CompletedTask;
+                };
+            }
+
+            return milliseconds => Task.Delay(milliseconds);
+        }
+
+        private static NativeMethods.RECT? GetWindowRectCore(IntPtr hwnd)
         {
             NativeMethods.RECT rect;
-            if (explorerHwnd != IntPtr.Zero && NativeMethods.GetWindowRect(explorerHwnd, out rect))
+            if (hwnd != IntPtr.Zero && NativeMethods.GetWindowRect(hwnd, out rect))
             {
                 return rect;
             }
 
-            return _explorerService.GetExplorerWindowRect(explorerHwnd);
+            return null;
+        }
+
+        private Task<string> GetCurrentPathAsync(IntPtr explorerHwnd)
+        {
+            if (_getCurrentPath == null)
+            {
+                return Task.FromResult<string>(null);
+            }
+
+            return Services.ComThreadService.Instance.InvokeAsync(() => _getCurrentPath(explorerHwnd));
         }
     }
 }
+
+
+

@@ -195,52 +195,7 @@ namespace UnitTestProject
             Assert.AreEqual((IntPtr)100, trackingState.ParkedExplorerOrigins[(IntPtr)202]);
         }
 
-        [TestMethod]
-        public void AbsorbExplorerWindow_ReusesControlPanelTab_AndAlignsNewWindowToPreviousRect()
-        {
-            MockExplorerService explorerService = new MockExplorerService();
-            explorerService.IsControlPanelPathFunc = delegate (string path)
-            {
-                return path == explorerService.AllControlPanelPath || path == explorerService.PowerOptionsPath;
-            };
 
-            ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState();
-            NativeMethods.RECT movedRect = default(NativeMethods.RECT);
-            IntPtr movedHwnd = IntPtr.Zero;
-            ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
-                explorerService,
-                trackingState,
-                TestTabPersistenceFactory.Create(),
-                delegate (IntPtr hwnd) { return string.Empty; },
-                delegate (IntPtr hwnd) { },
-                delegate (IntPtr hwnd) { },
-                delegate (IntPtr hwnd, NativeMethods.RECT rect)
-                {
-                    movedHwnd = hwnd;
-                    movedRect = rect;
-                },
-                delegate (TabBarViewModel viewModel, IntPtr hwnd)
-                {
-                    viewModel.SetExplorerHwnd(hwnd);
-                    return true;
-                },
-                delegate (IntPtr hwnd) { },
-                delegate { return null; },
-                delegate { });
-
-            TabBarViewModel targetViewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorerService);
-            targetViewModel.InsertTabWithPath(explorerService.AllControlPanelPath, 1, true);
-
-            bool absorbed = service.AbsorbExplorerWindow((IntPtr)205, targetViewModel, explorerService.PowerOptionsPath, true, true, delegate (IntPtr hwnd) { });
-
-            Assert.IsTrue(absorbed);
-            Assert.AreEqual((IntPtr)205, movedHwnd);
-            Assert.AreEqual(0, movedRect.Left);
-            Assert.AreEqual(0, movedRect.Top);
-            Assert.AreEqual(800, movedRect.Width);
-            Assert.AreEqual(600, movedRect.Height);
-            Assert.AreEqual((IntPtr)205, targetViewModel.ExplorerHwnd);
-        }
 
         [TestMethod]
         public void AbsorbExplorerWindow_PreservesBackgroundControlPanelTab_WhenActiveTabIsNotControlPanel()

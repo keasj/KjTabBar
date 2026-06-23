@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -28,8 +28,16 @@ namespace KjTabBar
         private TabPersistenceService _tabPersistence = new TabPersistenceService();
         private LanguageResourceService _languageResourceService = new LanguageResourceService();
         private AppBootstrapResult _bootstrapResult;
+        private bool _hasRestoredHiddenExplorerWindowsAfterFatalException;
 
         private static readonly TimeSpan MaxHiddenDuration = TimeSpan.FromSeconds(2);
+
+        public App()
+        {
+            DispatcherUnhandledException += App_DispatcherUnhandledException;
+            AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
+            TaskScheduler.UnobservedTaskException += TaskScheduler_UnobservedTaskException;
+        }
 
         private void Application_Exit(object sender, ExitEventArgs e)
         {
@@ -52,6 +60,40 @@ namespace KjTabBar
             });
         }
 
+        private void App_DispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+        {
+            AppLogger.LogError("App", "Unhandled dispatcher exception.", e.Exception);
+            RestoreHiddenExplorerWindowsAfterFatalException();
+            AppLogger.Flush();
+            e.Handled = true;
+            Shutdown(-1);
+        }
+
+        private void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
+        {
+            Exception exception = e.ExceptionObject as Exception;
+            if (exception != null)
+            {
+                AppLogger.LogError("App", "Unhandled AppDomain exception.", exception);
+            }
+            else
+            {
+                AppLogger.LogError(
+                    "App",
+                    string.Format("Unhandled AppDomain exception object. IsTerminating={0}", e.IsTerminating),
+                    new InvalidOperationException("Unhandled exception object was not an Exception instance."));
+            }
+
+            RestoreHiddenExplorerWindowsAfterFatalException();
+            AppLogger.Flush();
+        }
+
+        private void TaskScheduler_UnobservedTaskException(object sender, UnobservedTaskExceptionEventArgs e)
+        {
+            AppLogger.LogError("App", "Unobserved task exception.", e.Exception);
+            AppLogger.Flush();
+        }
+
         private void Application_Startup(object sender, StartupEventArgs e)
         {
             if (SetupCustomActions.IsPostInstallHelperRequest(e != null ? e.Args : null))
@@ -62,6 +104,7 @@ namespace KjTabBar
             }
 
             ApplyLanguageResource();
+            ThemeManager.Instance.ApplyThemeToResources(this.Resources);
 
             if (StandardUserRelaunchService.ShouldRelaunchAsStandardUser(e))
             {
@@ -121,6 +164,27 @@ namespace KjTabBar
             catch (Exception ex)
             {
                 Helpers.AppLogger.LogError("App", "Failed to apply language resources.", ex);
+            }
+        }
+
+        private void RestoreHiddenExplorerWindowsAfterFatalException()
+        {
+            if (_hasRestoredHiddenExplorerWindowsAfterFatalException)
+            {
+                return;
+            }
+
+            _hasRestoredHiddenExplorerWindowsAfterFatalException = true;
+            try
+            {
+                if (_windowTracking != null)
+                {
+                    _windowTracking.RestoreAllHiddenWindows();
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("App", "Failed to restore hidden explorer windows after fatal exception.", ex);
             }
         }
 
@@ -255,6 +319,7 @@ namespace KjTabBar
                                         path,
                                         allowSpecialPath: true,
                                         isControlPanelPath: isControlPanel,
+                                        wasManagedControlPanelLaunchSource: false,
                                         ignoreExplorerWindow: null
                                     );
                                 }));

@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using KjTabBar.Helpers;
 using KjTabBar.ViewModels;
 using KjTabBar.Views;

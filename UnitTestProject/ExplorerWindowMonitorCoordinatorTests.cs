@@ -1,9 +1,10 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using KjTabBar.Helpers;
 using KjTabBar.Models;
 using KjTabBar.Services;
 using KjTabBar.ViewModels;
+using KjTabBar.Views;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace UnitTestProject
@@ -37,6 +38,7 @@ namespace UnitTestProject
                 delegate (IntPtr hwnd, uint flags) { return hwnd; },
                 delegate (IntPtr hwnd) { return new NativeMethods.RECT(); },
                 delegate (IntPtr hwnd) { movedOffscreen = true; },
+                null,
                 delegate { return new DateTime(2026, 6, 2, 0, 0, 0, DateTimeKind.Utc); });
 
             foregroundTracker.Update((IntPtr)50, "SHELLDLL_DefView");
@@ -82,6 +84,7 @@ namespace UnitTestProject
                 delegate (IntPtr hwnd, uint flags) { return hwnd; },
                 delegate (IntPtr hwnd) { return new NativeMethods.RECT(); },
                 delegate (IntPtr hwnd) { movedOffscreen = true; },
+                null,
                 delegate { return new DateTime(2026, 6, 2, 0, 0, 0, DateTimeKind.Utc); });
 
             trackingState.RegisterExplicitIndependentLaunchRequest();
@@ -125,6 +128,7 @@ namespace UnitTestProject
                 delegate (IntPtr hwnd, uint flags) { return hwnd; },
                 delegate (IntPtr hwnd) { return new NativeMethods.RECT(); },
                 delegate (IntPtr hwnd) { movedOffscreen = true; },
+                null,
                 delegate { return new DateTime(2026, 6, 17, 0, 0, 0, DateTimeKind.Utc); });
 
             trackingState.RegisterInternalHostSwitchLaunchRequest();
@@ -172,6 +176,7 @@ namespace UnitTestProject
                 delegate (IntPtr hwnd, uint flags) { return hwnd; },
                 delegate (IntPtr hwnd) { return new NativeMethods.RECT(); },
                 delegate (IntPtr hwnd) { },
+                null,
                 delegate { return new DateTime(2026, 6, 2, 0, 0, 0, DateTimeKind.Utc); });
 
             foregroundTracker.Update((IntPtr)50, "SHELLDLL_DefView");
@@ -214,6 +219,7 @@ namespace UnitTestProject
                 delegate (IntPtr hwnd, uint flags) { return hwnd; },
                 delegate (IntPtr hwnd) { return new NativeMethods.RECT(); },
                 delegate (IntPtr hwnd) { },
+                null,
                 delegate { return new DateTime(2026, 6, 15, 0, 0, 0, DateTimeKind.Utc); });
 
             foregroundTracker.Update((IntPtr)100, "CabinetWClass");
@@ -246,6 +252,7 @@ namespace UnitTestProject
                 delegate (IntPtr hwnd, uint flags) { return hwnd; },
                 delegate (IntPtr hwnd) { return null; },
                 delegate (IntPtr hwnd) { },
+                null,
                 delegate { return DateTime.UtcNow; });
 
             List<ExplorerWindowProcessRequest> requests = coordinator.PrepareProcessRequests(
@@ -274,6 +281,7 @@ namespace UnitTestProject
                 delegate (IntPtr hwnd, uint flags) { return hwnd; },
                 delegate (IntPtr hwnd) { return null; },
                 delegate (IntPtr hwnd) { },
+                null,
                 delegate { return DateTime.UtcNow; });
 
             List<ExplorerWindowProcessRequest> requests = coordinator.PrepareProcessRequests(
@@ -300,6 +308,7 @@ namespace UnitTestProject
                 delegate (IntPtr hwnd, uint flags) { return hwnd; },
                 delegate (IntPtr hwnd) { return null; },
                 delegate (IntPtr hwnd) { },
+                null,
                 delegate { return DateTime.UtcNow; });
 
             List<ExplorerWindowProcessRequest> requests = coordinator.PrepareProcessRequests(
@@ -327,6 +336,7 @@ namespace UnitTestProject
                 delegate (IntPtr hwnd, uint flags) { return hwnd; },
                 delegate (IntPtr hwnd) { return null; },
                 delegate (IntPtr hwnd) { },
+                null,
                 delegate { return DateTime.UtcNow; });
 
             List<ExplorerWindowProcessRequest> requests = coordinator.PrepareProcessRequests(
@@ -354,6 +364,7 @@ namespace UnitTestProject
                 delegate (IntPtr hwnd, uint flags) { return hwnd; },
                 delegate (IntPtr hwnd) { return null; },
                 delegate (IntPtr hwnd) { },
+                null,
                 delegate { return DateTime.UtcNow; });
 
             List<ExplorerWindowProcessRequest> requests = coordinator.PrepareProcessRequests(
@@ -405,6 +416,7 @@ namespace UnitTestProject
                 },
                 delegate (IntPtr hwnd) { return new NativeMethods.RECT(); },
                 delegate (IntPtr hwnd) { movedHwnd = hwnd; },
+                null,
                 delegate { return new DateTime(2026, 6, 12, 0, 0, 0, DateTimeKind.Utc); });
 
             foregroundTracker.Update((IntPtr)50, "SHELLDLL_DefView");
@@ -422,6 +434,91 @@ namespace UnitTestProject
             Assert.IsTrue(trackingState.HiddenPendingAbsorb.ContainsKey((IntPtr)300));
             Assert.AreEqual((IntPtr)300, movedHwnd);
             Assert.IsFalse(trackingState.ControlPanelTabLaunchCandidates.Contains((IntPtr)301));
+        }
+
+        [TestMethod]
+        public void PrepareProcessRequests_PersistsState_BeforeClosing_InvalidTabBarWindow()
+        {
+            TabBarRegistry tabBars = new TabBarRegistry();
+            ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState();
+            MockExplorerService explorerService = new MockExplorerService();
+            TabBarViewModel viewModel = new TabBarViewModel((IntPtr)500, new MockUserSettings(), explorerService);
+            viewModel.InsertTabWithPath(@"C:\Desktop", 1, false);
+
+            TabBarWindow window = new TabBarWindow();
+            window.DataContext = viewModel;
+            tabBars.Add((IntPtr)500, window);
+
+            int persistedCount = 0;
+            ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                tabBars,
+                trackingState,
+                new DesktopForegroundTracker(),
+                CreateLaunchTracker(trackingState),
+                delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return null; },
+                delegate (IntPtr hwnd) { },
+                delegate (TabBarViewModel vm)
+                {
+                    if (ReferenceEquals(vm, viewModel))
+                    {
+                        persistedCount++;
+                    }
+                },
+                delegate { return DateTime.UtcNow; });
+
+            List<ExplorerWindowProcessRequest> requests = coordinator.PrepareProcessRequests(
+                new List<IntPtr>(),
+                delegate { return null; });
+
+            Assert.AreEqual(0, requests.Count);
+            Assert.AreEqual(1, persistedCount);
+            Assert.IsFalse(tabBars.Contains((IntPtr)500));
+        }
+
+        [TestMethod]
+        public void PrepareProcessRequests_DoesNotClose_TabBar_WhenRegistryKeyIsStaleButCurrentHostIsEnumerated()
+        {
+            TabBarRegistry tabBars = new TabBarRegistry();
+            ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState();
+            MockExplorerService explorerService = new MockExplorerService();
+            TabBarViewModel viewModel = new TabBarViewModel((IntPtr)500, new MockUserSettings(), explorerService);
+            viewModel.SetExplorerHwnd((IntPtr)600);
+
+            TabBarWindow window = new TabBarWindow();
+            window.DataContext = viewModel;
+
+            tabBars.Add((IntPtr)500, window);
+
+            int persistedCount = 0;
+            ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                tabBars,
+                trackingState,
+                new DesktopForegroundTracker(),
+                CreateLaunchTracker(trackingState),
+                delegate (IntPtr hwnd) { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return null; },
+                delegate (IntPtr hwnd) { },
+                delegate (TabBarViewModel vm)
+                {
+                    if (ReferenceEquals(vm, viewModel))
+                    {
+                        persistedCount++;
+                    }
+                },
+                delegate { return DateTime.UtcNow; });
+
+            List<ExplorerWindowProcessRequest> requests = coordinator.PrepareProcessRequests(
+                new List<IntPtr> { (IntPtr)600 },
+                delegate { return viewModel; });
+
+            Assert.AreEqual(1, requests.Count);
+            Assert.AreEqual((IntPtr)600, requests[0].ExplorerHwnd);
+            Assert.AreSame(viewModel, requests[0].ValidTarget);
+            Assert.AreEqual(0, persistedCount);
+            Assert.IsTrue(tabBars.Contains((IntPtr)500));
         }
 
         private static ExplorerLaunchTracker CreateLaunchTracker(ExplorerWindowTrackingState trackingState)

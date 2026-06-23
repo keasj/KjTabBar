@@ -54,9 +54,29 @@ namespace KjTabBar.Models
         {
             if (_resolvedHomeFolderPath == null)
             {
-                if (_isShellPathAvailable != null && _isShellPathAvailable(homeFolderPath))
+                string[] candidates = new string[]
                 {
-                    _resolvedHomeFolderPath = homeFolderPath;
+                    homeFolderPath,
+                    "::{F87431B7-B615-448F-972C-469618B6A34D}", // Win11 Home
+                    "::{F874310E-B6B7-47DC-BC84-B9E6B38F5903}"  // Alternate Home
+                };
+
+                string foundPath = null;
+                if (_isShellPathAvailable != null)
+                {
+                    for (int i = 0; i < candidates.Length; i++)
+                    {
+                        if (_isShellPathAvailable(candidates[i]))
+                        {
+                            foundPath = candidates[i];
+                            break;
+                        }
+                    }
+                }
+
+                if (foundPath != null)
+                {
+                    _resolvedHomeFolderPath = foundPath;
                 }
                 else
                 {

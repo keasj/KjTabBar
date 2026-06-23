@@ -14,10 +14,7 @@ namespace KjTabBar.ViewModels
             for (int i = 0; i < tabs.Count; i++)
             {
                 TabItemViewModel tab = tabs[i];
-                if (string.IsNullOrEmpty(tab.BaseTitle))
-                {
-                    tab.BaseTitle = explorerService.GetFolderName(tab.Path);
-                }
+                tab.BaseTitle = explorerService.GetFolderName(tab.Path);
                 tab.Title = tab.BaseTitle;
             }
 

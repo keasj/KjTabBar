@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using System.Windows.Threading;
 using KjTabBar.Helpers;
@@ -9,7 +9,9 @@ namespace KjTabBar.Views
     {
         private static readonly TimeSpan FastPositionPollingInterval = TimeSpan.FromMilliseconds(50);
         private static readonly TimeSpan FallbackPositionPollingInterval = TimeSpan.FromMilliseconds(500);
-        private static readonly TimeSpan SyncInterval = TimeSpan.FromMilliseconds(300);
+        private static readonly TimeSpan SyncInterval = TimeSpan.FromMilliseconds(1000);
+        private static readonly TimeSpan ImmediateSyncThrottleInterval = TimeSpan.FromMilliseconds(150);
+        private const int ExplorerGoneConfirmationCount = 2;
 
         private readonly Dispatcher _dispatcher;
         private readonly Func<bool> _isExplorerAlive;
@@ -22,6 +24,8 @@ namespace KjTabBar.Views
         private IntPtr _trackedExplorerHwnd = IntPtr.Zero;
         private NativeMethods.WinEventDelegate _locationEventCallback;
         private bool _isSyncTickRunning;
+        private DateTime _lastImmediateSyncRequestUtc = DateTime.MinValue;
+        private int _consecutiveExplorerGoneCount;
 
         public TabBarWindowRuntimeCoordinator(
             Dispatcher dispatcher,
@@ -39,6 +43,7 @@ namespace KjTabBar.Views
 
         public void Start(IntPtr explorerHwnd)
         {
+            _consecutiveExplorerGoneCount = 0;
             RegisterLocationHook(explorerHwnd);
 
             if (_positionTimer == null)
@@ -78,12 +83,14 @@ namespace KjTabBar.Views
 
         public void RebindExplorer(IntPtr explorerHwnd)
         {
+            _consecutiveExplorerGoneCount = 0;
             RegisterLocationHook(explorerHwnd);
             _updatePosition();
         }
 
         public void Stop()
         {
+            _consecutiveExplorerGoneCount = 0;
             UnregisterLocationHook();
 
             if (_positionTimer != null)
@@ -110,11 +117,18 @@ namespace KjTabBar.Views
         {
             if (!_isExplorerAlive())
             {
+                _consecutiveExplorerGoneCount++;
+                if (_consecutiveExplorerGoneCount < ExplorerGoneConfirmationCount)
+                {
+                    return;
+                }
+
                 Stop();
                 _closeWindow();
                 return;
             }
 
+            _consecutiveExplorerGoneCount = 0;
             _updatePosition();
         }
 
@@ -164,7 +178,7 @@ namespace KjTabBar.Views
                     return;
                 }
 
-                _dispatcher.BeginInvoke(new Action(_updatePosition));
+                _dispatcher.BeginInvoke(new Action(BeginUpdatePositionAndSync));
             }
             catch (Exception ex)
             {
@@ -200,6 +214,12 @@ namespace KjTabBar.Views
         private async void SyncTimer_Tick(object sender, EventArgs e)
         {
             await HandleSyncTimerTickAsync();
+        }
+
+        private void BeginUpdatePositionAndSync()
+        {
+            _updatePosition();
+            RequestImmediateSync();
         }
 
         private void RegisterLocationHook(IntPtr explorerHwnd)
@@ -268,6 +288,24 @@ namespace KjTabBar.Views
             {
                 _positionTimer.Interval = GetPositionTimerInterval(_locationHook);
             }
+        }
+
+        private void RequestImmediateSync()
+        {
+            DateTime nowUtc = DateTime.UtcNow;
+            if (_lastImmediateSyncRequestUtc != DateTime.MinValue &&
+                (nowUtc - _lastImmediateSyncRequestUtc) < ImmediateSyncThrottleInterval)
+            {
+                return;
+            }
+
+            _lastImmediateSyncRequestUtc = nowUtc;
+            if (_isSyncTickRunning)
+            {
+                return;
+            }
+
+            _ = HandleSyncTimerTickAsync();
         }
     }
 }

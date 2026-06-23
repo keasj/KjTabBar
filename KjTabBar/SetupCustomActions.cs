@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.ComponentModel;
 using System.Configuration.Install;
@@ -28,6 +28,7 @@ namespace KjTabBar
 
         public override void Install(IDictionary stateSaver)
         {
+            KillRunningInstances();
             base.Install(stateSaver);
             LaunchApplicationDelayed();
         }

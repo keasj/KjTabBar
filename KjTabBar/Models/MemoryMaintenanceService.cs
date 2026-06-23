@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using KjTabBar.Helpers;
@@ -8,9 +8,11 @@ namespace KjTabBar.Models
 {
     internal sealed class MemoryMaintenanceService
     {
-        private static readonly TimeSpan MaintenanceInterval = TimeSpan.FromSeconds(60);
+        private static readonly TimeSpan MaintenanceInterval = TimeSpan.FromMinutes(3);
+        private static readonly TimeSpan FullGarbageCollectionInterval = TimeSpan.FromMinutes(15);
         private readonly IExplorerService _explorerService;
         private DateTime _lastMaintenanceUtc = DateTime.MinValue;
+        private DateTime _lastFullGarbageCollectionUtc = DateTime.MinValue;
         private int _gcMaintenanceRunning;
 
         public MemoryMaintenanceService(IExplorerService explorerService)
@@ -40,7 +42,12 @@ namespace KjTabBar.Models
                 });
 
                 System.Runtime.InteropServices.Marshal.CleanupUnusedObjectsInCurrentContext();
-                StartBackgroundGarbageCollection();
+                if (_lastFullGarbageCollectionUtc == DateTime.MinValue ||
+                    (nowUtc - _lastFullGarbageCollectionUtc) >= FullGarbageCollectionInterval)
+                {
+                    _lastFullGarbageCollectionUtc = nowUtc;
+                    StartBackgroundGarbageCollection();
+                }
             }
             catch (Exception ex)
             {

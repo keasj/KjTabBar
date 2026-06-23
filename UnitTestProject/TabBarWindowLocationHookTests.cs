@@ -1,7 +1,8 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using System.Windows.Threading;
 using KjTabBar.Helpers;
+using KjTabBar.ViewModels;
 using KjTabBar.Views;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -97,9 +98,29 @@ namespace UnitTestProject
                 delegate { closeCalls++; });
 
             coordinator.HandlePositionTimerTick();
+            coordinator.HandlePositionTimerTick();
 
             Assert.AreEqual(1, closeCalls);
             Assert.AreEqual(0, updateCalls);
+        }
+
+        [TestMethod]
+        public void HandlePositionTimerTick_DoesNotCloseWindow_OnFirstTransientExplorerMiss()
+        {
+            int closeCalls = 0;
+            int updateCalls = 0;
+            bool isAlive = false;
+            TabBarWindowRuntimeCoordinator coordinator = CreateCoordinator(
+                delegate { return isAlive; },
+                delegate { updateCalls++; },
+                delegate { closeCalls++; });
+
+            coordinator.HandlePositionTimerTick();
+            isAlive = true;
+            coordinator.HandlePositionTimerTick();
+
+            Assert.AreEqual(0, closeCalls);
+            Assert.AreEqual(1, updateCalls);
         }
 
         [TestMethod]
@@ -143,6 +164,57 @@ namespace UnitTestProject
             Assert.AreEqual(1, syncCalls);
         }
 
+        [TestMethod]
+        public void ExecuteTabSelectionWithPendingReveal_CompletesReveal_AfterSuccessfulSelection()
+        {
+            int selectionCalls = 0;
+            int revealCalls = 0;
+
+            TabBarWindow.ExecuteTabSelectionWithPendingReveal(
+                delegate { selectionCalls++; },
+                delegate { revealCalls++; });
+
+            Assert.AreEqual(1, selectionCalls);
+            Assert.AreEqual(1, revealCalls);
+        }
+
+        [TestMethod]
+        public void ExecuteTabSelectionWithPendingReveal_CompletesReveal_WhenSelectionThrows()
+        {
+            int revealCalls = 0;
+            bool threw = false;
+
+            try
+            {
+                TabBarWindow.ExecuteTabSelectionWithPendingReveal(
+                    delegate { throw new InvalidOperationException("boom"); },
+                    delegate { revealCalls++; });
+            }
+            catch (InvalidOperationException)
+            {
+                threw = true;
+            }
+
+            Assert.IsTrue(threw);
+            Assert.AreEqual(1, revealCalls);
+        }
+
+        [TestMethod]
+        public void PersistCurrentTabState_PersistsViewModel_WhenWindowCloses()
+        {
+            TabBarViewModel persistedViewModel = null;
+            TabBarViewModel viewModel = new TabBarViewModel((IntPtr)10, new MockUserSettings(), new MockExplorerService());
+
+            TabBarWindow.PersistCurrentTabState(
+                viewModel,
+                delegate (TabBarViewModel currentViewModel)
+                {
+                    persistedViewModel = currentViewModel;
+                });
+
+            Assert.AreSame(viewModel, persistedViewModel);
+        }
+
         private static TabBarWindowRuntimeCoordinator CreateCoordinator(
             Func<bool> isExplorerAlive,
             Action updatePosition,
@@ -170,3 +242,4 @@ namespace UnitTestProject
         }
     }
 }
+

@@ -1,4 +1,4 @@
-<Window x:Class="KjTabBar.Views.TabBarWindow"
+﻿<Window x:Class="KjTabBar.Views.TabBarWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:KjTabBar.ViewModels"
@@ -24,7 +24,7 @@
             <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorderLine}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding" Value="10,6"/>
-            <Setter Property="FontSize" Value="{Binding FontSize, RelativeSource={RelativeSource AncestorType=Window}}"/>
+            <Setter Property="FontSize" Value="{Binding PlacementTarget.FontSize, RelativeSource={RelativeSource Self}}"/>
         </Style>
 
         <Style x:Key="TabCloseBtn" TargetType="Button">

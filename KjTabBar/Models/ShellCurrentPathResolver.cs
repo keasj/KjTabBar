@@ -26,7 +26,13 @@ namespace KjTabBar.Models
 
         public string Resolve(string locationUrl, string locationName, string folderPath)
         {
-            string mappedControlPanelPath = _mapLocationNameToKnownShellPath(locationName);
+            string mappedVirtualPath = _mapLocationNameToKnownShellPath(locationName);
+            if (!string.IsNullOrEmpty(mappedVirtualPath) && !_isControlPanelRootPath(mappedVirtualPath))
+            {
+                return mappedVirtualPath;
+            }
+
+            string mappedControlPanelPath = mappedVirtualPath;
             string normalizedFolderPath = _normalizeShellPath(folderPath);
             if (!string.IsNullOrEmpty(mappedControlPanelPath) &&
                 _isControlPanelRootPath(mappedControlPanelPath) &&
@@ -71,7 +77,6 @@ namespace KjTabBar.Models
                 }
             }
 
-            string mappedVirtualPath = _mapLocationNameToKnownShellPath(locationName);
             if (!string.IsNullOrEmpty(mappedVirtualPath))
             {
                 return mappedVirtualPath;

@@ -267,6 +267,38 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void RestoreTabs_Selects_Persisted_Active_Path_When_Provided()
+        {
+            MockUserSettings mockSettings = new MockUserSettings();
+            RestoreTabsExplorerService mockExplorer = new RestoreTabsExplorerService();
+            TabBarViewModel vm = new TabBarViewModel(IntPtr.Zero, mockSettings, mockExplorer);
+
+            vm.RestoreTabs(new string[] { @"C:\SavedA", @"C:\SavedB" }, @"C:\SavedB");
+
+            Assert.AreEqual(2, vm.Tabs.Count);
+            Assert.AreEqual(@"C:\SavedB", vm.ActiveTab.Path);
+            Assert.AreEqual(@"C:\SavedB", mockExplorer.LastNavigatedPath);
+        }
+
+        [TestMethod]
+        public void RestoreTabs_Selects_Persisted_Active_Index_When_Duplicate_Paths_Exist()
+        {
+            MockUserSettings mockSettings = new MockUserSettings();
+            RestoreTabsExplorerService mockExplorer = new RestoreTabsExplorerService();
+            TabBarViewModel vm = new TabBarViewModel(IntPtr.Zero, mockSettings, mockExplorer);
+
+            vm.RestoreTabs(
+                new string[] { @"C:\Desktop", @"C:\Work", @"C:\Desktop" },
+                @"C:\Desktop",
+                2);
+
+            Assert.AreEqual(3, vm.Tabs.Count);
+            Assert.AreSame(vm.Tabs[2], vm.ActiveTab);
+            Assert.AreEqual(@"C:\Desktop", vm.ActiveTab.Path);
+            Assert.AreEqual(@"C:\Desktop", mockExplorer.LastNavigatedPath);
+        }
+
+        [TestMethod]
         public void NavigationTracker_ActivatesExplorerHostSwitchGracePeriod()
         {
             TabNavigationStateTracker tracker = new TabNavigationStateTracker();
@@ -294,7 +326,7 @@ namespace UnitTestProject
         }
 
         [TestMethod]
-        public void SyncWithExplorerAsync_UpdatesActiveControlPanelTab_InsteadOfJumpingToExistingControlPanelRootTab()
+        public void SyncWithExplorerAsync_UpdatesActiveControlPanelItemTab_WhenSeparateRootTabExists()
         {
             SynchronizerControlPanelExplorerService mockExplorer = new SynchronizerControlPanelExplorerService();
             MockUserSettings mockSettings = new MockUserSettings();
@@ -311,6 +343,29 @@ namespace UnitTestProject
             Assert.AreEqual(vm.Tabs[0], vm.ActiveTab);
             Assert.AreEqual(mockExplorer.AllControlPanelPath, vm.Tabs[0].Path);
             Assert.AreEqual(mockExplorer.AllControlPanelPath, vm.Tabs[1].Path);
+        }
+
+        [TestMethod]
+        public void SyncWithExplorerAsync_UpdatesActiveControlPanelRootTab_WhenSeparateItemTabExists()
+        {
+            SynchronizerControlPanelExplorerService mockExplorer = new SynchronizerControlPanelExplorerService();
+            mockExplorer.CurrentPath = mockExplorer.AllControlPanelPath;
+            MockUserSettings mockSettings = new MockUserSettings();
+            TabBarViewModel vm = new TabBarViewModel((IntPtr)123, mockSettings, mockExplorer);
+
+            vm.InsertTabWithPath(mockExplorer.PowerOptionsPath, 1, true);
+
+            // Revert active tab back to Tabs[0] (AllControlPanelPath)
+            mockExplorer.CurrentPath = mockExplorer.AllControlPanelPath;
+            vm.SelectTab(vm.Tabs[0]);
+
+            mockExplorer.CurrentPath = mockExplorer.PowerOptionsPath;
+            vm.SyncWithExplorerAsync().GetAwaiter().GetResult();
+
+            Assert.AreEqual(mockExplorer.PowerOptionsPath, vm.ActiveTab.Path);
+            Assert.AreEqual(vm.Tabs[0], vm.ActiveTab);
+            Assert.AreEqual(mockExplorer.PowerOptionsPath, vm.Tabs[0].Path);
+            Assert.AreEqual(mockExplorer.PowerOptionsPath, vm.Tabs[1].Path);
         }
 
         [TestMethod]
@@ -373,6 +428,44 @@ namespace UnitTestProject
             Assert.AreSame(unavailableTab, vm.Tabs[1]);
             Assert.AreSame(originalActiveTab, vm.ActiveTab);
             Assert.AreEqual(0, mockExplorer.NavigateCallCount);
+        }
+
+        [TestMethod]
+        public void SyncWithExplorerAsync_Removes_Unavailable_Inactive_Tab()
+        {
+            DeletedInactiveTabExplorerService mockExplorer = new DeletedInactiveTabExplorerService();
+            MockUserSettings mockSettings = new MockUserSettings();
+            TabBarViewModel vm = new TabBarViewModel((IntPtr)123, mockSettings, mockExplorer);
+
+            vm.InsertTabWithPath(@"C:\DeletedFolder", 1, false);
+            vm.InsertTabWithPath(@"C:\OtherAlive", 2, false);
+            vm.SelectTab(vm.Tabs[0]);
+
+            vm.SyncWithExplorerAsync().GetAwaiter().GetResult();
+
+            Assert.AreEqual(2, vm.Tabs.Count);
+            Assert.AreEqual(@"C:\Alive", vm.ActiveTab.Path);
+            Assert.AreEqual(@"C:\Alive", vm.Tabs[0].Path);
+            Assert.AreEqual(@"C:\OtherAlive", vm.Tabs[1].Path);
+        }
+
+        [TestMethod]
+        public void SyncWithExplorerAsync_Removes_Unavailable_Active_Tab_And_Selects_Existing_Matching_Tab()
+        {
+            DeletedActiveTabExplorerService mockExplorer = new DeletedActiveTabExplorerService();
+            MockUserSettings mockSettings = new MockUserSettings();
+            TabBarViewModel vm = new TabBarViewModel((IntPtr)123, mockSettings, mockExplorer);
+
+            vm.Tabs.Clear();
+            vm.InsertTabWithPath(@"C:\Desktop", 0, false);
+            vm.InsertTabWithPath(@"C:\DeletedFolder", 1, false);
+            vm.SelectTab(vm.Tabs[1]);
+
+            vm.SyncWithExplorerAsync().GetAwaiter().GetResult();
+
+            Assert.AreEqual(1, vm.Tabs.Count);
+            Assert.AreEqual(@"C:\Desktop", vm.ActiveTab.Path);
+            Assert.AreEqual(@"C:\Desktop", vm.Tabs[0].Path);
         }
 
         private class CustomMockExplorerService : MockExplorerService
@@ -555,6 +648,42 @@ namespace UnitTestProject
             public override bool IsTabPathCurrentlyAvailable(string path)
             {
                 return !string.Equals(path, @"Z:\SleepingDrive", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        private sealed class DeletedInactiveTabExplorerService : MockExplorerService
+        {
+            public override string GetCurrentPath(IntPtr explorerHwnd)
+            {
+                return @"C:\Alive";
+            }
+
+            public override string GetFolderName(string path)
+            {
+                return path;
+            }
+
+            public override bool IsTabPathCurrentlyAvailable(string path)
+            {
+                return !string.Equals(path, @"C:\DeletedFolder", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        private sealed class DeletedActiveTabExplorerService : MockExplorerService
+        {
+            public override string GetCurrentPath(IntPtr explorerHwnd)
+            {
+                return @"C:\Desktop";
+            }
+
+            public override string GetFolderName(string path)
+            {
+                return path;
+            }
+
+            public override bool IsTabPathCurrentlyAvailable(string path)
+            {
+                return !string.Equals(path, @"C:\DeletedFolder", StringComparison.OrdinalIgnoreCase);
             }
         }
     }

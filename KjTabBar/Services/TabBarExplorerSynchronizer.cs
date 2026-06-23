@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using KjTabBar.Helpers;
 using KjTabBar.Models;
@@ -31,6 +31,11 @@ namespace KjTabBar.Services
                 string currentPath = await ComThreadService.Instance.InvokeAsync(() => GetCurrentPathForSync(forcePathPoll));
                 if (_viewModel.ActiveTab == null) return;
 
+                if (_viewModel.RemoveUnavailableInactiveTabs(_explorerService.IsTabPathCurrentlyAvailable, currentPath))
+                {
+                    shouldUpdateTitles = true;
+                }
+
                 if (_viewModel.NavigationTracker.NavigatingToPath == null &&
                     _viewModel.NavigationTracker.IsExplorerHostSwitchGraceActive(syncNowUtc) &&
                     !string.IsNullOrEmpty(currentPath) &&
@@ -42,10 +47,13 @@ namespace KjTabBar.Services
                 if (_explorerService.IsControlPanelRootPath(currentPath))
                 {
                     string normalizedCPPath = _explorerService.AllControlPanelPath;
-                    if (!_viewModel.PathEquals(_viewModel.ActiveTab.Path, normalizedCPPath))
+                    string localizedCPTitle = _explorerService.GetLocalizedControlPanelTitle();
+
+                    if (!_viewModel.PathEquals(_viewModel.ActiveTab.Path, normalizedCPPath) ||
+                         !string.Equals(_viewModel.ActiveTab.BaseTitle, localizedCPTitle, StringComparison.OrdinalIgnoreCase))
                     {
                         _viewModel.ActiveTab.Path = normalizedCPPath;
-                        _viewModel.ActiveTab.BaseTitle = _explorerService.GetLocalizedControlPanelTitle();
+                        _viewModel.ActiveTab.BaseTitle = localizedCPTitle;
                         _viewModel.ActiveTab.Title = _viewModel.ActiveTab.BaseTitle;
                         shouldUpdateTitles = true;
                     }
@@ -68,7 +76,11 @@ namespace KjTabBar.Services
                 }
 
                 // 現在のアクティブタブとパスが一致 → 何もしない
-                if (_viewModel.PathEquals(_viewModel.ActiveTab.Path, currentPath))
+                // コントロールパネルのパスの場合、カテゴリIDなどの違いを無視して同一とみなすのを防ぐため、
+                // 文字列全体が完全に等しいかどうかもチェックする。
+                if (_viewModel.PathEquals(_viewModel.ActiveTab.Path, currentPath) &&
+                    (!_explorerService.IsControlPanelPath(currentPath) ||
+                     string.Equals(_viewModel.ActiveTab.Path, currentPath, StringComparison.OrdinalIgnoreCase)))
                 {
                     _viewModel.ClearPendingNavigationTracking();
                     if (_viewModel.NavigationTracker.PendingSelectedItems != null)
@@ -77,6 +89,20 @@ namespace KjTabBar.Services
                         _viewModel.NavigationTracker.PendingSelectedItems = null;
                     }
                     return;
+                }
+
+                if (!_explorerService.IsTabPathCurrentlyAvailable(_viewModel.ActiveTab.Path))
+                {
+                    ViewModels.TabItemViewModel matchingTab = _viewModel.FindTabByPath(currentPath);
+                    if (matchingTab != null && matchingTab != _viewModel.ActiveTab)
+                    {
+                        ViewModels.TabItemViewModel unavailableActiveTab = _viewModel.ActiveTab;
+                        _viewModel.Tabs.Remove(unavailableActiveTab);
+                        _viewModel.SetActiveTabOnly(matchingTab);
+                        _viewModel.ClearPendingNavigationTracking();
+                        shouldUpdateTitles = true;
+                        return;
+                    }
                 }
 
                 // ナビゲート先パスと一致 → タブ切り替え中のナビゲーション完了
@@ -151,6 +177,7 @@ namespace KjTabBar.Services
                 }
             }
         }
+
 
         private string GetCurrentPathForSync(bool forcePoll)
         {
