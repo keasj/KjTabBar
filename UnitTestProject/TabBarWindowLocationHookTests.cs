@@ -52,7 +52,7 @@ namespace UnitTestProject
         {
             TimeSpan result = TabBarWindowRuntimeCoordinator.GetPositionTimerInterval(IntPtr.Zero);
 
-            Assert.AreEqual(TimeSpan.FromMilliseconds(50), result);
+            Assert.AreEqual(TimeSpan.FromMilliseconds(100), result);
         }
 
         [TestMethod]
@@ -60,7 +60,7 @@ namespace UnitTestProject
         {
             TimeSpan result = TabBarWindowRuntimeCoordinator.GetPositionTimerInterval((IntPtr)10);
 
-            Assert.AreEqual(TimeSpan.FromMilliseconds(500), result);
+            Assert.AreEqual(TimeSpan.FromSeconds(1), result);
         }
 
         [TestMethod]

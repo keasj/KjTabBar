@@ -67,6 +67,22 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void SelectPreferredSessionId_Prefers_Fallback_Session_When_Explorer_Window_Is_In_That_Session()
+        {
+            int selectedSessionId = SetupEnvironmentResolver.SelectPreferredSessionId(2, new int[] { 1, 2, 3 });
+
+            Assert.AreEqual(2, selectedSessionId);
+        }
+
+        [TestMethod]
+        public void SelectPreferredSessionId_Uses_First_Explorer_Session_When_Fallback_Session_Has_No_Explorer_Window()
+        {
+            int selectedSessionId = SetupEnvironmentResolver.SelectPreferredSessionId(9, new int[] { 4, 5 });
+
+            Assert.AreEqual(4, selectedSessionId);
+        }
+
+        [TestMethod]
         public void IsInstalledExecutablePathMatch_Compares_Normalized_Paths_Case_Insensitively()
         {
             Assert.IsTrue(SetupCustomActions.IsInstalledExecutablePathMatch(

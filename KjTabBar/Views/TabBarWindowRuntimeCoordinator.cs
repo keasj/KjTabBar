@@ -7,8 +7,8 @@ namespace KjTabBar.Views
 {
     internal sealed class TabBarWindowRuntimeCoordinator : IDisposable
     {
-        private static readonly TimeSpan FastPositionPollingInterval = TimeSpan.FromMilliseconds(50);
-        private static readonly TimeSpan FallbackPositionPollingInterval = TimeSpan.FromMilliseconds(500);
+        private static readonly TimeSpan FastPositionPollingInterval = TimeSpan.FromMilliseconds(100);
+        private static readonly TimeSpan FallbackPositionPollingInterval = TimeSpan.FromSeconds(1);
         private static readonly TimeSpan SyncInterval = TimeSpan.FromMilliseconds(1000);
         private static readonly TimeSpan ImmediateSyncThrottleInterval = TimeSpan.FromMilliseconds(150);
         private const int ExplorerGoneConfirmationCount = 2;

@@ -81,6 +81,7 @@
     <Compile Include="ExplorerWindowTrackingStateTests.cs" />
     <Compile Include="ExplorerTabTargetResolverTests.cs" />
     <Compile Include="AppMonitorCycleCoordinatorTests.cs" />
+    <Compile Include="MemoryMaintenanceServiceTests.cs" />
     <Compile Include="TabExternalDragOpenDeciderTests.cs" />
     <Compile Include="TabBarWindowLocationHookTests.cs" />
     <Compile Include="LineEndingPolicyTests.cs" />
@@ -91,6 +92,7 @@
     <Compile Include="ShellShortcutManagerTests.cs" />
     <Compile Include="ShellFolderNameResolverTests.cs" />
     <Compile Include="ShellPathNormalizerTests.cs" />
+    <Compile Include="ShellDragDropHelperTests.cs" />
     <Compile Include="ThemeManagerTests.cs" />
     <Compile Include="ExplorerWindowEvaluationServiceTests.cs" />
     <Compile Include="ExplorerManagerTests.cs" />
@@ -98,6 +100,7 @@
     <Compile Include="SetupCustomActionsTests.cs" />
     <Compile Include="SettingsViewModelTests.cs" />
     <Compile Include="TabBarViewModelTests.cs" />
+    <Compile Include="TabItemViewModelTests.cs" />
     <Compile Include="TestTabPersistenceFactory.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

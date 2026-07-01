@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
@@ -233,6 +234,7 @@ namespace KjTabBar
 
         private void MonitorTimer_Tick(object sender, EventArgs e)
         {
+            Stopwatch stopwatch = Stopwatch.StartNew();
             try
             {
                 MonitorTimer_TickCore();
@@ -241,6 +243,10 @@ namespace KjTabBar
             {
                 Helpers.AppLogger.LogErrorThrottled("App", "MonitorTimerTick", "MonitorTimer_Tick failed.", ex, TimeSpan.FromMinutes(5));
                 // 例外が発生してもタイマーは継続
+            }
+            finally
+            {
+                Helpers.AppLogger.LogSlowOperation("App", "App.MonitorTimerTick", "MonitorTimer_Tick", stopwatch.Elapsed, TimeSpan.FromMilliseconds(100), TimeSpan.FromMinutes(1));
             }
         }
 

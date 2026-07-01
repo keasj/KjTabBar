@@ -1,6 +1,7 @@
 using KjTabBar.Models;
 using KjTabBar.Helpers;
 using System;
+using System.Diagnostics;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Interop;
@@ -62,7 +63,30 @@ namespace KjTabBar.ViewModels
             UpdateIconSource();
         }
 
+        internal static bool ShouldUseFileAttributeIconLookup(string normalizedPath)
+        {
+            if (string.IsNullOrEmpty(normalizedPath))
+            {
+                return false;
+            }
+
+            return normalizedPath.StartsWith(@"\\", StringComparison.Ordinal);
+        }
+
         private void UpdateIconSource()
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            try
+            {
+                UpdateIconSourceCore();
+            }
+            finally
+            {
+                AppLogger.LogSlowOperation("TabItemViewModel", "TabItemViewModel.UpdateIconSource", "UpdateIconSource", stopwatch.Elapsed, TimeSpan.FromMilliseconds(100), TimeSpan.FromMinutes(1));
+            }
+        }
+
+        private void UpdateIconSourceCore()
         {
             IntPtr pidl = IntPtr.Zero;
             IntPtr fallbackPidl = IntPtr.Zero;
@@ -144,16 +168,20 @@ namespace KjTabBar.ViewModels
                 }
                 else
                 {
-                    // まず実際のファイルシステムからアイコンを取得する。
-                    // desktop.ini で設定されたカスタムアイコン（ダウンロード、デスクトップ等）が反映される。
+                    bool useFileAttributeIconLookup = ShouldUseFileAttributeIconLookup(normalizedPath);
+                    uint fileAttributes = useFileAttributeIconLookup ? NativeMethods.FILE_ATTRIBUTE_DIRECTORY : 0;
+                    uint fileIconFlags = useFileAttributeIconLookup ? flags | NativeMethods.SHGFI_USEFILEATTRIBUTES : flags;
+
+                    // UNC パスは実体確認で待たされやすいため、まず属性指定で汎用フォルダアイコンを取得する。
+                    // ローカルパスは従来通り desktop.ini のカスタムアイコンを優先する。
                     result = NativeMethods.SHGetFileInfo(
                         normalizedPath,
-                        0,
+                        fileAttributes,
                         out fileInfo,
                         (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.SHFILEINFO)),
-                        flags);
-                    // パスが一時的に利用不可の場合は汎用フォルダアイコンにフォールバックする。
-                    if (result == IntPtr.Zero || fileInfo.hIcon == IntPtr.Zero)
+                        fileIconFlags);
+                    // ローカルパスが一時的に利用不可の場合は汎用フォルダアイコンにフォールバックする。
+                    if (!useFileAttributeIconLookup && (result == IntPtr.Zero || fileInfo.hIcon == IntPtr.Zero))
                     {
                         uint attrs = NativeMethods.FILE_ATTRIBUTE_DIRECTORY;
                         result = NativeMethods.SHGetFileInfo(

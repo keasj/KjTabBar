@@ -11,6 +11,12 @@ namespace UnitTestProject
     public class AppMonitorCycleCoordinatorTests
     {
         [TestMethod]
+        public void GetMonitorTimerInterval_Uses_Background_Polling_Interval()
+        {
+            Assert.AreEqual(TimeSpan.FromSeconds(1), AppRuntimeCoordinator.GetMonitorTimerInterval());
+        }
+
+        [TestMethod]
         public void RunCycle_SavesTabsAndRestoresExpiredHiddenWindows()
         {
             MockExplorerService explorerService = new MockExplorerService();

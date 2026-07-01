@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Management;
 using System.Runtime.InteropServices;
@@ -307,6 +308,7 @@ namespace KjTabBar
         public static int GetPreferredSessionId(int fallbackSessionId)
         {
             Process[] explorerProcesses = null;
+            List<int> explorerSessionIds = new List<int>();
             try
             {
                 explorerProcesses = Process.GetProcessesByName("explorer");
@@ -314,7 +316,7 @@ namespace KjTabBar
                 {
                     if (explorerProcesses[i].MainWindowHandle != IntPtr.Zero)
                     {
-                        return explorerProcesses[i].SessionId;
+                        explorerSessionIds.Add(explorerProcesses[i].SessionId);
                     }
                 }
             }
@@ -333,7 +335,26 @@ namespace KjTabBar
                 }
             }
 
-            return fallbackSessionId;
+            return SelectPreferredSessionId(fallbackSessionId, explorerSessionIds);
+        }
+
+        internal static int SelectPreferredSessionId(int fallbackSessionId, IList<int> explorerSessionIds)
+        {
+            if (explorerSessionIds == null || explorerSessionIds.Count == 0)
+            {
+                return fallbackSessionId;
+            }
+
+            int firstExplorerSessionId = explorerSessionIds[0];
+            for (int i = 0; i < explorerSessionIds.Count; i++)
+            {
+                if (explorerSessionIds[i] == fallbackSessionId)
+                {
+                    return fallbackSessionId;
+                }
+            }
+
+            return firstExplorerSessionId;
         }
 
         public static bool IsRegularUserSid(string userSid)

@@ -25,6 +25,13 @@ namespace KjTabBar.Services
 
     internal sealed class AppRuntimeCoordinator
     {
+        private static readonly TimeSpan MonitorTimerInterval = TimeSpan.FromSeconds(1);
+
+        internal static TimeSpan GetMonitorTimerInterval()
+        {
+            return MonitorTimerInterval;
+        }
+
         public bool TryAcquireSingleInstanceMutex(string mutexName, out Mutex mutex)
         {
             mutex = new Mutex(false, mutexName);

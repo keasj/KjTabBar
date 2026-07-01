@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -10,15 +11,24 @@ namespace KjTabBar.Helpers
 {
     internal static class AppLogger
     {
+#if DEBUG
         private static readonly object SyncRoot = new object();
         private static readonly Dictionary<string, DateTime> ThrottledLogTimes = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+#endif
         private static readonly Regex WindowsPathRegex = new Regex("(?i)(?:[a-z]:\\\\|\\\\\\\\)[^\\r\\n\\\"'<>|]+", RegexOptions.Compiled | RegexOptions.CultureInvariant);
         private static readonly Regex SidRegex = new Regex(@"\bS-\d-(?:\d+-){1,14}\d+\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+#if DEBUG
         private static readonly ConcurrentQueue<string> PendingLogEntries = new ConcurrentQueue<string>();
         private static readonly AutoResetEvent PendingLogSignal = new AutoResetEvent(false);
         private static readonly Thread LogWriterThread = new Thread(ProcessPendingLogEntries);
+#endif
         private const int MaxLoggedTextLength = 2048;
+#if DEBUG
+        private const long MaxLogFileBytes = 1024L * 1024L;
+        private const int MaxLogArchiveFiles = 3;
+#endif
 
+#if DEBUG
         static AppLogger()
         {
             LogWriterThread.IsBackground = true;
@@ -26,44 +36,49 @@ namespace KjTabBar.Helpers
             LogWriterThread.Start();
             AppDomain.CurrentDomain.ProcessExit += CurrentDomain_ProcessExit;
         }
+#endif
 
         public static void LogInfo(string source, string message)
         {
+#if DEBUG
             Write("INFO", source, message, null);
+#endif
         }
 
         public static void LogError(string source, string message, Exception exception)
         {
+#if DEBUG
             Write("ERROR", source, message, exception);
+#endif
         }
 
         public static void LogErrorThrottled(string source, string key, string message, Exception exception, TimeSpan interval)
         {
-            if (string.IsNullOrEmpty(key))
+#if DEBUG
+            WriteThrottled("ERROR", source, key, message, exception, interval);
+#endif
+        }
+
+        public static void LogSlowOperation(string source, string key, string operation, TimeSpan elapsed, TimeSpan threshold, TimeSpan interval)
+        {
+#if DEBUG
+            if (elapsed < threshold)
             {
-                Write("ERROR", source, message, exception);
                 return;
             }
 
-            lock (SyncRoot)
-            {
-                DateTime lastLoggedUtc;
-                if (ThrottledLogTimes.TryGetValue(key, out lastLoggedUtc))
-                {
-                    if ((DateTime.UtcNow - lastLoggedUtc) < interval)
-                    {
-                        return;
-                    }
-                }
-
-                ThrottledLogTimes[key] = DateTime.UtcNow;
-            }
-
-            Write("ERROR", source, message, exception);
+            string message = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} took {1:0} ms.",
+                string.IsNullOrEmpty(operation) ? "Operation" : operation,
+                elapsed.TotalMilliseconds);
+            WriteThrottled("INFO", source, key, message, null, interval);
+#endif
         }
 
         public static void Flush()
         {
+#if DEBUG
             try
             {
                 FlushPendingLogEntries();
@@ -71,6 +86,7 @@ namespace KjTabBar.Helpers
             catch
             {
             }
+#endif
         }
 
         internal static string SanitizeForLog(string text)
@@ -124,6 +140,48 @@ namespace KjTabBar.Helpers
             }
 
             return Regex.Replace(text, Regex.Escape(trimmedPath), replacement, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        internal static bool ShouldRotateLogFile(long currentFileBytes, int pendingByteCount, long maxLogFileBytes)
+        {
+            if (currentFileBytes <= 0 || maxLogFileBytes <= 0)
+            {
+                return false;
+            }
+
+            long pendingBytes = pendingByteCount > 0 ? pendingByteCount : 0;
+            if (pendingBytes >= maxLogFileBytes)
+            {
+                return true;
+            }
+
+            return currentFileBytes > maxLogFileBytes - pendingBytes;
+        }
+
+#if DEBUG
+        private static void WriteThrottled(string level, string source, string key, string message, Exception exception, TimeSpan interval)
+        {
+            if (string.IsNullOrEmpty(key))
+            {
+                Write(level, source, message, exception);
+                return;
+            }
+
+            lock (SyncRoot)
+            {
+                DateTime lastLoggedUtc;
+                if (ThrottledLogTimes.TryGetValue(key, out lastLoggedUtc))
+                {
+                    if ((DateTime.UtcNow - lastLoggedUtc) < interval)
+                    {
+                        return;
+                    }
+                }
+
+                ThrottledLogTimes[key] = DateTime.UtcNow;
+            }
+
+            Write(level, source, message, exception);
         }
 
         private static void Write(string level, string source, string message, Exception exception)
@@ -210,10 +268,68 @@ namespace KjTabBar.Helpers
                 return;
             }
 
+            string batchText = batchBuilder.ToString();
             lock (SyncRoot)
             {
-                File.AppendAllText(logPath, batchBuilder.ToString(), Encoding.UTF8);
+                RotateLogFileIfNeeded(logPath, Encoding.UTF8.GetByteCount(batchText));
+                File.AppendAllText(logPath, batchText, Encoding.UTF8);
             }
+        }
+
+        private static void RotateLogFileIfNeeded(string logPath, int pendingByteCount)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(logPath) || !File.Exists(logPath))
+                {
+                    return;
+                }
+
+                FileInfo fileInfo = new FileInfo(logPath);
+                if (!ShouldRotateLogFile(fileInfo.Length, pendingByteCount, MaxLogFileBytes))
+                {
+                    return;
+                }
+
+                for (int i = MaxLogArchiveFiles; i >= 1; i--)
+                {
+                    string archivePath = GetArchiveLogPath(logPath, i);
+                    if (!File.Exists(archivePath))
+                    {
+                        continue;
+                    }
+
+                    if (i == MaxLogArchiveFiles)
+                    {
+                        File.Delete(archivePath);
+                    }
+                    else
+                    {
+                        string nextArchivePath = GetArchiveLogPath(logPath, i + 1);
+                        if (File.Exists(nextArchivePath))
+                        {
+                            File.Delete(nextArchivePath);
+                        }
+                        File.Move(archivePath, nextArchivePath);
+                    }
+                }
+
+                string firstArchivePath = GetArchiveLogPath(logPath, 1);
+                if (File.Exists(firstArchivePath))
+                {
+                    File.Delete(firstArchivePath);
+                }
+
+                File.Move(logPath, firstArchivePath);
+            }
+            catch
+            {
+            }
+        }
+
+        private static string GetArchiveLogPath(string logPath, int index)
+        {
+            return logPath + "." + index.ToString(CultureInfo.InvariantCulture);
         }
 
         private static string GetLogDirectory()
@@ -244,5 +360,6 @@ namespace KjTabBar.Helpers
 
             return null;
         }
+#endif
     }
 }

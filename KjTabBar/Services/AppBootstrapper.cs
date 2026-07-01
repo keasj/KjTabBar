@@ -97,7 +97,7 @@ namespace KjTabBar.Services
                     context.MoveSizeEndEventCallback,
                     "Failed to set up movesizeend hook."),
                 MonitorTimer = _runtimeCoordinator.CreateMonitorTimer(
-                    TimeSpan.FromMilliseconds(500),
+                    AppRuntimeCoordinator.GetMonitorTimerInterval(),
                     context.MonitorTickHandler)
             };
         }

@@ -35,7 +35,7 @@ namespace KjTabBar.Models
                 {
                     bool isProtectedFile = ProtectedTextStorage.IsProtectedFile(file);
                     string[] paths = ProtectedTextStorage.LoadLines(file);
-                    PersistedActiveTabSelection activeTabSelection = LoadActiveTabSelection();
+                    PersistedActiveTabSelection activeTabSelection = LoadActiveTabSelectionSafe();
                     _tabsLoadFailed = false;
                     viewModel.RestoreTabs(paths, activeTabSelection.Path, activeTabSelection.Index);
                     _lastSavedTabs = BuildPersistedStateString(paths, activeTabSelection.Path, activeTabSelection.Index);
@@ -201,6 +201,19 @@ namespace KjTabBar.Models
             string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(tabsFilePath);
             string extension = Path.GetExtension(tabsFilePath);
             return Path.Combine(directory, fileNameWithoutExtension + ".active" + extension);
+        }
+
+        private PersistedActiveTabSelection LoadActiveTabSelectionSafe()
+        {
+            try
+            {
+                return LoadActiveTabSelection();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("TabPersistenceService", "Failed to load active tab selection. Tabs will be restored without persisted active selection.", ex);
+                return new PersistedActiveTabSelection(null, null);
+            }
         }
 
         private PersistedActiveTabSelection LoadActiveTabSelection()

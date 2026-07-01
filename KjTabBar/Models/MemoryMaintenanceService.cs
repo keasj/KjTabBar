@@ -10,6 +10,7 @@ namespace KjTabBar.Models
     {
         private static readonly TimeSpan MaintenanceInterval = TimeSpan.FromMinutes(3);
         private static readonly TimeSpan FullGarbageCollectionInterval = TimeSpan.FromMinutes(15);
+        private const long FullGarbageCollectionManagedBytesThreshold = 128L * 1024L * 1024L;
         private readonly IExplorerService _explorerService;
         private DateTime _lastMaintenanceUtc = DateTime.MinValue;
         private DateTime _lastFullGarbageCollectionUtc = DateTime.MinValue;
@@ -18,6 +19,17 @@ namespace KjTabBar.Models
         public MemoryMaintenanceService(IExplorerService explorerService)
         {
             _explorerService = explorerService;
+        }
+
+        internal static bool ShouldRunFullGarbageCollection(DateTime nowUtc, DateTime lastFullGarbageCollectionUtc, long managedMemoryBytes)
+        {
+            if (managedMemoryBytes < FullGarbageCollectionManagedBytesThreshold)
+            {
+                return false;
+            }
+
+            return lastFullGarbageCollectionUtc == DateTime.MinValue ||
+                   (nowUtc - lastFullGarbageCollectionUtc) >= FullGarbageCollectionInterval;
         }
 
         public void PerformIfDue()
@@ -42,8 +54,8 @@ namespace KjTabBar.Models
                 });
 
                 System.Runtime.InteropServices.Marshal.CleanupUnusedObjectsInCurrentContext();
-                if (_lastFullGarbageCollectionUtc == DateTime.MinValue ||
-                    (nowUtc - _lastFullGarbageCollectionUtc) >= FullGarbageCollectionInterval)
+                long managedMemoryBytes = GC.GetTotalMemory(false);
+                if (ShouldRunFullGarbageCollection(nowUtc, _lastFullGarbageCollectionUtc, managedMemoryBytes))
                 {
                     _lastFullGarbageCollectionUtc = nowUtc;
                     StartBackgroundGarbageCollection();

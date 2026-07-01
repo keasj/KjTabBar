@@ -150,6 +150,45 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void TabPersistenceService_LoadTabsTo_Ignores_Corrupt_Active_Tab_File()
+        {
+            string tempFile = Path.Combine(Path.GetTempPath(), "KjTabBar.Tests." + Guid.NewGuid().ToString("N") + ".tabs.txt");
+            string activeTabFile = Path.Combine(Path.GetDirectoryName(tempFile), Path.GetFileNameWithoutExtension(tempFile) + ".active" + Path.GetExtension(tempFile));
+            try
+            {
+                ProtectedTextStorage.SaveLines(tempFile, new string[] { @"C:\SavedA", @"C:\SavedB" });
+                File.WriteAllText(activeTabFile, "kjtb-dpapi-v1:not-base64");
+
+                MockExplorerService explorer = new MockExplorerService();
+                TabPersistenceService persistence = new TabPersistenceService(tempFile);
+                TabBarViewModel vm = new TabBarViewModel(IntPtr.Zero, new MockUserSettings(), explorer);
+
+                bool loaded = persistence.LoadTabsTo(vm);
+
+                Assert.IsTrue(loaded);
+                Assert.AreEqual(2, vm.Tabs.Count);
+                Assert.AreEqual(@"C:\SavedA", vm.Tabs[0].Path);
+                Assert.AreEqual(@"C:\SavedB", vm.Tabs[1].Path);
+                Assert.AreEqual(@"C:\SavedA", vm.ActiveTab.Path);
+
+                persistence.SaveTabsIfChanged(vm, true);
+                string[] restoredActiveSelection = ProtectedTextStorage.LoadLines(activeTabFile);
+                CollectionAssert.AreEqual(new string[] { "index=0", @"C:\SavedA" }, restoredActiveSelection);
+            }
+            finally
+            {
+                if (File.Exists(tempFile))
+                {
+                    File.Delete(tempFile);
+                }
+                if (File.Exists(activeTabFile))
+                {
+                    File.Delete(activeTabFile);
+                }
+            }
+        }
+
+        [TestMethod]
         public void SanitizeForLog_Masks_File_Paths_And_Sids()
         {
             string sanitized = AppLogger.SanitizeForLog(@"Failed for C:\Users\alice\Secret\foo.txt and \\server\share\bar.txt (S-1-5-21-100-200-300-400).");
@@ -159,6 +198,15 @@ namespace UnitTestProject
             Assert.IsFalse(sanitized.Contains("S-1-5-21-100-200-300-400"));
             StringAssert.Contains(sanitized, "<path>");
             StringAssert.Contains(sanitized, "<sid>");
+        }
+
+        [TestMethod]
+        public void ShouldRotateLogFile_Returns_True_Only_When_Append_Would_Exceed_Limit()
+        {
+            Assert.IsFalse(AppLogger.ShouldRotateLogFile(0, 100, 1000));
+            Assert.IsFalse(AppLogger.ShouldRotateLogFile(900, 100, 1000));
+            Assert.IsTrue(AppLogger.ShouldRotateLogFile(901, 100, 1000));
+            Assert.IsTrue(AppLogger.ShouldRotateLogFile(10, 1000, 1000));
         }
 
         [TestMethod]

@@ -19,6 +19,8 @@ namespace KjTabBar.Models
         private static readonly object CurrentPathCacheSync = new object();
         private static readonly Dictionary<IntPtr, CurrentPathCacheEntry> CurrentPathCache = new Dictionary<IntPtr, CurrentPathCacheEntry>();
         private static readonly TimeSpan CurrentPathCacheDuration = TimeSpan.FromMilliseconds(100);
+        private static readonly TimeSpan SlowComOperationThreshold = TimeSpan.FromMilliseconds(100);
+        private static readonly TimeSpan SlowComOperationLogInterval = TimeSpan.FromMinutes(1);
         private readonly ShellWindowCacheManager _cacheManager = new ShellWindowCacheManager();
 
         private readonly ShellExplorerWindowMatcher _shellExplorerWindowMatcher;
@@ -109,6 +111,19 @@ namespace KjTabBar.Models
         }
 
         public string GetCurrentPath(IntPtr explorerHwnd)
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            try
+            {
+                return GetCurrentPathCore(explorerHwnd);
+            }
+            finally
+            {
+                AppLogger.LogSlowOperation("ShellWindowComInterop", "ShellWindowComInterop.GetCurrentPath", "GetCurrentPath", stopwatch.Elapsed, SlowComOperationThreshold, SlowComOperationLogInterval);
+            }
+        }
+
+        private string GetCurrentPathCore(IntPtr explorerHwnd)
         {
             string cachedPath = TryGetCachedCurrentPath(explorerHwnd, DateTime.UtcNow);
             if (cachedPath != null)
@@ -203,6 +218,19 @@ namespace KjTabBar.Models
 
         public List<string> GetSelectedItems(IntPtr explorerHwnd)
         {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            try
+            {
+                return GetSelectedItemsCore(explorerHwnd);
+            }
+            finally
+            {
+                AppLogger.LogSlowOperation("ShellWindowComInterop", "ShellWindowComInterop.GetSelectedItems", "GetSelectedItems", stopwatch.Elapsed, SlowComOperationThreshold, SlowComOperationLogInterval);
+            }
+        }
+
+        private List<string> GetSelectedItemsCore(IntPtr explorerHwnd)
+        {
             List<string> selectedItems = new List<string>();
             object windowsObject = null;
             if (!_cacheManager.TryCreateShellWindows(out windowsObject))
@@ -283,6 +311,19 @@ namespace KjTabBar.Models
         }
 
         public void SelectItems(IntPtr explorerHwnd, List<string> itemPaths)
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            try
+            {
+                SelectItemsCore(explorerHwnd, itemPaths);
+            }
+            finally
+            {
+                AppLogger.LogSlowOperation("ShellWindowComInterop", "ShellWindowComInterop.SelectItems", "SelectItems", stopwatch.Elapsed, SlowComOperationThreshold, SlowComOperationLogInterval);
+            }
+        }
+
+        private void SelectItemsCore(IntPtr explorerHwnd, List<string> itemPaths)
         {
             if (itemPaths == null || itemPaths.Count == 0) return;
             object windowsObject = null;
@@ -397,6 +438,19 @@ namespace KjTabBar.Models
         }
 
         public bool Navigate(IntPtr explorerHwnd, string path)
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            try
+            {
+                return NavigateCore(explorerHwnd, path);
+            }
+            finally
+            {
+                AppLogger.LogSlowOperation("ShellWindowComInterop", "ShellWindowComInterop.Navigate", "Navigate", stopwatch.Elapsed, SlowComOperationThreshold, SlowComOperationLogInterval);
+            }
+        }
+
+        private bool NavigateCore(IntPtr explorerHwnd, string path)
         {
             string navigatePath = _getNavigableShellPath(path);
 
