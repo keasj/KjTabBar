@@ -21,8 +21,10 @@ namespace KjTabBar.Views
         private DispatcherTimer _positionTimer;
         private DispatcherTimer _syncTimer;
         private IntPtr _locationHook = IntPtr.Zero;
+        private IntPtr _destroyHook = IntPtr.Zero;
         private IntPtr _trackedExplorerHwnd = IntPtr.Zero;
         private NativeMethods.WinEventDelegate _locationEventCallback;
+        private NativeMethods.WinEventDelegate _destroyEventCallback;
         private bool _isSyncTickRunning;
         private DateTime _lastImmediateSyncRequestUtc = DateTime.MinValue;
         private int _consecutiveExplorerGoneCount;
@@ -186,6 +188,35 @@ namespace KjTabBar.Views
             }
         }
 
+        internal void HandleDestroyEvent(
+            IntPtr hWinEventHook,
+            uint eventType,
+            IntPtr hwnd,
+            int idObject,
+            int idChild,
+            uint dwEventThread,
+            uint dwmsEventTime)
+        {
+            try
+            {
+                if (!ShouldHandleDestroyEvent(eventType, hwnd, idObject, _trackedExplorerHwnd))
+                {
+                    return;
+                }
+
+                if (_dispatcher.HasShutdownStarted || _dispatcher.HasShutdownFinished)
+                {
+                    return;
+                }
+
+                _dispatcher.BeginInvoke(new Action(CloseAfterExplorerDestroyed));
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("TabBarWindowRuntimeCoordinator", "Error in destroy callback.", ex);
+            }
+        }
+
         internal static TimeSpan GetPositionTimerInterval(IntPtr locationHook)
         {
             return locationHook == IntPtr.Zero
@@ -196,6 +227,14 @@ namespace KjTabBar.Views
         internal static bool ShouldHandleLocationChangeEvent(uint eventType, IntPtr hwnd, int idObject, IntPtr trackedExplorerHwnd)
         {
             return eventType == NativeMethods.EVENT_OBJECT_LOCATIONCHANGE &&
+                   idObject == 0 &&
+                   hwnd != IntPtr.Zero &&
+                   hwnd == trackedExplorerHwnd;
+        }
+
+        internal static bool ShouldHandleDestroyEvent(uint eventType, IntPtr hwnd, int idObject, IntPtr trackedExplorerHwnd)
+        {
+            return eventType == NativeMethods.EVENT_OBJECT_DESTROY &&
                    idObject == 0 &&
                    hwnd != IntPtr.Zero &&
                    hwnd == trackedExplorerHwnd;
@@ -250,6 +289,16 @@ namespace KjTabBar.Views
                     processId,
                     0,
                     NativeMethods.WINEVENT_OUTOFCONTEXT);
+
+                _destroyEventCallback = HandleDestroyEvent;
+                _destroyHook = NativeMethods.SetWinEventHook(
+                    NativeMethods.EVENT_OBJECT_DESTROY,
+                    NativeMethods.EVENT_OBJECT_DESTROY,
+                    IntPtr.Zero,
+                    _destroyEventCallback,
+                    processId,
+                    0,
+                    NativeMethods.WINEVENT_OUTOFCONTEXT);
             }
             catch (Exception ex)
             {
@@ -264,6 +313,21 @@ namespace KjTabBar.Views
         private void UnregisterLocationHook()
         {
             _trackedExplorerHwnd = IntPtr.Zero;
+            if (_destroyHook != IntPtr.Zero)
+            {
+                try
+                {
+                    NativeMethods.UnhookWinEvent(_destroyHook);
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.LogError("TabBarWindowRuntimeCoordinator", "Failed to unhook destroy event hook.", ex);
+                }
+
+                _destroyHook = IntPtr.Zero;
+                _destroyEventCallback = null;
+            }
+
             if (_locationHook != IntPtr.Zero)
             {
                 try
@@ -306,6 +370,17 @@ namespace KjTabBar.Views
             }
 
             _ = HandleSyncTimerTickAsync();
+        }
+
+        private void CloseAfterExplorerDestroyed()
+        {
+            if (_trackedExplorerHwnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            Stop();
+            _closeWindow();
         }
     }
 }

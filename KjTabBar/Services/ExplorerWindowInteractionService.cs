@@ -156,7 +156,7 @@ namespace KjTabBar.Services
         {
             RestorePreparedExplorerWindowForCreate(hwnd);
 
-            TabBarViewModel viewModel = new TabBarViewModel(hwnd, userSettings, _explorerService);
+            TabBarViewModel viewModel = new TabBarViewModel(hwnd, userSettings, _explorerService, initialPath);
             InitializeTabsForNewWindow(viewModel, initialPath, useInitialPathOnly);
 
             TabBarWindow tabBarWindow = _createTabBarWindow();

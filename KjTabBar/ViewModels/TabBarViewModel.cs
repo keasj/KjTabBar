@@ -134,6 +134,11 @@ namespace KjTabBar.ViewModels
         }
 
         public TabBarViewModel(IntPtr explorerHwnd, IUserSettings userSettings, IExplorerService explorerService)
+            : this(explorerHwnd, userSettings, explorerService, null)
+        {
+        }
+
+        internal TabBarViewModel(IntPtr explorerHwnd, IUserSettings userSettings, IExplorerService explorerService, string initialPath)
         {
             _userSettings = userSettings;
             _explorerService = explorerService;
@@ -146,7 +151,11 @@ namespace KjTabBar.ViewModels
             _explorerHwnd = explorerHwnd;
             _tabs = new ObservableCollection<TabItemViewModel>();
 
-            string currentPath = _explorerService.GetCurrentPath(explorerHwnd);
+            string currentPath = initialPath;
+            if (string.IsNullOrEmpty(currentPath))
+            {
+                currentPath = _explorerService.GetCurrentPath(explorerHwnd);
+            }
             if (string.IsNullOrEmpty(currentPath))
             {
                 currentPath = _explorerService.GetResolvedHomeFolderPath();

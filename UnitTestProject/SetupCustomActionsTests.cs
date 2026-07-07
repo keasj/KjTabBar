@@ -99,6 +99,38 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void ShouldTerminateKjTabBarProcess_Returns_True_When_Path_Matches()
+        {
+            Assert.IsTrue(SetupCustomActions.ShouldTerminateKjTabBarProcess(
+                @"C:\Program Files\KjTabBar\KjTabBar.exe",
+                @"c:\program files\KjTabBar\.\KjTabBar.exe"));
+        }
+
+        [TestMethod]
+        public void ShouldTerminateKjTabBarProcess_Returns_False_When_Different_Path_Is_Known()
+        {
+            Assert.IsFalse(SetupCustomActions.ShouldTerminateKjTabBarProcess(
+                @"C:\Program Files\KjTabBar\KjTabBar.exe",
+                @"C:\Other\KjTabBar.exe"));
+        }
+
+        [TestMethod]
+        public void ShouldTerminateKjTabBarProcess_Returns_True_When_Process_Path_Is_Unavailable()
+        {
+            Assert.IsTrue(SetupCustomActions.ShouldTerminateKjTabBarProcess(
+                @"C:\Program Files\KjTabBar\KjTabBar.exe",
+                null));
+        }
+
+        [TestMethod]
+        public void ShouldTerminateKjTabBarProcess_Returns_True_When_Installed_Path_Is_Unresolved()
+        {
+            Assert.IsTrue(SetupCustomActions.ShouldTerminateKjTabBarProcess(
+                null,
+                @"C:\Other\KjTabBar.exe"));
+        }
+
+        [TestMethod]
         public void TryResolveInstalledExecutablePath_Prefers_TargetDir_When_Provided()
         {
             string tempDir = Path.Combine(Path.GetTempPath(), "KjTabBar_SetupTests_" + System.Guid.NewGuid().ToString("N"));

@@ -82,6 +82,13 @@ Expected outputs:
 - `Setup\Release\setup.exe`
 - `Setup\Release\Setup.msi`
 
+Patch the built MSI so a running `KjTabBar.exe` is closed before Windows Installer runs `InstallValidate`.
+Without this patch, the Visual Studio setup project's InstallerClass custom action runs too late to prevent the FilesInUse dialog.
+
+```powershell
+.\tools\Patch-SetupMsiPreClose.ps1 -MsiPath 'Setup\Release\Setup.msi'
+```
+
 If the setup build fails with an unspecified Visual Studio error, check:
 
 - `C:\Users\<UserName>\AppData\Roaming\Microsoft\VisualStudio\<InstanceId>\ActivityLog.xml`

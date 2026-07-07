@@ -48,6 +48,42 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void ShouldHandleDestroyEvent_ReturnsTrue_ForTrackedExplorerWindowDestroy()
+        {
+            bool result = TabBarWindowRuntimeCoordinator.ShouldHandleDestroyEvent(
+                NativeMethods.EVENT_OBJECT_DESTROY,
+                (IntPtr)10,
+                0,
+                (IntPtr)10);
+
+            Assert.IsTrue(result);
+        }
+
+        [TestMethod]
+        public void ShouldHandleDestroyEvent_ReturnsFalse_ForChildObjectDestroy()
+        {
+            bool result = TabBarWindowRuntimeCoordinator.ShouldHandleDestroyEvent(
+                NativeMethods.EVENT_OBJECT_DESTROY,
+                (IntPtr)10,
+                1,
+                (IntPtr)10);
+
+            Assert.IsFalse(result);
+        }
+
+        [TestMethod]
+        public void ShouldHandleDestroyEvent_ReturnsFalse_ForDifferentExplorerWindow()
+        {
+            bool result = TabBarWindowRuntimeCoordinator.ShouldHandleDestroyEvent(
+                NativeMethods.EVENT_OBJECT_DESTROY,
+                (IntPtr)11,
+                0,
+                (IntPtr)10);
+
+            Assert.IsFalse(result);
+        }
+
+        [TestMethod]
         public void GetPositionTimerInterval_ReturnsFastInterval_WhenLocationHookIsMissing()
         {
             TimeSpan result = TabBarWindowRuntimeCoordinator.GetPositionTimerInterval(IntPtr.Zero);

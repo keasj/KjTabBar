@@ -37,6 +37,17 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void Constructor_Uses_InitialPath_Without_Querying_ExplorerPath()
+        {
+            CountingInitialPathExplorerService mockExplorer = new CountingInitialPathExplorerService();
+            TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), mockExplorer, @"C:\Resolved");
+
+            Assert.AreEqual(0, mockExplorer.GetCurrentPathCallCount);
+            Assert.AreEqual(@"C:\Resolved", vm.Tabs[0].Path);
+            Assert.AreEqual(@"C:\Resolved", vm.ActiveTab.Path);
+        }
+
+        [TestMethod]
         public void SettingsChanged_Updates_TabBarViewModel()
         {
             MockUserSettings mockSettings = new MockUserSettings
@@ -482,6 +493,22 @@ namespace UnitTestProject
                 {
                     return "MockFolder";
                 }
+            }
+        }
+
+        private sealed class CountingInitialPathExplorerService : MockExplorerService
+        {
+            public int GetCurrentPathCallCount { get; private set; }
+
+            public override string GetCurrentPath(IntPtr explorerHwnd)
+            {
+                GetCurrentPathCallCount++;
+                return @"C:\SlowCurrentPath";
+            }
+
+            public override string GetFolderName(string path)
+            {
+                return path;
             }
         }
 
