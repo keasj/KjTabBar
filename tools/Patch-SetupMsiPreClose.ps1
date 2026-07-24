@@ -213,6 +213,40 @@ function Confirm-CloseProcessCustomAction {
     }
 }
 
+function Set-RegularShortcutPolicy {
+    param(
+        [object]$Database
+    )
+
+    $propertyValue = Get-MsiScalar $Database "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='DISABLEADVTSHORTCUTS'"
+    if ([string]::IsNullOrEmpty($propertyValue)) {
+        Invoke-MsiSql $Database "INSERT INTO ``Property`` (``Property``, ``Value``) VALUES ('DISABLEADVTSHORTCUTS', '1')"
+    }
+    else {
+        Invoke-MsiSql $Database "UPDATE ``Property`` SET ``Value``='1' WHERE ``Property``='DISABLEADVTSHORTCUTS'"
+    }
+
+    Invoke-MsiSql $Database "UPDATE ``Shortcut`` SET ``Icon_``=NULL, ``IconIndex``=NULL"
+}
+
+function Confirm-RegularShortcutPolicy {
+    param(
+        [object]$Database
+    )
+
+    $propertyValue = Get-MsiScalar $Database "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='DISABLEADVTSHORTCUTS'"
+    $shortcutIcon = Get-MsiScalar $Database "SELECT ``Icon_`` FROM ``Shortcut`` WHERE ``Icon_`` IS NOT NULL"
+    $shortcutIconIndex = Get-MsiScalar $Database "SELECT ``IconIndex`` FROM ``Shortcut`` WHERE ``IconIndex`` IS NOT NULL"
+
+    if ($propertyValue -ne '1') {
+        throw 'DISABLEADVTSHORTCUTS was not set to 1.'
+    }
+
+    if (-not [string]::IsNullOrEmpty($shortcutIcon) -or -not [string]::IsNullOrEmpty($shortcutIconIndex)) {
+        throw 'Shortcut icon overrides were not removed.'
+    }
+}
+
 foreach ($path in $MsiPath) {
     $resolvedPath = (Resolve-Path $path).Path
     Write-Host "Patching MSI pre-close action: $resolvedPath"
@@ -240,6 +274,8 @@ foreach ($path in $MsiPath) {
         Add-PreValidateSequenceAction $database 'InstallExecuteSequence' $actionName $true
         Confirm-CloseProcessCustomAction $database $actionName $actionType $scriptBinaryName $actionTarget
         Confirm-PreValidateSequenceAction $database $actionName
+        Set-RegularShortcutPolicy $database
+        Confirm-RegularShortcutPolicy $database
 
         $database.GetType().InvokeMember('Commit', 'InvokeMethod', $null, $database, $null) | Out-Null
     }

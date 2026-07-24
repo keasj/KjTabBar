@@ -113,7 +113,6 @@ namespace KjTabBar
                 }
 
                 WaitForInstallerExit(installerProcessId, preferredSessionId);
-                SetupShortcutUpdater.UpdatePostInstallShortcuts(exePath, workingDirectory);
                 string targetSid = SetupEnvironmentResolver.TryGetExplorerOwnerSid(preferredSessionId);
                 SetupRegistryManager.RegisterStartupRunValue(exePath, preferredSessionId, targetSid);
                 StartInstalledApplicationThroughExplorer(exePath);
