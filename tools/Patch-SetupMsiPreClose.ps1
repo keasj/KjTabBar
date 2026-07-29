@@ -247,6 +247,44 @@ function Confirm-RegularShortcutPolicy {
     }
 }
 
+function Set-VersionIndependentUpgradePolicy {
+    param(
+        [object]$Database
+    )
+
+    $upgradeCode = Get-MsiScalar $Database "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='UpgradeCode'"
+    if ([string]::IsNullOrEmpty($upgradeCode)) {
+        throw 'UpgradeCode is missing from the Property table.'
+    }
+
+    $escapedUpgradeCode = ConvertTo-MsiSqlLiteral $upgradeCode
+    Invoke-MsiSql $Database "DELETE FROM ``Upgrade`` WHERE ``UpgradeCode``='$escapedUpgradeCode'"
+    Invoke-MsiSql $Database "INSERT INTO ``Upgrade`` (``UpgradeCode``, ``VersionMin``, ``VersionMax``, ``Language``, ``Attributes``, ``Remove``, ``ActionProperty``) VALUES ('$escapedUpgradeCode', '0.0.0', NULL, NULL, 256, NULL, 'PREVIOUSVERSIONSINSTALLED')"
+}
+
+function Confirm-VersionIndependentUpgradePolicy {
+    param(
+        [object]$Database
+    )
+
+    $upgradeCode = Get-MsiScalar $Database "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='UpgradeCode'"
+    $escapedUpgradeCode = ConvertTo-MsiSqlLiteral $upgradeCode
+    $versionMin = Get-MsiScalar $Database "SELECT ``VersionMin`` FROM ``Upgrade`` WHERE ``UpgradeCode``='$escapedUpgradeCode' AND ``ActionProperty``='PREVIOUSVERSIONSINSTALLED'"
+    $versionMax = Get-MsiScalar $Database "SELECT ``VersionMax`` FROM ``Upgrade`` WHERE ``UpgradeCode``='$escapedUpgradeCode' AND ``ActionProperty``='PREVIOUSVERSIONSINSTALLED'"
+    $attributes = Get-MsiScalar $Database "SELECT ``Attributes`` FROM ``Upgrade`` WHERE ``UpgradeCode``='$escapedUpgradeCode' AND ``ActionProperty``='PREVIOUSVERSIONSINSTALLED'"
+    $newerProductAction = Get-MsiScalar $Database "SELECT ``ActionProperty`` FROM ``Upgrade`` WHERE ``UpgradeCode``='$escapedUpgradeCode' AND ``ActionProperty``='NEWERPRODUCTFOUND'"
+
+    if ($versionMin -ne '0.0.0' -or -not [string]::IsNullOrEmpty($versionMax) -or [int]$attributes -ne 256) {
+        throw 'The version-independent Upgrade row was not configured as expected.'
+    }
+
+    if (-not [string]::IsNullOrEmpty($newerProductAction)) {
+        throw 'The newer-product blocking Upgrade row was not removed.'
+    }
+
+    Write-Host 'Upgrade policy replaces any installed KjTabBar version without requiring a manual uninstall.'
+}
+
 foreach ($path in $MsiPath) {
     $resolvedPath = (Resolve-Path $path).Path
     Write-Host "Patching MSI pre-close action: $resolvedPath"
@@ -276,6 +314,8 @@ foreach ($path in $MsiPath) {
         Confirm-PreValidateSequenceAction $database $actionName
         Set-RegularShortcutPolicy $database
         Confirm-RegularShortcutPolicy $database
+        Set-VersionIndependentUpgradePolicy $database
+        Confirm-VersionIndependentUpgradePolicy $database
 
         $database.GetType().InvokeMember('Commit', 'InvokeMethod', $null, $database, $null) | Out-Null
     }

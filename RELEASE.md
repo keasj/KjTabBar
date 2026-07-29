@@ -26,6 +26,8 @@ Important MSI upgrade rule:
 - Keep `UpgradeCode` unchanged. It is the stable family identifier used by `RemovePreviousVersions`.
 - If `ProductVersion` changes but `ProductCode` stays the same, Windows Installer can show: "Another version of this product is already installed."
 - Generate fresh GUIDs with `[guid]::NewGuid().ToString().ToUpper()`.
+- The post-build MSI patch detects and replaces any installed KjTabBar version, including the same or a newer version; manual uninstall is not required.
+- Re-running the exact same MSI uses Windows Installer maintenance/repair because its `ProductCode` is unchanged.
 
 Update these files before building:
 
@@ -82,7 +84,7 @@ Expected outputs:
 - `Setup\Release\setup.exe`
 - `Setup\Release\Setup.msi`
 
-Patch the built MSI so a running `KjTabBar.exe` is closed before Windows Installer runs `InstallValidate`.
+Patch the built MSI so a running `KjTabBar.exe` is closed before Windows Installer runs `InstallValidate`, and so any installed KjTabBar version is replaced automatically.
 Without this patch, the Visual Studio setup project's InstallerClass custom action runs too late to prevent the FilesInUse dialog.
 
 ```powershell

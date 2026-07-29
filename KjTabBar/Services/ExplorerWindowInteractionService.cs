@@ -273,7 +273,11 @@ namespace KjTabBar.Services
             TabItemViewModel targetTab = viewModel.FindTabByPath(initialPath);
             if (targetTab != null)
             {
-                if (!loadedSavedTabs)
+                if (loadedSavedTabs && useInitialPathOnly)
+                {
+                    viewModel.InsertTabWithPath(initialPath, viewModel.Tabs.Count, allowSpecialPath);
+                }
+                else
                 {
                     viewModel.SelectTab(targetTab);
                 }

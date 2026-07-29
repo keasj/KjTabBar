@@ -14,7 +14,7 @@ namespace KjTabBar.Services
         public void Initialize(Func<string, object> findResource, Action exitAction)
         {
             _trayIcon = new System.Windows.Forms.NotifyIcon();
-            _trayIcon.Text = GetProgramName();
+            _trayIcon.Text = GetTrayIconText();
             _trayIcon.Icon = LoadTrayIcon();
             _trayIcon.Visible = true;
 
@@ -84,6 +84,25 @@ namespace KjTabBar.Services
             catch (Exception ex)
             {
                 AppLogger.LogError("TrayIconService", "Failed to load assembly title for tray icon.", ex);
+            }
+
+            return programName;
+        }
+
+        private static string GetTrayIconText()
+        {
+            string programName = GetProgramName();
+            try
+            {
+                System.Version version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+                if (version != null)
+                {
+                    return programName + " v" + version.ToString();
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("TrayIconService", "Failed to load assembly version for tray icon.", ex);
             }
 
             return programName;

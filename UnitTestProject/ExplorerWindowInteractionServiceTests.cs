@@ -422,6 +422,48 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void InitializeTabsForNewWindow_AddsExplicitInitialPathAsNewTab_WhenItAlreadyExistsInSavedTabs()
+        {
+            string tabsFilePath = Path.Combine(
+                Path.GetTempPath(),
+                "KjTabBar.Tests." + Guid.NewGuid().ToString("N") + ".existing-initial.tabs.txt");
+
+            try
+            {
+                ProtectedTextStorage.SaveLines(tabsFilePath, new string[] { @"C:\SavedA", @"C:\DesktopLaunch" });
+
+                MockExplorerService explorerService = new MockExplorerService();
+                ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                    explorerService,
+                    new ExplorerWindowTrackingState(),
+                    new TabPersistenceService(tabsFilePath),
+                    delegate (IntPtr hwnd) { return string.Empty; },
+                    delegate (IntPtr hwnd) { },
+                    delegate (IntPtr hwnd) { },
+                    delegate (IntPtr hwnd) { },
+                    delegate { return null; },
+                    delegate { });
+
+                TabBarViewModel viewModel = new TabBarViewModel((IntPtr)403, new MockUserSettings(), explorerService);
+
+                service.InitializeTabsForNewWindow(viewModel, @"C:\DesktopLaunch", true);
+
+                Assert.AreEqual(3, viewModel.Tabs.Count);
+                Assert.AreEqual(@"C:\DesktopLaunch", viewModel.Tabs[1].Path);
+                Assert.AreEqual(@"C:\DesktopLaunch", viewModel.Tabs[2].Path);
+                Assert.AreSame(viewModel.Tabs[2], viewModel.ActiveTab);
+                Assert.AreEqual(@"C:\DesktopLaunch", viewModel.ActiveTab.Path);
+            }
+            finally
+            {
+                if (File.Exists(tabsFilePath))
+                {
+                    File.Delete(tabsFilePath);
+                }
+            }
+        }
+
+        [TestMethod]
         public void InitializeTabsForNewWindow_AddsControlPanelInitialPath_WhenSavedTabsExist()
         {
             string tabsFilePath = Path.Combine(

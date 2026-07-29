@@ -11,24 +11,17 @@ namespace KjTabBar.Helpers
 {
     internal static class AppLogger
     {
-#if DEBUG
         private static readonly object SyncRoot = new object();
         private static readonly Dictionary<string, DateTime> ThrottledLogTimes = new Dictionary<string, DateTime>(StringComparer.Ordinal);
-#endif
         private static readonly Regex WindowsPathRegex = new Regex("(?i)(?:[a-z]:\\\\|\\\\\\\\)[^\\r\\n\\\"'<>|]+", RegexOptions.Compiled | RegexOptions.CultureInvariant);
         private static readonly Regex SidRegex = new Regex(@"\bS-\d-(?:\d+-){1,14}\d+\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
-#if DEBUG
         private static readonly ConcurrentQueue<string> PendingLogEntries = new ConcurrentQueue<string>();
         private static readonly AutoResetEvent PendingLogSignal = new AutoResetEvent(false);
         private static readonly Thread LogWriterThread = new Thread(ProcessPendingLogEntries);
-#endif
         private const int MaxLoggedTextLength = 2048;
-#if DEBUG
         private const long MaxLogFileBytes = 1024L * 1024L;
         private const int MaxLogArchiveFiles = 3;
-#endif
 
-#if DEBUG
         static AppLogger()
         {
             LogWriterThread.IsBackground = true;
@@ -36,8 +29,8 @@ namespace KjTabBar.Helpers
             LogWriterThread.Start();
             AppDomain.CurrentDomain.ProcessExit += CurrentDomain_ProcessExit;
         }
-#endif
 
+        [System.Diagnostics.Conditional("DEBUG")]
         public static void LogInfo(string source, string message)
         {
 #if DEBUG
@@ -47,18 +40,15 @@ namespace KjTabBar.Helpers
 
         public static void LogError(string source, string message, Exception exception)
         {
-#if DEBUG
             Write("ERROR", source, message, exception);
-#endif
         }
 
         public static void LogErrorThrottled(string source, string key, string message, Exception exception, TimeSpan interval)
         {
-#if DEBUG
             WriteThrottled("ERROR", source, key, message, exception, interval);
-#endif
         }
 
+        [System.Diagnostics.Conditional("DEBUG")]
         public static void LogSlowOperation(string source, string key, string operation, TimeSpan elapsed, TimeSpan threshold, TimeSpan interval)
         {
 #if DEBUG
@@ -78,7 +68,6 @@ namespace KjTabBar.Helpers
 
         public static void Flush()
         {
-#if DEBUG
             try
             {
                 FlushPendingLogEntries();
@@ -86,7 +75,6 @@ namespace KjTabBar.Helpers
             catch
             {
             }
-#endif
         }
 
         internal static string SanitizeForLog(string text)
@@ -117,12 +105,7 @@ namespace KjTabBar.Helpers
             }
             catch
             {
-                if (text.Length > MaxLoggedTextLength)
-                {
-                    return text.Substring(0, MaxLoggedTextLength) + "...";
-                }
-
-                return text;
+                return "<log-text-unavailable>";
             }
         }
 
@@ -158,7 +141,6 @@ namespace KjTabBar.Helpers
             return currentFileBytes > maxLogFileBytes - pendingBytes;
         }
 
-#if DEBUG
         private static void WriteThrottled(string level, string source, string key, string message, Exception exception, TimeSpan interval)
         {
             if (string.IsNullOrEmpty(key))
@@ -360,6 +342,5 @@ namespace KjTabBar.Helpers
 
             return null;
         }
-#endif
     }
 }
