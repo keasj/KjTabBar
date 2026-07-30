@@ -11,19 +11,105 @@ $previousActionBinaryName = 'KjTabBarCloseRunningProcessBinary'
 $actionType = 6
 $actionTarget = 'CloseRunningKjTabBar'
 $scriptContent = @"
+Function GetRunningKjTabBarCount(service)
+    On Error Resume Next
+    Dim processes
+
+    Err.Clear
+    Set processes = service.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name='KjTabBar.exe'")
+    If Err.Number <> 0 Then
+        GetRunningKjTabBarCount = -1
+        Exit Function
+    End If
+
+    Err.Clear
+    GetRunningKjTabBarCount = processes.Count
+    If Err.Number <> 0 Then
+        GetRunningKjTabBarCount = -1
+    End If
+End Function
+
+Function WaitForKjTabBarExit(service)
+    On Error Resume Next
+    Dim attempt
+    Dim deletionEvent
+    Dim eventSource
+    Dim runningCount
+
+    runningCount = GetRunningKjTabBarCount(service)
+    If runningCount = 0 Then
+        WaitForKjTabBarExit = True
+        Exit Function
+    End If
+    If runningCount < 0 Then
+        WaitForKjTabBarExit = False
+        Exit Function
+    End If
+
+    Err.Clear
+    Set eventSource = service.ExecNotificationQuery("SELECT * FROM __InstanceDeletionEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_Process' AND TargetInstance.Name='KjTabBar.exe'")
+    If Err.Number <> 0 Then
+        WaitForKjTabBarExit = False
+        Exit Function
+    End If
+
+    For attempt = 1 To 10
+        Err.Clear
+        Set deletionEvent = eventSource.NextEvent(1000)
+        Err.Clear
+
+        runningCount = GetRunningKjTabBarCount(service)
+        If runningCount = 0 Then
+            WaitForKjTabBarExit = True
+            Exit Function
+        End If
+        If runningCount < 0 Then
+            WaitForKjTabBarExit = False
+            Exit Function
+        End If
+    Next
+
+    WaitForKjTabBarExit = False
+End Function
+
 Function CloseRunningKjTabBar()
     On Error Resume Next
-    Dim service
-    Dim processes
     Dim process
+    Dim processes
+    Dim runningCount
+    Dim service
+
+    CloseRunningKjTabBar = 3
+    Err.Clear
     Set service = GetObject("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
-    If Err.Number = 0 Then
-        Set processes = service.ExecQuery("SELECT * FROM Win32_Process WHERE Name='KjTabBar.exe'")
-        For Each process In processes
-            process.Terminate()
-        Next
+    If Err.Number <> 0 Then
+        Exit Function
     End If
-    CloseRunningKjTabBar = 1
+
+    runningCount = GetRunningKjTabBarCount(service)
+    If runningCount < 0 Then
+        Exit Function
+    End If
+    If runningCount = 0 Then
+        CloseRunningKjTabBar = 1
+        Exit Function
+    End If
+
+    Err.Clear
+    Set processes = service.ExecQuery("SELECT * FROM Win32_Process WHERE Name='KjTabBar.exe'")
+    If Err.Number <> 0 Then
+        Exit Function
+    End If
+
+    For Each process In processes
+        Err.Clear
+        process.Terminate()
+        Err.Clear
+    Next
+
+    If WaitForKjTabBarExit(service) Then
+        CloseRunningKjTabBar = 1
+    End If
 End Function
 "@
 
