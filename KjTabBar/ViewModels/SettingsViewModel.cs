@@ -82,7 +82,7 @@ namespace KjTabBar.ViewModels
             {
                 AppLogger.LogError("SettingsViewModel", "Failed to read assembly metadata for settings window.", ex);
                 ProgramName = "KjTabBar";
-                Version = "v1.2.5.0";
+                Version = "v1.2.6.0";
             }
         }
 

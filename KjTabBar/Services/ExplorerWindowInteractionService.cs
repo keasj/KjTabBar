@@ -473,7 +473,13 @@ namespace KjTabBar.Services
                 _windowTracking.HiddenOriginalRects.Remove(newExplorerHwnd);
             }
 
-            AlignExplorerWindowToPreviousRect(newExplorerHwnd, previousExplorerRect);
+            NativeMethods.RECT targetExplorerRect = previousExplorerRect;
+            if (!NativeMethods.IsUsableWindowRestoreRect(targetExplorerRect) && hadHiddenOriginalRect)
+            {
+                targetExplorerRect = hiddenOriginalRect;
+            }
+
+            AlignExplorerWindowToPreviousRect(newExplorerHwnd, targetExplorerRect);
 
             if (_rebindExplorerWindow == null || !_rebindExplorerWindow(targetViewModel, newExplorerHwnd))
             {
@@ -598,7 +604,7 @@ namespace KjTabBar.Services
                 return;
             }
 
-            if (previousExplorerRect.Width <= 0 || previousExplorerRect.Height <= 0)
+            if (!NativeMethods.IsUsableWindowRestoreRect(previousExplorerRect))
             {
                 return;
             }

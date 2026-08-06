@@ -26,6 +26,7 @@ namespace UnitTestProject
         public Func<string, string> NormalizeShellNamespacePathFunc { get; set; }
         public Func<List<IntPtr>> FindExplorerWindowsFunc { get; set; }
         public Func<IntPtr, string> GetCurrentPathFunc { get; set; }
+        public Func<IntPtr, KjTabBar.Helpers.NativeMethods.RECT> GetExplorerWindowRectFunc { get; set; }
         public bool OpenInNewWindowResult { get; set; } = true;
         public string OpenedInNewWindowPath { get; private set; }
 
@@ -52,6 +53,11 @@ namespace UnitTestProject
 
         public KjTabBar.Helpers.NativeMethods.RECT GetExplorerWindowRect(IntPtr hwnd)
         {
+            if (GetExplorerWindowRectFunc != null)
+            {
+                return GetExplorerWindowRectFunc(hwnd);
+            }
+
             return new KjTabBar.Helpers.NativeMethods.RECT { Left = 0, Top = 0, Right = 800, Bottom = 600 };
         }
 

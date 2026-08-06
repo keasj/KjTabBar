@@ -229,6 +229,16 @@ namespace KjTabBar.Helpers
             public int Height { get { return Bottom - Top; } }
         }
 
+        public const int HiddenWindowCoordinate = -32000;
+
+        public static bool IsUsableWindowRestoreRect(RECT rect)
+        {
+            return rect.Width > 0 &&
+                   rect.Height > 0 &&
+                   rect.Left > HiddenWindowCoordinate &&
+                   rect.Top > HiddenWindowCoordinate;
+        }
+
         [StructLayout(LayoutKind.Sequential)]
         public struct POINT
         {

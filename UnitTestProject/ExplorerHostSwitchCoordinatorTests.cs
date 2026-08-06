@@ -95,6 +95,69 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void CompletePendingReveal_DoesNotMoveParkedHostToOffscreenCurrentRect()
+        {
+            MockExplorerService explorerService = new MockExplorerService();
+            explorerService.IsControlPanelPathFunc = delegate (string path)
+            {
+                return path == explorerService.PowerOptionsPath;
+            };
+            explorerService.GetCurrentPathFunc = delegate (IntPtr hwnd)
+            {
+                return hwnd == (IntPtr)200 ? explorerService.PowerOptionsPath : @"C:\Work";
+            };
+
+            ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState();
+            trackingState.RememberParkedExplorerOrigin((IntPtr)200, (IntPtr)100);
+
+            IntPtr shownHwnd = IntPtr.Zero;
+            int moveCallCount = 0;
+            ExplorerHostSwitchCoordinator coordinator = new ExplorerHostSwitchCoordinator(
+                explorerService,
+                trackingState,
+                delegate (TabBarViewModel vm, IntPtr hwnd)
+                {
+                    vm.SetExplorerHwnd(hwnd);
+                    return true;
+                },
+                delegate (IntPtr hwnd) { shownHwnd = hwnd; },
+                delegate (IntPtr hwnd, NativeMethods.RECT rect) { moveCallCount++; },
+                delegate (IntPtr hwnd) { },
+                delegate (IntPtr hwnd) { return true; },
+                delegate { return explorerService.FindExplorerWindows(); },
+                delegate (IntPtr hwnd) { return explorerService.GetCurrentPath(hwnd); },
+                delegate (IntPtr hwnd)
+                {
+                    if (hwnd == (IntPtr)200)
+                    {
+                        return new NativeMethods.RECT
+                        {
+                            Left = -32000,
+                            Top = -32000,
+                            Right = -31839,
+                            Bottom = -31757
+                        };
+                    }
+
+                    return null;
+                },
+                delegate (string path) { return explorerService.OpenInNewWindow(path); },
+                delegate (int millisecondsTimeout) { });
+
+            TabBarViewModel viewModel = new TabBarViewModel((IntPtr)200, new MockUserSettings(), explorerService);
+            viewModel.InsertTabWithPath(explorerService.PowerOptionsPath, 1, true);
+            viewModel.SelectTab(viewModel.Tabs[1]);
+
+            bool prepared = coordinator.PrepareForPath(viewModel, @"C:\Work");
+            coordinator.CompletePendingReveal();
+
+            Assert.IsTrue(prepared);
+            Assert.AreEqual((IntPtr)100, shownHwnd);
+            Assert.AreEqual(0, moveCallCount);
+            Assert.AreEqual((IntPtr)100, viewModel.ExplorerHwnd);
+        }
+
+        [TestMethod]
         public void PrepareForPath_DoesNothing_ForControlPanelPath()
         {
             MockExplorerService explorerService = new MockExplorerService();

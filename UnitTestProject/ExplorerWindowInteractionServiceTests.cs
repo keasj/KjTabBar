@@ -195,6 +195,70 @@ namespace UnitTestProject
             Assert.AreEqual((IntPtr)100, trackingState.ParkedExplorerOrigins[(IntPtr)202]);
         }
 
+        [TestMethod]
+        public void AbsorbExplorerWindow_UsesHiddenOriginalRect_WhenManagedHostRectIsOffscreen()
+        {
+            MockExplorerService explorerService = new MockExplorerService();
+            explorerService.IsControlPanelPathFunc = delegate (string path)
+            {
+                return path == explorerService.PowerOptionsPath;
+            };
+            explorerService.GetExplorerWindowRectFunc = delegate (IntPtr hwnd)
+            {
+                return new NativeMethods.RECT
+                {
+                    Left = -32000,
+                    Top = -32000,
+                    Right = -31839,
+                    Bottom = -31757
+                };
+            };
+
+            ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState();
+            trackingState.HiddenPendingAbsorb[(IntPtr)200] = DateTime.UtcNow;
+            trackingState.HiddenOriginalRects[(IntPtr)200] = new NativeMethods.RECT
+            {
+                Left = 100,
+                Top = 200,
+                Right = 900,
+                Bottom = 800
+            };
+
+            NativeMethods.RECT movedRect = default(NativeMethods.RECT);
+            ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                explorerService,
+                trackingState,
+                TestTabPersistenceFactory.Create(),
+                delegate (IntPtr hwnd) { return string.Empty; },
+                delegate (IntPtr hwnd) { },
+                delegate (IntPtr hwnd) { },
+                delegate (IntPtr hwnd, NativeMethods.RECT rect) { movedRect = rect; },
+                delegate (TabBarViewModel vm, IntPtr hwnd)
+                {
+                    vm.SetExplorerHwnd(hwnd);
+                    return true;
+                },
+                delegate (IntPtr hwnd) { },
+                delegate { return null; },
+                delegate (KjTabBar.Views.TabBarWindow window) { });
+
+            TabBarViewModel targetViewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorerService);
+
+            bool absorbed = service.AbsorbExplorerWindow(
+                (IntPtr)200,
+                targetViewModel,
+                explorerService.PowerOptionsPath,
+                true,
+                true,
+                delegate (IntPtr hwnd) { });
+
+            Assert.IsTrue(absorbed);
+            Assert.AreEqual(100, movedRect.Left);
+            Assert.AreEqual(200, movedRect.Top);
+            Assert.AreEqual(800, movedRect.Width);
+            Assert.AreEqual(600, movedRect.Height);
+        }
+
 
 
         [TestMethod]

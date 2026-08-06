@@ -201,8 +201,7 @@ namespace KjTabBar.Services
                 NativeMethods.ShowWindow(currentExplorerHwnd, NativeMethods.SW_HIDE);
                 _pendingRevealExplorerHwnd = parkedExplorerHwnd;
                 if (currentExplorerRect.HasValue &&
-                    currentExplorerRect.Value.Width > 0 &&
-                    currentExplorerRect.Value.Height > 0)
+                    NativeMethods.IsUsableWindowRestoreRect(currentExplorerRect.Value))
                 {
                     _pendingRevealHasOriginalRect = true;
                     _pendingRevealOriginalRect = currentExplorerRect.Value;
@@ -309,15 +308,15 @@ namespace KjTabBar.Services
                 NativeMethods.ShowWindow(currentExplorerHwnd, NativeMethods.SW_HIDE);
                 _pendingRevealExplorerHwnd = newExplorerHwnd;
                 if (currentExplorerRect.HasValue &&
-                    currentExplorerRect.Value.Width > 0 &&
-                    currentExplorerRect.Value.Height > 0)
+                    NativeMethods.IsUsableWindowRestoreRect(currentExplorerRect.Value))
                 {
                     _pendingRevealHasOriginalRect = true;
                     _pendingRevealOriginalRect = currentExplorerRect.Value;
                 }
                 else
                 {
-                    _pendingRevealHasOriginalRect = hadHiddenOriginalRect;
+                    _pendingRevealHasOriginalRect = hadHiddenOriginalRect &&
+                        NativeMethods.IsUsableWindowRestoreRect(hiddenOriginalRect);
                     _pendingRevealOriginalRect = hiddenOriginalRect;
                 }
                 AppLogger.LogInfo(
@@ -380,8 +379,7 @@ namespace KjTabBar.Services
                 string.Format("CompletePendingReveal hwnd={0}", pendingRevealExplorerHwnd));
 
             if (pendingRevealHasOriginalRect &&
-                pendingRevealOriginalRect.Width > 0 &&
-                pendingRevealOriginalRect.Height > 0 &&
+                NativeMethods.IsUsableWindowRestoreRect(pendingRevealOriginalRect) &&
                 _moveExplorerWindow != null)
             {
                 _moveExplorerWindow(pendingRevealExplorerHwnd, pendingRevealOriginalRect);

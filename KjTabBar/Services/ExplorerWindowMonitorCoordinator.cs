@@ -217,7 +217,14 @@ namespace KjTabBar.Services
 
         private static void MoveWindowOffscreenCore(IntPtr hwnd)
         {
-            NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, -32000, -32000, 0, 0, NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER);
+            NativeMethods.SetWindowPos(
+                hwnd,
+                IntPtr.Zero,
+                NativeMethods.HiddenWindowCoordinate,
+                NativeMethods.HiddenWindowCoordinate,
+                0,
+                0,
+                NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER);
         }
 
         private IntPtr GetRootWindowOrSelf(IntPtr hwnd)
