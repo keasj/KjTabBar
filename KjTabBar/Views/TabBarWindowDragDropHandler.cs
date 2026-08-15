@@ -376,9 +376,9 @@ namespace KjTabBar.Views
                     shf.fFlags = NativeMethods.FOF_ALLOWUNDO;
 
                     int result = NativeMethods.SHFileOperation(ref shf);
-                    if (result != 0 || shf.fAnyOperationsAborted)
+                    if (result != 0 && !shf.fAnyOperationsAborted)
                     {
-                        AppLogger.LogInfo("TabBarWindowDragDropHandler", "SHFileOperation reported failure or cancellation.");
+                        AppLogger.LogInfo("TabBarWindowDragDropHandler", "SHFileOperation reported failure.");
                         _window.Dispatcher.BeginInvoke(new Action(() =>
                         {
                             string errorMessage = _window.TryFindResource("FileOperationCompleteErrorMessage") as string ?? "The file operation could not be completed.";

@@ -10,6 +10,8 @@ $scriptBinaryName = 'KjTabBarCloseRunningProcessScript'
 $previousActionBinaryName = 'KjTabBarCloseRunningProcessBinary'
 $actionType = 6
 $actionTarget = 'CloseRunningKjTabBar'
+$managedInstallActionName = '_E2E8DF0E_1F4F_45B4_A665_76E7300B4B0F.install'
+$commitCustomActionFlag = 0x0200
 $scriptContent = @"
 Function GetRunningKjTabBarCount(service)
     On Error Resume Next
@@ -274,6 +276,30 @@ function Confirm-PreValidateSequenceAction {
     Write-Host "$ActionName scheduled before InstallValidate: $actionSequence < $installValidateSequence"
 }
 
+function Set-ManagedInstallCommitPolicy {
+    param(
+        [object]$Database,
+        [string]$ManagedInstallActionName,
+        [int]$CommitFlag
+    )
+
+    $escapedManagedInstallAction = ConvertTo-MsiSqlLiteral $ManagedInstallActionName
+    $currentType = Get-MsiScalar $Database "SELECT ``Type`` FROM ``CustomAction`` WHERE ``Action``='$escapedManagedInstallAction'"
+    if ([string]::IsNullOrEmpty($currentType)) {
+        throw "$ManagedInstallActionName does not have a CustomAction type."
+    }
+
+    [int]$commitType = [int]$currentType -bor $CommitFlag
+    Invoke-MsiSql $Database "UPDATE ``CustomAction`` SET ``Type``=$commitType WHERE ``Action``='$escapedManagedInstallAction'"
+
+    $actualType = Get-MsiScalar $Database "SELECT ``Type`` FROM ``CustomAction`` WHERE ``Action``='$escapedManagedInstallAction'"
+    if (([int]$actualType -band $CommitFlag) -ne $CommitFlag) {
+        throw "$ManagedInstallActionName was not configured as a commit custom action."
+    }
+
+    Write-Host "$ManagedInstallActionName runs only after the installation transaction commits."
+}
+
 function Confirm-CloseProcessCustomAction {
     param(
         [object]$Database,
@@ -398,6 +424,7 @@ foreach ($path in $MsiPath) {
         Add-PreValidateSequenceAction $database 'InstallExecuteSequence' $actionName $true
         Confirm-CloseProcessCustomAction $database $actionName $actionType $scriptBinaryName $actionTarget
         Confirm-PreValidateSequenceAction $database $actionName
+        Set-ManagedInstallCommitPolicy $database $managedInstallActionName $commitCustomActionFlag
         Set-RegularShortcutPolicy $database
         Confirm-RegularShortcutPolicy $database
         Set-VersionIndependentUpgradePolicy $database
