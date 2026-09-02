@@ -40,6 +40,8 @@ namespace KjTabBar.Models
                 return false;
             }
 
+            PruneShortcutTargetCache(desktopPath, shortcutFiles);
+
             for (int i = 0; i < shortcutFiles.Length; i++)
             {
                 string resolvedPath = ResolveShortcutTargetCached(explorerService, shortcutFiles[i]);
@@ -66,6 +68,37 @@ namespace KjTabBar.Models
             lock (ShortcutTargetCacheSync)
             {
                 ShortcutTargetCache.Clear();
+            }
+        }
+
+        internal static int GetShortcutTargetCacheCountForTests()
+        {
+            lock (ShortcutTargetCacheSync)
+            {
+                return ShortcutTargetCache.Count;
+            }
+        }
+
+        private static void PruneShortcutTargetCache(string desktopPath, string[] currentShortcutFiles)
+        {
+            HashSet<string> currentShortcuts = new HashSet<string>(currentShortcutFiles, StringComparer.OrdinalIgnoreCase);
+            List<string> staleShortcuts = new List<string>();
+            lock (ShortcutTargetCacheSync)
+            {
+                foreach (string shortcutPath in ShortcutTargetCache.Keys)
+                {
+                    string shortcutDirectory = Path.GetDirectoryName(shortcutPath);
+                    if (string.Equals(shortcutDirectory, desktopPath, StringComparison.OrdinalIgnoreCase) &&
+                        !currentShortcuts.Contains(shortcutPath))
+                    {
+                        staleShortcuts.Add(shortcutPath);
+                    }
+                }
+
+                for (int i = 0; i < staleShortcuts.Count; i++)
+                {
+                    ShortcutTargetCache.Remove(staleShortcuts[i]);
+                }
             }
         }
 
@@ -154,7 +187,8 @@ namespace KjTabBar.Models
             usersRelativePath = null;
             if (string.IsNullOrEmpty(normalizedPath)) return false;
 
-            // ドライブレターまたはネットワーク共有直下の "Users" フォルダか判定する
+            // ドライブレターまたはネットワーク共有直下の "Users" フォルダか判定し、
+            // ドライブだけを無視できるようにユーザー名を含む相対パスを返す。
             // "C:\Users\..." や "E:\Users\..." などの形式のみマッチさせる (単純な "\Users\" 検索による誤爆を防ぐ)
             if (normalizedPath.Length >= 3 && normalizedPath[1] == ':' && normalizedPath[2] == '\\')
             {
@@ -165,7 +199,7 @@ namespace KjTabBar.Models
                     int separatorIndex = relativeToUsers.IndexOf('\\');
                     if (separatorIndex >= 0 && separatorIndex + 1 < relativeToUsers.Length)
                     {
-                        usersRelativePath = relativeToUsers.Substring(separatorIndex + 1);
+                        usersRelativePath = withoutDrive;
                         return true;
                     }
                 }
@@ -186,7 +220,7 @@ namespace KjTabBar.Models
                             int separatorIndex = relativeToUsers.IndexOf('\\');
                             if (separatorIndex >= 0 && separatorIndex + 1 < relativeToUsers.Length)
                             {
-                                usersRelativePath = relativeToUsers.Substring(separatorIndex + 1);
+                                usersRelativePath = folder;
                                 return true;
                             }
                         }

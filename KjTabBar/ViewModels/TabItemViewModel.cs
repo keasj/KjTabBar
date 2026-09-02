@@ -1,6 +1,7 @@
 using KjTabBar.Models;
 using KjTabBar.Helpers;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -10,6 +11,10 @@ namespace KjTabBar.ViewModels
 {
     public class TabItemViewModel : ViewModelBase
     {
+        private const int IconCacheCapacity = 256;
+        private static readonly object IconCacheSync = new object();
+        private static readonly Dictionary<string, ImageSource> IconCache = new Dictionary<string, ImageSource>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Queue<string> IconCacheOrder = new Queue<string>();
         private string _title;
         private Models.IExplorerService _explorerService;
         private string _path;
@@ -35,6 +40,11 @@ namespace KjTabBar.ViewModels
             get { return _path; }
             set
             {
+                if (string.Equals(_path, value, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
                 _path = value;
                 OnPropertyChanged("Path");
                 UpdateIconSource();
@@ -96,6 +106,13 @@ namespace KjTabBar.ViewModels
                 if (string.IsNullOrEmpty(normalizedPath))
                 {
                     IconSource = null;
+                    return;
+                }
+
+                ImageSource cachedIcon;
+                if (TryGetCachedIcon(normalizedPath, out cachedIcon))
+                {
+                    IconSource = cachedIcon;
                     return;
                 }
 
@@ -207,6 +224,7 @@ namespace KjTabBar.ViewModels
                         BitmapSizeOptions.FromEmptyOptions());
                     bitmap.Freeze();
                     IconSource = bitmap;
+                    AddCachedIcon(normalizedPath, bitmap);
                 }
                 finally
                 {
@@ -227,6 +245,34 @@ namespace KjTabBar.ViewModels
                 {
                     NativeMethods.ILFree(fallbackPidl);
                 }
+            }
+        }
+
+        private static bool TryGetCachedIcon(string normalizedPath, out ImageSource iconSource)
+        {
+            lock (IconCacheSync)
+            {
+                return IconCache.TryGetValue(normalizedPath, out iconSource);
+            }
+        }
+
+        private static void AddCachedIcon(string normalizedPath, ImageSource iconSource)
+        {
+            lock (IconCacheSync)
+            {
+                if (IconCache.ContainsKey(normalizedPath))
+                {
+                    IconCache[normalizedPath] = iconSource;
+                    return;
+                }
+
+                while (IconCache.Count >= IconCacheCapacity && IconCacheOrder.Count > 0)
+                {
+                    IconCache.Remove(IconCacheOrder.Dequeue());
+                }
+
+                IconCache[normalizedPath] = iconSource;
+                IconCacheOrder.Enqueue(normalizedPath);
             }
         }
     }

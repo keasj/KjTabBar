@@ -78,11 +78,13 @@ namespace KjTabBar.Services
 
         public void ClearAndCloseAll()
         {
-            foreach (KeyValuePair<IntPtr, TabBarWindow> kvp in _tabBars)
-            {
-                try { kvp.Value.Close(); } catch (Exception ex) { AppLogger.LogError("TabBarRegistry", "Failed to close a tab bar window during exit.", ex); }
-            }
+            List<TabBarWindow> windows = new List<TabBarWindow>(_tabBars.Values);
             _tabBars.Clear();
+
+            for (int i = 0; i < windows.Count; i++)
+            {
+                try { windows[i].Close(); } catch (Exception ex) { AppLogger.LogError("TabBarRegistry", "Failed to close a tab bar window during exit.", ex); }
+            }
         }
 
         public void RemoveInvalidWindows(List<IntPtr> explorerWindows, Action<TabBarViewModel> beforeClose = null)

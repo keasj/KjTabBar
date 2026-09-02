@@ -613,7 +613,8 @@ namespace KjTabBar.ViewModels
             {
                 path = _explorerService.GetResolvedHomeFolderPath();
                 tab.Path = path;
-                tab.Title = _explorerService.GetFolderName(path);
+                tab.BaseTitle = _explorerService.GetFolderName(path);
+                tab.Title = tab.BaseTitle;
                 shouldUpdateTitles = true;
             }
 

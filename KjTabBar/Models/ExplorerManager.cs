@@ -117,7 +117,15 @@ namespace KjTabBar.Models
                     _shellItemPathResolver = new ShellItemPathResolver(NormalizeKnownPath),
                     AppLogger.LogErrorThrottled),
                 _shellWindowNavigator = new ShellWindowNavigator(
-                    delegate (object obj, string methodName, object[] args) { return ShellWindowComInterop.InvokeComMethod(obj, methodName, args); },
+                    delegate (object obj, string methodName, object[] args)
+                    {
+                        return obj.GetType().InvokeMember(
+                            methodName,
+                            System.Reflection.BindingFlags.InvokeMethod,
+                            null,
+                            obj,
+                            args);
+                    },
                     delegate (object obj, string methodName, object[] args)
                     {
                         obj.GetType().InvokeMember(

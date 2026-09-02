@@ -29,7 +29,7 @@ Windows エクスプローラー（`explorer.exe`）を独自のタブバーで�
 ## 動作環境
 
 - OS: Windows 10 / Windows 11
-- ランタイム: .NET 環境 (仕様に合わせてご準備ください)
+- ランタイム: .NET Framework 4.8.1
 
 ## 使い方
 

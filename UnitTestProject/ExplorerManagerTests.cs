@@ -349,8 +349,9 @@ namespace UnitTestProject
                 delegate (IntPtr pidl) { return 0u; },
                 delegate (IntPtr pidl) { });
 
-            navigator.Navigate(new object(), "::{TestPath}");
+            bool navigated = navigator.Navigate(new object(), "::{TestPath}");
 
+            Assert.IsTrue(navigated);
             Assert.AreEqual("Navigate", invokedMethod);
             Assert.AreEqual("::{TestPath}", invokedArgs[0]);
         }
@@ -380,8 +381,9 @@ namespace UnitTestProject
                     delegate (IntPtr currentPidl) { return 4u; },
                     delegate (IntPtr currentPidl) { });
 
-                navigator.Navigate(new object(), "::{TestPath}");
+                bool navigated = navigator.Navigate(new object(), "::{TestPath}");
 
+                Assert.IsTrue(navigated);
                 Assert.AreEqual("Navigate2", invokedMethod);
                 Assert.IsInstanceOfType(invokedArgs[0], typeof(byte[]));
             }
@@ -389,6 +391,18 @@ namespace UnitTestProject
             {
                 System.Runtime.InteropServices.Marshal.FreeCoTaskMem(pidl);
             }
+        }
+
+        [TestMethod]
+        public void Navigate_Returns_False_When_Normal_Path_Invocation_Fails()
+        {
+            ShellWindowNavigator navigator = new ShellWindowNavigator(
+                delegate { throw new InvalidOperationException("Navigate failed"); },
+                delegate { });
+
+            bool navigated = navigator.Navigate(new object(), @"C:\Folder");
+
+            Assert.IsFalse(navigated);
         }
 
         [TestMethod]

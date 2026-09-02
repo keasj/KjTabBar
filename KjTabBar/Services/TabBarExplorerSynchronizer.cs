@@ -147,7 +147,8 @@ namespace KjTabBar.Services
                             _viewModel.SetActiveTabOnly(cancelledTab);
                         }
                         cancelledTab.Path = currentPath;
-                        cancelledTab.Title = _explorerService.GetFolderName(currentPath);
+                        cancelledTab.BaseTitle = _explorerService.GetFolderName(currentPath);
+                        cancelledTab.Title = cancelledTab.BaseTitle;
                         shouldUpdateTitles = true;
                         _viewModel.ClearCancelledNavigationTracking();
                         return;

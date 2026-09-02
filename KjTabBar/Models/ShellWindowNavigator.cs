@@ -38,42 +38,51 @@ namespace KjTabBar.Models
             _freePidl = freePidl;
         }
 
-        public void Navigate(object window, string navigatePath)
+        public bool Navigate(object window, string navigatePath)
         {
             if (window == null || string.IsNullOrEmpty(navigatePath))
             {
-                return;
+                return false;
             }
 
-            if (!navigatePath.StartsWith("::{", StringComparison.OrdinalIgnoreCase))
+            try
             {
+                if (!navigatePath.StartsWith("::{", StringComparison.OrdinalIgnoreCase))
+                {
+                    _invokeComMethod(window, "Navigate", new object[] { navigatePath });
+                    return true;
+                }
+
+                Tuple<int, IntPtr> parseResult = _parseDisplayName(navigatePath);
+                IntPtr pidl = parseResult != null ? parseResult.Item2 : IntPtr.Zero;
+                if (parseResult != null && parseResult.Item1 == 0 && pidl != IntPtr.Zero)
+                {
+                    try
+                    {
+                        uint size = _getPidlSize(pidl);
+                        byte[] pidlBytes = new byte[size];
+                        Marshal.Copy(pidl, pidlBytes, 0, (int)size);
+                        object url = pidlBytes;
+                        object flags = 0;
+                        object targetFrame = null;
+                        _invokeNavigate2(window, "Navigate2", new object[] { url, flags, targetFrame });
+                    }
+                    finally
+                    {
+                        _freePidl(pidl);
+                    }
+
+                    return true;
+                }
+
                 _invokeComMethod(window, "Navigate", new object[] { navigatePath });
-                return;
+                return true;
             }
-
-            Tuple<int, IntPtr> parseResult = _parseDisplayName(navigatePath);
-            IntPtr pidl = parseResult != null ? parseResult.Item2 : IntPtr.Zero;
-            if (parseResult != null && parseResult.Item1 == 0 && pidl != IntPtr.Zero)
+            catch (Exception ex)
             {
-                try
-                {
-                    uint size = _getPidlSize(pidl);
-                    byte[] pidlBytes = new byte[size];
-                    Marshal.Copy(pidl, pidlBytes, 0, (int)size);
-                    object url = pidlBytes;
-                    object flags = 0;
-                    object targetFrame = null;
-                    _invokeNavigate2(window, "Navigate2", new object[] { url, flags, targetFrame });
-                }
-                finally
-                {
-                    _freePidl(pidl);
-                }
-
-                return;
+                AppLogger.LogErrorThrottled("ShellWindowNavigator", "NavigateFailed", "Failed to invoke Explorer navigation.", ex, TimeSpan.FromMinutes(5));
+                return false;
             }
-
-            _invokeComMethod(window, "Navigate", new object[] { navigatePath });
         }
 
         private static Tuple<int, IntPtr> ParseDisplayName(string path)

@@ -23,7 +23,7 @@ namespace UnitTestProject
             string path = @"C:\Users\username\Desktop\Folder";
             bool result = ExplorerAbsorptionLogic.TryGetUsersRelativePath(path, out string relative);
             Assert.IsTrue(result);
-            Assert.AreEqual(@"Desktop\Folder", relative);
+            Assert.AreEqual(@"Users\username\Desktop\Folder", relative);
         }
 
         [TestMethod]
@@ -79,6 +79,17 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void AreEquivalentDesktopShortcutTargetPath_Does_Not_Match_Different_Users()
+        {
+            string path1 = @"C:\Users\user1\Documents\Test";
+            string path2 = @"E:\Users\user2\Documents\Test";
+
+            bool result = ExplorerAbsorptionLogic.AreEquivalentDesktopShortcutTargetPath(path1, path2);
+
+            Assert.IsFalse(result);
+        }
+
+        [TestMethod]
         public void ShouldAbsorbDesktopOriginPath_Absorbs_Special_Shell_Path()
         {
             bool result = ExplorerAbsorptionLogic.ShouldAbsorbDesktopOriginPath(false, false, false, true);
@@ -129,6 +140,32 @@ namespace UnitTestProject
                 Assert.IsTrue(ExplorerAbsorptionLogic.HasShortcutToPathInDesktop(explorerService, desktopPath, @"C:\Target"));
 
                 Assert.AreEqual(2, explorerService.ResolveShortcutTargetCallCount);
+            }
+            finally
+            {
+                Directory.Delete(desktopPath, true);
+                ExplorerAbsorptionLogic.ClearShortcutTargetCacheForTests();
+            }
+        }
+
+        [TestMethod]
+        public void HasShortcutToPathInDesktop_Prunes_Deleted_Shortcuts_From_Cache()
+        {
+            string desktopPath = CreateTemporaryDesktopWithShortcut("first.lnk");
+            string deletedShortcutPath = Path.Combine(desktopPath, "first.lnk");
+            File.WriteAllText(Path.Combine(desktopPath, "second.lnk"), "shortcut");
+            try
+            {
+                ExplorerAbsorptionLogic.ClearShortcutTargetCacheForTests();
+                CountingExplorerService explorerService = new CountingExplorerService(@"C:\Other");
+
+                Assert.IsFalse(ExplorerAbsorptionLogic.HasShortcutToPathInDesktop(explorerService, desktopPath, @"C:\Target"));
+                Assert.AreEqual(2, ExplorerAbsorptionLogic.GetShortcutTargetCacheCountForTests());
+
+                File.Delete(deletedShortcutPath);
+                Assert.IsFalse(ExplorerAbsorptionLogic.HasShortcutToPathInDesktop(explorerService, desktopPath, @"C:\Target"));
+
+                Assert.AreEqual(1, ExplorerAbsorptionLogic.GetShortcutTargetCacheCountForTests());
             }
             finally
             {

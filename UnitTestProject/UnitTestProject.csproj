@@ -81,6 +81,7 @@
     <Compile Include="ExplorerWindowTrackingStateTests.cs" />
     <Compile Include="ExplorerTabTargetResolverTests.cs" />
     <Compile Include="AppMonitorCycleCoordinatorTests.cs" />
+    <Compile Include="ComThreadServiceTests.cs" />
     <Compile Include="MemoryMaintenanceServiceTests.cs" />
     <Compile Include="TabExternalDragOpenDeciderTests.cs" />
     <Compile Include="TabBarWindowLocationHookTests.cs" />

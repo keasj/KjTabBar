@@ -29,7 +29,7 @@ Instead of hooking into or modifying Explorer itself, it places an independent t
 ## Requirements
 
 - OS: Windows 10 / Windows 11
-- Runtime: .NET environment (prepare it according to the specification)
+- Runtime: .NET Framework 4.8.1
 
 ## Usage
 

@@ -9,17 +9,35 @@ namespace KjTabBar.Services
 {
     public sealed class ComThreadService : IDisposable
     {
+        private const int DefaultQueueCapacity = 64;
+        private static readonly TimeSpan DefaultInvocationTimeout = TimeSpan.FromSeconds(5);
         private static readonly Lazy<ComThreadService> _instance = new Lazy<ComThreadService>(() => new ComThreadService());
         public static ComThreadService Instance => _instance.Value;
         public static bool IsCreated { get { return _instance.IsValueCreated; } }
 
         private readonly Thread _thread;
         private readonly BlockingCollection<Action> _queue;
+        private readonly TimeSpan _invocationTimeout;
         private int _disposed;
 
         private ComThreadService()
+            : this(DefaultQueueCapacity, DefaultInvocationTimeout)
         {
-            _queue = new BlockingCollection<Action>();
+        }
+
+        internal ComThreadService(int queueCapacity, TimeSpan invocationTimeout)
+        {
+            if (queueCapacity <= 0)
+            {
+                throw new ArgumentOutOfRangeException("queueCapacity");
+            }
+            if (invocationTimeout <= TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException("invocationTimeout");
+            }
+
+            _queue = new BlockingCollection<Action>(new ConcurrentQueue<Action>(), queueCapacity);
+            _invocationTimeout = invocationTimeout;
             _thread = new Thread(RunLoop);
             _thread.SetApartmentState(ApartmentState.STA);
             _thread.IsBackground = true;
@@ -59,37 +77,82 @@ namespace KjTabBar.Services
 
         public Task<T> InvokeAsync<T>(Func<T> func)
         {
-            TaskCompletionSource<T> tcs = new TaskCompletionSource<T>();
+            if (func == null)
+            {
+                throw new ArgumentNullException("func");
+            }
+
+            TaskCompletionSource<T> tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Timer timeoutTimer = CreateTimeoutTimer(tcs);
             if (!TryAdd(() =>
             {
-                try { tcs.SetResult(func()); }
-                catch (Exception ex) { tcs.SetException(ex); }
+                if (tcs.Task.IsCompleted)
+                {
+                    timeoutTimer.Dispose();
+                    return;
+                }
+
+                try { tcs.TrySetResult(func()); }
+                catch (Exception ex) { tcs.TrySetException(ex); }
+                finally { timeoutTimer.Dispose(); }
             }))
             {
-                tcs.SetCanceled();
+                timeoutTimer.Dispose();
+                tcs.TrySetException(new InvalidOperationException("The COM worker queue is unavailable or full."));
             }
             return tcs.Task;
         }
 
         public Task InvokeAsync(Action action)
         {
-            TaskCompletionSource<bool> tcs = new TaskCompletionSource<bool>();
+            if (action == null)
+            {
+                throw new ArgumentNullException("action");
+            }
+
+            TaskCompletionSource<bool> tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Timer timeoutTimer = CreateTimeoutTimer(tcs);
             if (!TryAdd(() =>
             {
+                if (tcs.Task.IsCompleted)
+                {
+                    timeoutTimer.Dispose();
+                    return;
+                }
+
                 try
                 {
                     action();
-                    tcs.SetResult(true);
+                    tcs.TrySetResult(true);
                 }
                 catch (Exception ex)
                 {
-                    tcs.SetException(ex);
+                    tcs.TrySetException(ex);
                 }
+                finally { timeoutTimer.Dispose(); }
             }))
             {
-                tcs.SetCanceled();
+                timeoutTimer.Dispose();
+                tcs.TrySetException(new InvalidOperationException("The COM worker queue is unavailable or full."));
             }
             return tcs.Task;
+        }
+
+        private Timer CreateTimeoutTimer<T>(TaskCompletionSource<T> tcs)
+        {
+            Timer timeoutTimer = null;
+            timeoutTimer = new Timer(
+                delegate
+                {
+                    if (tcs.TrySetException(new TimeoutException("The COM worker operation timed out.")))
+                    {
+                        timeoutTimer.Dispose();
+                    }
+                },
+                null,
+                _invocationTimeout,
+                Timeout.InfiniteTimeSpan);
+            return timeoutTimer;
         }
 
         private bool TryAdd(Action action)
@@ -101,8 +164,7 @@ namespace KjTabBar.Services
 
             try
             {
-                _queue.Add(action);
-                return true;
+                return _queue.TryAdd(action);
             }
             catch (InvalidOperationException)
             {

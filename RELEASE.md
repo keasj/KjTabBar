@@ -42,6 +42,8 @@ Update these files before building:
   - `ProductVersion = "8:x.y.z"`
   - `ProductCode = "8:{new-guid}"`
   - `PackageCode = "8:{new-guid}"`
+- `spec.md`
+  - Update the displayed `KjTabBar vX.Y.Z.W` example when it contains a concrete version.
 
 Example for `v1.1.3.0`:
 
@@ -63,32 +65,37 @@ Expected output:
 
 - `KjTabBar\bin\Release\net481\KjTabBar.exe`
 
-## 4. Build the Installer
+## 4. Build the Installers
 
-Build the setup solution in Release configuration with Visual Studio.
+Build both the Japanese and English setup solutions in Release configuration with Visual Studio.
 
 If `devenv.com` is on `PATH`:
 
 ```powershell
 devenv.com KjTabBar.setup.sln /Build Release
+devenv.com KjTabBar.setup_en.sln /Build Release
 ```
 
 If it is not on `PATH`, use the full path, for example:
 
 ```powershell
 & 'C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\devenv.com' KjTabBar.setup.sln /Build Release
+& 'C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\devenv.com' KjTabBar.setup_en.sln /Build Release
 ```
 
 Expected outputs:
 
 - `Setup\Release\setup.exe`
 - `Setup\Release\Setup.msi`
+- `Setup\Release_en\setup.exe`
+- `Setup\Release_en\Setup.msi`
 
 Patch the built MSI so a running `KjTabBar.exe` is closed before Windows Installer runs `InstallValidate`, and so any installed KjTabBar version is replaced automatically.
 Without this patch, the Visual Studio setup project's InstallerClass custom action runs too late to prevent the FilesInUse dialog.
 
 ```powershell
 .\tools\Patch-SetupMsiPreClose.ps1 -MsiPath 'Setup\Release\Setup.msi'
+.\tools\Patch-SetupMsiPreClose.ps1 -MsiPath 'Setup\Release_en\Setup.msi'
 ```
 
 If the setup build fails with an unspecified Visual Studio error, check:

@@ -14,5 +14,23 @@ namespace UnitTestProject
             Assert.IsFalse(TabItemViewModel.ShouldUseFileAttributeIconLookup("shell:Desktop"));
             Assert.IsFalse(TabItemViewModel.ShouldUseFileAttributeIconLookup(null));
         }
+
+        [TestMethod]
+        public void Path_Does_Not_Raise_Change_For_Equivalent_Path()
+        {
+            TabItemViewModel viewModel = new TabItemViewModel(@"C:\Folder", "Folder", new MockExplorerService());
+            int pathChangeCount = 0;
+            viewModel.PropertyChanged += delegate (object sender, System.ComponentModel.PropertyChangedEventArgs e)
+            {
+                if (e.PropertyName == "Path")
+                {
+                    pathChangeCount++;
+                }
+            };
+
+            viewModel.Path = @"c:\folder";
+
+            Assert.AreEqual(0, pathChangeCount);
+        }
     }
 }

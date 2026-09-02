@@ -228,6 +228,23 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void UpdateTitles_Reuses_Existing_BaseTitles()
+        {
+            CountingFolderNameExplorerService explorerService = new CountingFolderNameExplorerService();
+            System.Collections.ObjectModel.ObservableCollection<TabItemViewModel> tabs =
+                new System.Collections.ObjectModel.ObservableCollection<TabItemViewModel>
+                {
+                    new TabItemViewModel(@"C:\ProjectA\Work", "Work", explorerService),
+                    new TabItemViewModel(@"C:\ProjectB\Other", "Other", explorerService)
+                };
+
+            TabTitleDisambiguator.UpdateTitles(tabs, explorerService);
+            TabTitleDisambiguator.UpdateTitles(tabs, explorerService);
+
+            Assert.AreEqual(0, explorerService.GetFolderNameCallCount);
+        }
+
+        [TestMethod]
         public void ShortenTitle_Handles_Non_Absolute_Path_Without_Losing_Parent()
         {
             var vm = CreateViewModel();
@@ -493,6 +510,17 @@ namespace UnitTestProject
                 {
                     return "MockFolder";
                 }
+            }
+        }
+
+        private sealed class CountingFolderNameExplorerService : MockExplorerService
+        {
+            public int GetFolderNameCallCount { get; private set; }
+
+            public override string GetFolderName(string path)
+            {
+                GetFolderNameCallCount++;
+                return path;
             }
         }
 

@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Threading;
 using System.Threading.Tasks;
 using KjTabBar.Helpers;
 using KjTabBar.Models;
@@ -24,7 +23,6 @@ namespace KjTabBar.Services
         private readonly Func<IntPtr, string> _getCurrentPath;
         private readonly Func<IntPtr, NativeMethods.RECT?> _getWindowRect;
         private readonly Func<string, bool> _openInNewWindow;
-        private readonly Action<int> _sleep;
         private readonly Func<int, Task> _delayAsync;
 
         public ExplorerHostSwitchCoordinator(
@@ -46,7 +44,7 @@ namespace KjTabBar.Services
                   delegate (IntPtr hwnd) { return explorerService != null ? explorerService.GetCurrentPath(hwnd) : null; },
                   GetWindowRectCore,
                   delegate (string path) { return explorerService != null && explorerService.OpenInNewWindow(path); },
-                  Thread.Sleep,
+                  null,
                   null)
         {
         }
@@ -107,7 +105,6 @@ namespace KjTabBar.Services
             _getCurrentPath = getCurrentPath;
             _getWindowRect = getWindowRect ?? GetWindowRectCore;
             _openInNewWindow = openInNewWindow;
-            _sleep = sleep;
             _delayAsync = delayAsync ?? CreateDelayAsync(sleep);
         }
 

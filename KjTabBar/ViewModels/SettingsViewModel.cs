@@ -8,6 +8,7 @@ namespace KjTabBar.ViewModels
 {
     public class SettingsViewModel : ViewModelBase
     {
+        private static readonly Lazy<string[]> AvailableFontNames = new Lazy<string[]>(LoadAvailableFontNames);
         private IUserSettings _settings;
         private string _fontFamily;
         private double _fontSize;
@@ -60,15 +61,10 @@ namespace KjTabBar.ViewModels
 
 
             _availableFonts = new ObservableCollection<string>();
-            System.Collections.Generic.List<string> fontNames = new System.Collections.Generic.List<string>();
-            foreach (FontFamily family in Fonts.SystemFontFamilies)
+            string[] fontNames = AvailableFontNames.Value;
+            for (int i = 0; i < fontNames.Length; i++)
             {
-                fontNames.Add(family.Source);
-            }
-            fontNames.Sort();
-            foreach (string fontName in fontNames)
-            {
-                _availableFonts.Add(fontName);
+                _availableFonts.Add(fontNames[i]);
             }
 
             try
@@ -82,8 +78,19 @@ namespace KjTabBar.ViewModels
             {
                 AppLogger.LogError("SettingsViewModel", "Failed to read assembly metadata for settings window.", ex);
                 ProgramName = "KjTabBar";
-                Version = "v1.2.7.0";
+                Version = string.Empty;
             }
+        }
+
+        private static string[] LoadAvailableFontNames()
+        {
+            System.Collections.Generic.List<string> fontNames = new System.Collections.Generic.List<string>();
+            foreach (FontFamily family in Fonts.SystemFontFamilies)
+            {
+                fontNames.Add(family.Source);
+            }
+            fontNames.Sort();
+            return fontNames.ToArray();
         }
 
         public bool SaveSettings(out string errorMessage)

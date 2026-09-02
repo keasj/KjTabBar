@@ -19,6 +19,8 @@ namespace KjTabBar.Models
         private static readonly object CurrentPathCacheSync = new object();
         private static readonly Dictionary<IntPtr, CurrentPathCacheEntry> CurrentPathCache = new Dictionary<IntPtr, CurrentPathCacheEntry>();
         private static readonly TimeSpan CurrentPathCacheDuration = TimeSpan.FromMilliseconds(100);
+        private static readonly TimeSpan CurrentPathCachePruneInterval = TimeSpan.FromSeconds(30);
+        private static DateTime _lastCurrentPathCachePruneUtc = DateTime.MinValue;
         private static readonly TimeSpan SlowComOperationThreshold = TimeSpan.FromMilliseconds(100);
         private static readonly TimeSpan SlowComOperationLogInterval = TimeSpan.FromMinutes(1);
         private readonly ShellWindowCacheManager _cacheManager = new ShellWindowCacheManager();
@@ -488,9 +490,11 @@ namespace KjTabBar.Models
 
                         if (!_shellExplorerWindowMatcher.MatchesTargetWindow(hwnd, explorerHwnd)) continue;
 
-                        _shellWindowNavigator.Navigate(window, navigatePath);
-                        navigated = true;
-                        break;
+                        navigated = _shellWindowNavigator.Navigate(window, navigatePath);
+                        if (navigated)
+                        {
+                            break;
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -553,11 +557,37 @@ namespace KjTabBar.Models
 
             lock (CurrentPathCacheSync)
             {
+                PruneCurrentPathCache(nowUtc, NativeMethods.IsWindow);
                 CurrentPathCache[explorerHwnd] = new CurrentPathCacheEntry
                 {
                     Path = path,
                     CachedAtUtc = nowUtc
                 };
+            }
+        }
+
+        private static void PruneCurrentPathCache(DateTime nowUtc, Func<IntPtr, bool> isWindow)
+        {
+            if (_lastCurrentPathCachePruneUtc != DateTime.MinValue &&
+                (nowUtc - _lastCurrentPathCachePruneUtc) < CurrentPathCachePruneInterval)
+            {
+                return;
+            }
+
+            _lastCurrentPathCachePruneUtc = nowUtc;
+            List<IntPtr> staleHandles = new List<IntPtr>();
+            foreach (KeyValuePair<IntPtr, CurrentPathCacheEntry> entry in CurrentPathCache)
+            {
+                if ((nowUtc - entry.Value.CachedAtUtc) > CurrentPathCacheDuration ||
+                    (isWindow != null && !isWindow(entry.Key)))
+                {
+                    staleHandles.Add(entry.Key);
+                }
+            }
+
+            for (int i = 0; i < staleHandles.Count; i++)
+            {
+                CurrentPathCache.Remove(staleHandles[i]);
             }
         }
 
