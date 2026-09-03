@@ -354,6 +354,53 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void SyncWithExplorerAsync_SelectsPendingItemsBeforeClearingNavigation()
+        {
+            MockExplorerService mockExplorer = new MockExplorerService();
+            string currentPath = @"C:\Original";
+            mockExplorer.GetCurrentPathFunc = delegate (IntPtr hwnd) { return currentPath; };
+            TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), mockExplorer, currentPath);
+            System.Collections.Generic.List<string> selectedItems = new System.Collections.Generic.List<string>
+            {
+                @"C:\Target\Selected.txt"
+            };
+
+            vm.AddTabWithPathAndSelect(@"C:\Target", selectedItems);
+            currentPath = @"C:\Target";
+            vm.SyncWithExplorerAsync().GetAwaiter().GetResult();
+
+            Assert.AreEqual(1, mockExplorer.SelectItemsCallCount);
+            Assert.AreEqual((IntPtr)123, mockExplorer.LastSelectItemsHwnd);
+            CollectionAssert.AreEqual(selectedItems, mockExplorer.LastSelectedItems);
+            Assert.IsNull(vm.NavigationTracker.PendingSelectedItems);
+            Assert.IsNull(vm.NavigationTracker.NavigatingToPath);
+        }
+
+        [TestMethod]
+        public void SyncWithExplorerAsync_DiscardsPathFromPreviousExplorerHost()
+        {
+            BlockingPathExplorerService mockExplorer = new BlockingPathExplorerService();
+            TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), mockExplorer, @"C:\Initial");
+            System.Threading.Tasks.Task syncTask = vm.SyncWithExplorerAsync();
+
+            try
+            {
+                Assert.IsTrue(mockExplorer.WaitUntilPathReadStarts(1000));
+                vm.SetExplorerHwnd((IntPtr)456);
+            }
+            finally
+            {
+                mockExplorer.ReleasePathRead();
+            }
+
+            syncTask.GetAwaiter().GetResult();
+
+            Assert.AreEqual((IntPtr)123, mockExplorer.RequestedExplorerHwnd);
+            Assert.AreEqual(@"C:\Initial", vm.ActiveTab.Path);
+            Assert.IsNull(vm.NavigationTracker.CachedExplorerPath);
+        }
+
+        [TestMethod]
         public void SyncWithExplorerAsync_UpdatesActiveControlPanelItemTab_WhenSeparateRootTabExists()
         {
             SynchronizerControlPanelExplorerService mockExplorer = new SynchronizerControlPanelExplorerService();
@@ -617,6 +664,32 @@ namespace UnitTestProject
             public override string GetFolderName(string path)
             {
                 return "Power Options";
+            }
+        }
+
+        private sealed class BlockingPathExplorerService : MockExplorerService
+        {
+            private readonly System.Threading.ManualResetEventSlim _pathReadStarted = new System.Threading.ManualResetEventSlim(false);
+            private readonly System.Threading.ManualResetEventSlim _releasePathRead = new System.Threading.ManualResetEventSlim(false);
+
+            public IntPtr RequestedExplorerHwnd { get; private set; }
+
+            public override string GetCurrentPath(IntPtr explorerHwnd)
+            {
+                RequestedExplorerHwnd = explorerHwnd;
+                _pathReadStarted.Set();
+                _releasePathRead.Wait();
+                return @"C:\Stale";
+            }
+
+            public bool WaitUntilPathReadStarts(int millisecondsTimeout)
+            {
+                return _pathReadStarted.Wait(millisecondsTimeout);
+            }
+
+            public void ReleasePathRead()
+            {
+                _releasePathRead.Set();
             }
         }
 

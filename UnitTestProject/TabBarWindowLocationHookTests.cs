@@ -48,6 +48,19 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void LocationUpdateQueue_CoalescesUntilPendingUpdateIsReleased()
+        {
+            int isQueued = 0;
+
+            Assert.IsTrue(TabBarWindowRuntimeCoordinator.TryMarkLocationUpdateQueued(ref isQueued));
+            Assert.IsFalse(TabBarWindowRuntimeCoordinator.TryMarkLocationUpdateQueued(ref isQueued));
+
+            TabBarWindowRuntimeCoordinator.ClearLocationUpdateQueued(ref isQueued);
+
+            Assert.IsTrue(TabBarWindowRuntimeCoordinator.TryMarkLocationUpdateQueued(ref isQueued));
+        }
+
+        [TestMethod]
         public void ShouldHandleDestroyEvent_ReturnsTrue_ForTrackedExplorerWindowDestroy()
         {
             bool result = TabBarWindowRuntimeCoordinator.ShouldHandleDestroyEvent(

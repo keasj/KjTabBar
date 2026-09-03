@@ -26,6 +26,7 @@ namespace KjTabBar.Views
         private NativeMethods.WinEventDelegate _locationEventCallback;
         private NativeMethods.WinEventDelegate _destroyEventCallback;
         private bool _isSyncTickRunning;
+        private int _isLocationUpdateQueued;
         private DateTime _lastImmediateSyncRequestUtc = DateTime.MinValue;
         private int _consecutiveExplorerGoneCount;
 
@@ -180,7 +181,20 @@ namespace KjTabBar.Views
                     return;
                 }
 
-                _dispatcher.BeginInvoke(new Action(BeginUpdatePositionAndSync));
+                if (!TryMarkLocationUpdateQueued(ref _isLocationUpdateQueued))
+                {
+                    return;
+                }
+
+                try
+                {
+                    _dispatcher.BeginInvoke(new Action(RunQueuedPositionUpdate));
+                }
+                catch
+                {
+                    System.Threading.Interlocked.Exchange(ref _isLocationUpdateQueued, 0);
+                    throw;
+                }
             }
             catch (Exception ex)
             {
@@ -232,6 +246,16 @@ namespace KjTabBar.Views
                    hwnd == trackedExplorerHwnd;
         }
 
+        internal static bool TryMarkLocationUpdateQueued(ref int isQueued)
+        {
+            return System.Threading.Interlocked.CompareExchange(ref isQueued, 1, 0) == 0;
+        }
+
+        internal static void ClearLocationUpdateQueued(ref int isQueued)
+        {
+            System.Threading.Interlocked.Exchange(ref isQueued, 0);
+        }
+
         internal static bool ShouldHandleDestroyEvent(uint eventType, IntPtr hwnd, int idObject, IntPtr trackedExplorerHwnd)
         {
             return eventType == NativeMethods.EVENT_OBJECT_DESTROY &&
@@ -253,6 +277,17 @@ namespace KjTabBar.Views
         private async void SyncTimer_Tick(object sender, EventArgs e)
         {
             await HandleSyncTimerTickAsync();
+        }
+
+        private void RunQueuedPositionUpdate()
+        {
+            ClearLocationUpdateQueued(ref _isLocationUpdateQueued);
+            if (_trackedExplorerHwnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            BeginUpdatePositionAndSync();
         }
 
         private void BeginUpdatePositionAndSync()

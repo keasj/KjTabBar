@@ -119,6 +119,11 @@ namespace KjTabBar.Helpers
         [DllImport("kernel32.dll")]
         public static extern uint GetCurrentThreadId();
 
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+        public static extern uint GetDriveType(string lpRootPathName);
+
+        public const uint DRIVE_REMOTE = 4;
+
         [DllImport("wtsapi32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool WTSQuerySessionInformation(

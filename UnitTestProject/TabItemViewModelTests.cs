@@ -16,6 +16,33 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void ShouldUseFileAttributeIconLookup_Returns_True_For_Mapped_Network_Drive()
+        {
+            string requestedRootPath = null;
+
+            bool result = TabItemViewModel.ShouldUseFileAttributeIconLookup(
+                @"Z:\Folder",
+                delegate (string rootPath)
+                {
+                    requestedRootPath = rootPath;
+                    return KjTabBar.Helpers.NativeMethods.DRIVE_REMOTE;
+                });
+
+            Assert.IsTrue(result);
+            Assert.AreEqual(@"Z:\", requestedRootPath);
+        }
+
+        [TestMethod]
+        public void ShouldUseFileAttributeIconLookup_Returns_False_For_Fixed_Drive()
+        {
+            bool result = TabItemViewModel.ShouldUseFileAttributeIconLookup(
+                @"C:\Folder",
+                delegate { return 3; });
+
+            Assert.IsFalse(result);
+        }
+
+        [TestMethod]
         public void Path_Does_Not_Raise_Change_For_Equivalent_Path()
         {
             TabItemViewModel viewModel = new TabItemViewModel(@"C:\Folder", "Folder", new MockExplorerService());

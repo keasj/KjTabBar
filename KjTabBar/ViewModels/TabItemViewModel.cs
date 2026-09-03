@@ -75,12 +75,36 @@ namespace KjTabBar.ViewModels
 
         internal static bool ShouldUseFileAttributeIconLookup(string normalizedPath)
         {
+            return ShouldUseFileAttributeIconLookup(normalizedPath, NativeMethods.GetDriveType);
+        }
+
+        internal static bool ShouldUseFileAttributeIconLookup(string normalizedPath, Func<string, uint> getDriveType)
+        {
             if (string.IsNullOrEmpty(normalizedPath))
             {
                 return false;
             }
 
-            return normalizedPath.StartsWith(@"\\", StringComparison.Ordinal);
+            if (normalizedPath.StartsWith(@"\\", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (getDriveType == null || normalizedPath.Length < 2 ||
+                !char.IsLetter(normalizedPath[0]) || normalizedPath[1] != ':')
+            {
+                return false;
+            }
+
+            try
+            {
+                string rootPath = normalizedPath.Substring(0, 2) + @"\";
+                return getDriveType(rootPath) == NativeMethods.DRIVE_REMOTE;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private void UpdateIconSource()
@@ -189,8 +213,9 @@ namespace KjTabBar.ViewModels
                     uint fileAttributes = useFileAttributeIconLookup ? NativeMethods.FILE_ATTRIBUTE_DIRECTORY : 0;
                     uint fileIconFlags = useFileAttributeIconLookup ? flags | NativeMethods.SHGFI_USEFILEATTRIBUTES : flags;
 
-                    // UNC パスは実体確認で待たされやすいため、まず属性指定で汎用フォルダアイコンを取得する。
-                    // ローカルパスは従来通り desktop.ini のカスタムアイコンを優先する。
+                    // UNC パスとマップされたネットワークドライブは実体確認で待たされやすいため、
+                    // 属性指定で汎用フォルダアイコンを取得する。ローカルパスは従来通り
+                    // desktop.ini のカスタムアイコンを優先する。
                     result = NativeMethods.SHGetFileInfo(
                         normalizedPath,
                         fileAttributes,

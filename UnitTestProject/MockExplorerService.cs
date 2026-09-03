@@ -29,6 +29,9 @@ namespace UnitTestProject
         public Func<IntPtr, KjTabBar.Helpers.NativeMethods.RECT> GetExplorerWindowRectFunc { get; set; }
         public bool OpenInNewWindowResult { get; set; } = true;
         public string OpenedInNewWindowPath { get; private set; }
+        public int SelectItemsCallCount { get; private set; }
+        public IntPtr LastSelectItemsHwnd { get; private set; }
+        public List<string> LastSelectedItems { get; private set; }
 
         public List<IntPtr> FindExplorerWindows() => FindExplorerWindowsFunc != null ? FindExplorerWindowsFunc() : new List<IntPtr>();
         public virtual string GetCurrentPath(IntPtr explorerHwnd) => GetCurrentPathFunc != null ? GetCurrentPathFunc(explorerHwnd) : @"C:\MockPath";
@@ -49,7 +52,12 @@ namespace UnitTestProject
         public void CreateSymbolicLinks(string[] sourceFiles, string destinationFolder, IntPtr targetWindowHandle) { }
         public void ReleaseCachedComObjects() { }
         public virtual string ResolveShortcutTarget(string path) => path;
-        public void SelectItems(IntPtr explorerHwnd, List<string> itemPaths) { }
+        public void SelectItems(IntPtr explorerHwnd, List<string> itemPaths)
+        {
+            SelectItemsCallCount++;
+            LastSelectItemsHwnd = explorerHwnd;
+            LastSelectedItems = itemPaths != null ? new List<string>(itemPaths) : null;
+        }
 
         public KjTabBar.Helpers.NativeMethods.RECT GetExplorerWindowRect(IntPtr hwnd)
         {

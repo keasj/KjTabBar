@@ -22,13 +22,31 @@ namespace KjTabBar.Services
             if (_isSyncing) return;
             _isSyncing = true;
             bool shouldUpdateTitles = false;
-            DateTime syncNowUtc = DateTime.UtcNow;
             try
             {
                 bool forcePathPoll = (_viewModel.NavigationTracker.NavigatingToPath != null || _viewModel.NavigationTracker.PendingSelectedItems != null);
+                DateTime pathPollNowUtc = DateTime.UtcNow;
+                string currentPath;
 
-                // UIスレッドをブロックしないよう、COMアクセスをバックグラウンドスレッドで行う
-                string currentPath = await ComThreadService.Instance.InvokeAsync(() => GetCurrentPathForSync(forcePathPoll));
+                if (!forcePathPoll && !_viewModel.NavigationTracker.ShouldPoll(pathPollNowUtc, false))
+                {
+                    currentPath = _viewModel.NavigationTracker.CachedExplorerPath;
+                }
+                else
+                {
+                    IntPtr explorerHwnd = _viewModel.ExplorerHwnd;
+
+                    // COM ワーカーでは Explorer のパス取得だけを行い、UI 管理状態には触れない。
+                    currentPath = await ComThreadService.Instance.InvokeAsync(() => _explorerService.GetCurrentPath(explorerHwnd));
+                    if (_viewModel.ExplorerHwnd != explorerHwnd)
+                    {
+                        return;
+                    }
+
+                    _viewModel.NavigationTracker.UpdateCache(currentPath, DateTime.UtcNow);
+                }
+
+                DateTime syncNowUtc = DateTime.UtcNow;
                 if (_viewModel.ActiveTab == null) return;
 
                 if (_viewModel.RemoveUnavailableInactiveTabs(_explorerService.IsTabPathCurrentlyAvailable, currentPath))
@@ -82,12 +100,11 @@ namespace KjTabBar.Services
                     (!_explorerService.IsControlPanelPath(currentPath) ||
                      string.Equals(_viewModel.ActiveTab.Path, currentPath, StringComparison.OrdinalIgnoreCase)))
                 {
-                    _viewModel.ClearPendingNavigationTracking();
                     if (_viewModel.NavigationTracker.PendingSelectedItems != null)
                     {
                         _explorerService.SelectItems(_viewModel.ExplorerHwnd, _viewModel.NavigationTracker.PendingSelectedItems);
-                        _viewModel.NavigationTracker.PendingSelectedItems = null;
                     }
+                    _viewModel.ClearPendingNavigationTracking();
                     return;
                 }
 
@@ -111,13 +128,12 @@ namespace KjTabBar.Services
                     _viewModel.ActiveTab.Path = currentPath;
                     _viewModel.ActiveTab.BaseTitle = _explorerService.GetFolderName(currentPath);
                     _viewModel.ActiveTab.Title = _viewModel.ActiveTab.BaseTitle;
-                    _viewModel.ClearPendingNavigationTracking();
-                    shouldUpdateTitles = true;
                     if (_viewModel.NavigationTracker.PendingSelectedItems != null)
                     {
                         _explorerService.SelectItems(_viewModel.ExplorerHwnd, _viewModel.NavigationTracker.PendingSelectedItems);
-                        _viewModel.NavigationTracker.PendingSelectedItems = null;
                     }
+                    _viewModel.ClearPendingNavigationTracking();
+                    shouldUpdateTitles = true;
                     return;
                 }
 
@@ -180,21 +196,5 @@ namespace KjTabBar.Services
         }
 
 
-        private string GetCurrentPathForSync(bool forcePoll)
-        {
-            DateTime nowUtc = DateTime.UtcNow;
-
-            if (!forcePoll)
-            {
-                if (!_viewModel.NavigationTracker.ShouldPoll(nowUtc, false))
-                {
-                    return _viewModel.NavigationTracker.CachedExplorerPath;
-                }
-            }
-
-            string currentPath = _explorerService.GetCurrentPath(_viewModel.ExplorerHwnd);
-            _viewModel.NavigationTracker.UpdateCache(currentPath, nowUtc);
-            return currentPath;
-        }
     }
 }
