@@ -47,6 +47,8 @@ namespace KjTabBar.Models
 
         public bool IsDesktopShortcutTargetPath(string path)
         {
+            ExplorerManager manager = _explorerService as ExplorerManager;
+            if (manager != null && manager.UsesShellWorker) return manager.IsDesktopShortcutTargetPath(path);
             return ExplorerAbsorptionLogic.IsDesktopShortcutTargetPath(_explorerService, path);
         }
 

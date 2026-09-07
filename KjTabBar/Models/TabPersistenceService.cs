@@ -87,8 +87,6 @@ namespace KjTabBar.Models
                     return;
                 }
 
-                _lastSavedTabs = currentTabsString;
-
                 List<string> paths = BuildPersistablePathList(viewModel);
                 string activeTabPath = GetPersistableActiveTabPath(viewModel);
                 int? activeTabIndex = GetPersistableActiveTabIndex(viewModel);
@@ -100,6 +98,7 @@ namespace KjTabBar.Models
                 }
                 ProtectedTextStorage.SaveLines(file, paths);
                 SaveActiveTabSelection(activeTabIndex, activeTabPath);
+                _lastSavedTabs = currentTabsString;
             }
             catch (Exception ex)
             {

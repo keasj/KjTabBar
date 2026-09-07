@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 
 namespace KjTabBar.Models
 {
@@ -50,38 +51,53 @@ namespace KjTabBar.Models
 
         public object FindFolderItemByPath(object folder, object folderItems, int itemCount, string targetPath)
         {
-            if (string.IsNullOrEmpty(targetPath))
-            {
-                return null;
-            }
+            return FindFolderItemsByPaths(folder, folderItems, itemCount, new[] { targetPath })[0];
+        }
 
-            for (int i = 0; i < itemCount; i++)
+        public object[] FindFolderItemsByPaths(object folder, object folderItems, int itemCount, IList<string> targetPaths)
+        {
+            object[] matches = new object[targetPaths.Count];
+            int remaining = targetPaths.Count;
+            for (int i = 0; i < itemCount && remaining > 0; i++)
             {
                 object item = null;
+                bool retained = false;
                 try
                 {
                     item = _invokeComMethod(folderItems, "Item", new object[] { i });
                     string itemPath = _getComProperty(item, "Path") as string;
-                    if (_shellItemPathResolver.AreEquivalentItemPaths(itemPath, targetPath))
+                    for (int j = 0; j < targetPaths.Count; j++)
                     {
-                        return item;
+                        if (matches[j] == null && _shellItemPathResolver.AreEquivalentItemPaths(itemPath, targetPaths[j]))
+                        {
+                            matches[j] = item;
+                            retained = true;
+                            remaining--;
+                            break;
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
                     _logErrorThrottled("ExplorerManager", "FindFolderItemByPathEnumerate", "Failed while enumerating folder items.", ex, TimeSpan.FromMinutes(5));
                 }
-
-                _releaseComObject(item);
+                finally
+                {
+                    if (!retained) _releaseComObject(item);
+                }
             }
-
-            string parseName = _shellItemPathResolver.GetItemParseName(targetPath);
-            if (string.IsNullOrEmpty(parseName))
+            for (int j = 0; j < targetPaths.Count; j++)
             {
-                return null;
+                if (matches[j] != null || string.IsNullOrEmpty(targetPaths[j])) continue;
+                string parseName = _shellItemPathResolver.GetItemParseName(targetPaths[j]);
+                if (string.IsNullOrEmpty(parseName)) continue;
+                try { matches[j] = _invokeComMethod(folder, "ParseName", new object[] { parseName }); }
+                catch (Exception ex)
+                {
+                    _logErrorThrottled("ExplorerManager", "FindFolderItemParseName", "Failed to resolve a folder item.", ex, TimeSpan.FromMinutes(5));
+                }
             }
-
-            return _invokeComMethod(folder, "ParseName", new object[] { parseName });
+            return matches;
         }
     }
 }

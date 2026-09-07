@@ -383,9 +383,10 @@ namespace KjTabBar.Models
                             folderItems = InvokeComMethod(folder, "Items");
                             int itemCount = _shellFolderItemSelectionHelper.GetComCollectionCount(folderItems);
                             bool hasSelectedItem = false;
-                            for (int j = 0; j < itemPaths.Count; j++)
+                            object[] matchedItems = _shellFolderItemSelectionHelper.FindFolderItemsByPaths(folder, folderItems, itemCount, itemPaths);
+                            for (int j = 0; j < matchedItems.Length; j++)
                             {
-                                object item = _shellFolderItemSelectionHelper.FindFolderItemByPath(folder, folderItems, itemCount, itemPaths[j]);
+                                object item = matchedItems[j];
                                 try
                                 {
                                     if (item != null)

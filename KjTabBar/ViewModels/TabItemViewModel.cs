@@ -26,13 +26,13 @@ namespace KjTabBar.ViewModels
         public string Title
         {
             get { return _title; }
-            set { _title = value; OnPropertyChanged("Title"); }
+            set { if (_title == value) return; _title = value; OnPropertyChanged("Title"); }
         }
 
         public string BaseTitle
         {
             get { return _baseTitle; }
-            set { _baseTitle = value; OnPropertyChanged("BaseTitle"); }
+            set { if (_baseTitle == value) return; _baseTitle = value; OnPropertyChanged("BaseTitle"); }
         }
 
         public string Path
@@ -54,7 +54,7 @@ namespace KjTabBar.ViewModels
         public bool IsActive
         {
             get { return _isActive; }
-            set { _isActive = value; OnPropertyChanged("IsActive"); }
+            set { if (_isActive == value) return; _isActive = value; OnPropertyChanged("IsActive"); }
         }
 
         public ImageSource IconSource
@@ -107,12 +107,41 @@ namespace KjTabBar.ViewModels
             }
         }
 
-        private void UpdateIconSource()
+        private async void UpdateIconSource()
         {
+            string path = _path;
             Stopwatch stopwatch = Stopwatch.StartNew();
             try
             {
-                UpdateIconSourceCore();
+                ExplorerManager manager = _explorerService as ExplorerManager;
+                ImageSource icon;
+                if (manager != null && manager.UsesShellWorker)
+                {
+                    if (!TryGetCachedIcon(path ?? string.Empty, out icon))
+                    {
+                        icon = await Services.ComThreadService.Instance.InvokeAsync(delegate
+                        {
+                            byte[] bytes = manager.GetIconBytes(path);
+                            if (bytes.Length == 0) return null;
+                            using (System.IO.MemoryStream stream = new System.IO.MemoryStream(bytes, false))
+                            {
+                                BitmapFrame frame = BitmapFrame.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+                                frame.Freeze();
+                                return (ImageSource)frame;
+                            }
+                        });
+                        if (icon != null) AddCachedIcon(path, icon);
+                    }
+                }
+                else
+                {
+                    icon = LoadIcon(path, _explorerService);
+                }
+                if (string.Equals(_path, path, StringComparison.OrdinalIgnoreCase)) IconSource = icon;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogErrorThrottled("TabItemViewModel", "IconLookup", "Failed to load a tab icon.", ex, TimeSpan.FromMinutes(1));
             }
             finally
             {
@@ -120,24 +149,35 @@ namespace KjTabBar.ViewModels
             }
         }
 
-        private void UpdateIconSourceCore()
+        internal static byte[] LoadIconBytesForWorker(string path, IExplorerService explorerService)
+        {
+            BitmapSource bitmap = LoadIcon(path, explorerService) as BitmapSource;
+            if (bitmap == null) return new byte[0];
+            using (System.IO.MemoryStream stream = new System.IO.MemoryStream())
+            {
+                PngBitmapEncoder encoder = new PngBitmapEncoder();
+                encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                encoder.Save(stream);
+                return stream.ToArray();
+            }
+        }
+
+        private static ImageSource LoadIcon(string path, IExplorerService explorerService)
         {
             IntPtr pidl = IntPtr.Zero;
             IntPtr fallbackPidl = IntPtr.Zero;
             try
             {
-                string normalizedPath = _explorerService != null ? _explorerService.NormalizeKnownPath(_path) : _path;
+                string normalizedPath = explorerService != null ? explorerService.NormalizeKnownPath(path) : path;
                 if (string.IsNullOrEmpty(normalizedPath))
                 {
-                    IconSource = null;
-                    return;
+                    return null;
                 }
 
                 ImageSource cachedIcon;
                 if (TryGetCachedIcon(normalizedPath, out cachedIcon))
                 {
-                    IconSource = cachedIcon;
-                    return;
+                    return cachedIcon;
                 }
 
                 NativeMethods.SHFILEINFO fileInfo = new NativeMethods.SHFILEINFO();
@@ -160,9 +200,9 @@ namespace KjTabBar.ViewModels
                     // コントロールパネル配下項目は単独 GUID 解決だと親アイコンになる場合があるため、
                     // 一次取得が失敗したときのみ配下コンテキスト付きパスでも再取得する。
                     if ((result == IntPtr.Zero || fileInfo.hIcon == IntPtr.Zero) &&
-                        _explorerService != null &&
-                        _explorerService.IsControlPanelPath(normalizedPath) &&
-                        !string.Equals(normalizedPath, _explorerService.AllControlPanelPath, StringComparison.OrdinalIgnoreCase))
+                        explorerService != null &&
+                        explorerService.IsControlPanelPath(normalizedPath) &&
+                        !string.Equals(normalizedPath, explorerService.AllControlPanelPath, StringComparison.OrdinalIgnoreCase))
                     {
                         string controlPanelCompositePath = "::{26EE0668-A00A-44D7-9371-BEB064C98683}\\0\\" + normalizedPath;
                         uint fallbackDummy;
@@ -181,10 +221,10 @@ namespace KjTabBar.ViewModels
                     // SHParseDisplayName で解決できない場合がある。
                     // 解決済みパスで再試行する。
                     if ((result == IntPtr.Zero || fileInfo.hIcon == IntPtr.Zero) &&
-                        _explorerService != null &&
-                        string.Equals(normalizedPath, _explorerService.HomeFolderPath, StringComparison.OrdinalIgnoreCase))
+                        explorerService != null &&
+                        string.Equals(normalizedPath, explorerService.HomeFolderPath, StringComparison.OrdinalIgnoreCase))
                     {
-                        string resolvedHomePath = _explorerService.GetResolvedHomeFolderPath();
+                        string resolvedHomePath = explorerService.GetResolvedHomeFolderPath();
                         if (!string.IsNullOrEmpty(resolvedHomePath) &&
                             !string.Equals(resolvedHomePath, normalizedPath, StringComparison.OrdinalIgnoreCase))
                         {
@@ -237,8 +277,7 @@ namespace KjTabBar.ViewModels
 
                 if (result == IntPtr.Zero || fileInfo.hIcon == System.IntPtr.Zero)
                 {
-                    IconSource = null;
-                    return;
+                    return null;
                 }
 
                 try
@@ -248,8 +287,8 @@ namespace KjTabBar.ViewModels
                         System.Windows.Int32Rect.Empty,
                         BitmapSizeOptions.FromEmptyOptions());
                     bitmap.Freeze();
-                    IconSource = bitmap;
                     AddCachedIcon(normalizedPath, bitmap);
+                    return bitmap;
                 }
                 finally
                 {
@@ -258,7 +297,7 @@ namespace KjTabBar.ViewModels
             }
             catch
             {
-                IconSource = null;
+                return null;
             }
             finally
             {

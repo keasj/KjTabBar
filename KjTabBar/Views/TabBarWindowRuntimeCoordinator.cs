@@ -23,6 +23,7 @@ namespace KjTabBar.Views
         private IntPtr _locationHook = IntPtr.Zero;
         private IntPtr _destroyHook = IntPtr.Zero;
         private IntPtr _trackedExplorerHwnd = IntPtr.Zero;
+        private int _explorerGeneration;
         private NativeMethods.WinEventDelegate _locationEventCallback;
         private NativeMethods.WinEventDelegate _destroyEventCallback;
         private bool _isSyncTickRunning;
@@ -47,6 +48,7 @@ namespace KjTabBar.Views
         public void Start(IntPtr explorerHwnd)
         {
             _consecutiveExplorerGoneCount = 0;
+            _explorerGeneration++;
             RegisterLocationHook(explorerHwnd);
 
             if (_positionTimer == null)
@@ -87,6 +89,7 @@ namespace KjTabBar.Views
         public void RebindExplorer(IntPtr explorerHwnd)
         {
             _consecutiveExplorerGoneCount = 0;
+            _explorerGeneration++;
             RegisterLocationHook(explorerHwnd);
             _updatePosition();
         }
@@ -94,6 +97,7 @@ namespace KjTabBar.Views
         public void Stop()
         {
             _consecutiveExplorerGoneCount = 0;
+            _explorerGeneration++;
             UnregisterLocationHook();
 
             if (_positionTimer != null)
@@ -223,7 +227,8 @@ namespace KjTabBar.Views
                     return;
                 }
 
-                _dispatcher.BeginInvoke(new Action(CloseAfterExplorerDestroyed));
+                int generation = _explorerGeneration;
+                _dispatcher.BeginInvoke(new Action(() => CloseAfterExplorerDestroyed(hwnd, generation)));
             }
             catch (Exception ex)
             {
@@ -407,9 +412,10 @@ namespace KjTabBar.Views
             _ = HandleSyncTimerTickAsync();
         }
 
-        private void CloseAfterExplorerDestroyed()
+        private void CloseAfterExplorerDestroyed(IntPtr destroyedHwnd, int generation)
         {
-            if (_trackedExplorerHwnd == IntPtr.Zero)
+            if (_trackedExplorerHwnd == IntPtr.Zero || _trackedExplorerHwnd != destroyedHwnd ||
+                _explorerGeneration != generation)
             {
                 return;
             }

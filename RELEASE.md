@@ -102,6 +102,17 @@ If the setup build fails with an unspecified Visual Studio error, check:
 
 - `C:\Users\<UserName>\AppData\Roaming\Microsoft\VisualStudio\<InstanceId>\ActivityLog.xml`
 
+If setup reports missing generated WPF members (for example InitializeComponent) or missing BAML, rebuild the normal solution with Visual Studio MSBuild and confirm the BAML exists before retrying setup. Do not fix application source for a missing generated file.
+
+Example for the English setup on Visual Studio 18:
+
+```powershell
+& 'C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe' KjTabBar.build.sln /t:Rebuild /p:Configuration=Release /m:1
+& 'C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\devenv.com' KjTabBar.setup_en.sln /Build Release /Project 'Setup\Setup_en.vdproj' /ProjectConfig Release
+```
+
+For final validation, test the executable extracted from each generated MSI. Build-host differences can produce different executable hashes even when the source and version are unchanged. Record the actual MSI PackageCode from SummaryInformation as well as the project settings.
+
 ## 5. Prepare Release Asset Names
 
 Upload assets with the following names:

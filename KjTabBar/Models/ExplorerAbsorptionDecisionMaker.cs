@@ -123,6 +123,11 @@ namespace KjTabBar.Models
                 return AbsorptionAction.CreateNewTabBar;
             }
 
+            if (!isControlPanelPath && !context.IsDesktopCandidate)
+            {
+                return AbsorptionAction.Ignore;
+            }
+
             bool isSpecialShellPath = false;
             
             if (context.IsDesktopSpecialShellPathFunc != null && context.IsDesktopSpecialShellPathFunc(decisionPath))

@@ -25,6 +25,9 @@ namespace KjTabBar.ViewModels
         private IUserSettings _userSettings;
         private IExplorerService _explorerService;
         private bool _isDisposed;
+        private System.Windows.Threading.Dispatcher _metadataDispatcher;
+        private int _metadataUpdateQueued;
+        private bool _isReopeningClosedTabs;
 
         private readonly TabBarExplorerSynchronizer _synchronizer;
 
@@ -168,6 +171,25 @@ namespace KjTabBar.ViewModels
             UpdateTabTitles();
 
             _synchronizer = new TabBarExplorerSynchronizer(this, _explorerService);
+            ExplorerManager manager = _explorerService as ExplorerManager;
+            if (manager != null && manager.UsesShellWorker)
+            {
+                _metadataDispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+                manager.FolderTitlesChanged += FolderTitlesChanged;
+            }
+        }
+
+        private void FolderTitlesChanged(object sender, EventArgs e)
+        {
+            if (_isDisposed || _metadataDispatcher == null || _metadataDispatcher.HasShutdownStarted ||
+                System.Threading.Interlocked.Exchange(ref _metadataUpdateQueued, 1) != 0) return;
+            _metadataDispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(delegate
+            {
+                System.Threading.Interlocked.Exchange(ref _metadataUpdateQueued, 0);
+                if (_isDisposed) return;
+                foreach (TabItemViewModel tab in _tabs) tab.BaseTitle = _explorerService.GetFolderName(tab.Path);
+                UpdateTabTitles();
+            }));
         }
 
         private void ApplyUserSettings()
@@ -199,6 +221,8 @@ namespace KjTabBar.ViewModels
             }
 
             _isDisposed = true;
+            ExplorerManager manager = _explorerService as ExplorerManager;
+            if (manager != null) manager.FolderTitlesChanged -= FolderTitlesChanged;
             if (_userSettings != null)
             {
                 _userSettings.SettingsChanged -= UserSettings_SettingsChanged;
@@ -558,15 +582,34 @@ namespace KjTabBar.ViewModels
 
         public void ReopenClosedTab()
         {
-            List<ClosedTabInfo> batch = _closedTabHistory.PopLastBatch();
-            if (batch == null) return;
+            ReopenClosedTabAsync(null, null).GetAwaiter().GetResult();
+        }
 
-            OnPropertyChanged("HasClosedTabs");
-
-            for (int i = batch.Count - 1; i >= 0; i--)
+        internal async Task ReopenClosedTabAsync(Func<string, Task<bool>> preparePath, Action<Action> withPendingReveal)
+        {
+            if (_isReopeningClosedTabs) return;
+            _isReopeningClosedTabs = true;
+            try
             {
-                ClosedTabInfo info = batch[i];
-                InsertTabWithPath(info.Path, info.Position);
+                List<ClosedTabInfo> batch = _closedTabHistory.PeekLastBatch();
+                if (batch == null) return;
+
+                for (int i = batch.Count - 1; i >= 0; i--)
+                {
+                    ClosedTabInfo info = batch[i];
+                    if (preparePath != null && !await preparePath(info.Path)) return;
+                    bool restored = false;
+                    Action insert = () => restored = TryInsertTabWithPath(info.Path, info.Position, true);
+                    if (withPendingReveal != null) withPendingReveal(insert);
+                    else insert();
+                    if (!restored) return;
+                    _closedTabHistory.RemoveRestoredItem(info);
+                    OnPropertyChanged("HasClosedTabs");
+                }
+            }
+            finally
+            {
+                _isReopeningClosedTabs = false;
             }
         }
 
@@ -576,12 +619,7 @@ namespace KjTabBar.ViewModels
             int index = GetTabIndex(tab);
             if (index < 0) return;
 
-            StartHistoryBatch();
-            while (_tabs.Count > index + 1)
-            {
-                CloseTab(_tabs[index + 1]);
-            }
-            EndHistoryBatch();
+            CloseTabRange(index + 1, _tabs.Count - index - 1);
         }
 
         public void CloseTabsToLeft(TabItemViewModel tab)
@@ -590,12 +628,37 @@ namespace KjTabBar.ViewModels
             int index = GetTabIndex(tab);
             if (index <= 0) return;
 
+            CloseTabRange(0, index);
+        }
+
+        private void CloseTabRange(int startIndex, int count)
+        {
+            if (count <= 0) return;
+            bool removesActiveTab = _activeTabIndex >= startIndex && _activeTabIndex < startIndex + count;
             StartHistoryBatch();
-            for (int i = 0; i < index; i++)
+            try
             {
-                CloseTab(_tabs[0]);
+                for (int i = 0; i < count; i++)
+                {
+                    RecordClosedTab(_tabs[startIndex].Path, startIndex);
+                    _tabs.RemoveAt(startIndex);
+                }
+                if (removesActiveTab || _activeTab == null)
+                {
+                    ActiveTab = null;
+                    ActiveTabIndex = -1;
+                    SelectTab(_tabs[Math.Min(startIndex, _tabs.Count - 1)]);
+                }
+                else
+                {
+                    ActiveTabIndex = GetTabIndex(_activeTab);
+                }
+                UpdateTabTitles();
             }
-            EndHistoryBatch();
+            finally
+            {
+                EndHistoryBatch();
+            }
         }
 
         public void SelectTab(TabItemViewModel tab)
@@ -646,6 +709,10 @@ namespace KjTabBar.ViewModels
                 if (tab != _activeTab)
                 {
                     SetActiveTabOnly(tab);
+                }
+                if (_navigationTracker.PendingSelectedItems != null)
+                {
+                    _explorerService.SelectItems(_explorerHwnd, _navigationTracker.PendingSelectedItems);
                 }
                 ClearPendingNavigationTracking();
                 if (shouldUpdateTitles)
@@ -712,6 +779,11 @@ namespace KjTabBar.ViewModels
             }
         }
 
+        internal void RememberRemovedTab(TabItemViewModel tab)
+        {
+            if (tab != null) RecordClosedTab(tab.Path, GetTabIndex(tab));
+        }
+
         internal bool RemoveUnavailableInactiveTabs(Func<string, bool> isTabPathCurrentlyAvailable, string currentPath)
         {
             if (isTabPathCurrentlyAvailable == null)
@@ -738,6 +810,7 @@ namespace KjTabBar.ViewModels
                     continue;
                 }
 
+                RememberRemovedTab(tab);
                 _tabs.RemoveAt(i);
                 removed = true;
             }

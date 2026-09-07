@@ -48,14 +48,24 @@ namespace KjTabBar.ViewModels
             return true;
         }
 
-        public List<ClosedTabInfo> PopLastBatch()
+        public List<ClosedTabInfo> PeekLastBatch()
         {
             if (_history.Count == 0) return null;
 
             int lastIndex = _history.Count - 1;
             ClosedTabBatch batch = _history[lastIndex];
-            _history.RemoveAt(lastIndex);
             return new List<ClosedTabInfo>(batch.Tabs);
+        }
+
+        public void RemoveRestoredItem(ClosedTabInfo item)
+        {
+            for (int i = _history.Count - 1; i >= 0; i--)
+            {
+                ClosedTabBatch batch = _history[i];
+                if (!batch.Tabs.Remove(item)) continue;
+                if (batch.Tabs.Count == 0) _history.RemoveAt(i);
+                return;
+            }
         }
 
         private void AddBatch(ClosedTabBatch batch)

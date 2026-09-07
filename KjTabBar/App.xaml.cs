@@ -16,7 +16,8 @@ namespace KjTabBar
 {
     public partial class App : Application
     {
-        private IExplorerService _explorerService = new Models.ExplorerManager();
+        private IExplorerService _explorerService = new Models.ExplorerManager(true);
+        private bool _isShellWorker;
         private System.Threading.Mutex _mutex;
         private TabBarRegistry _tabBars = new TabBarRegistry();
         private ExplorerWindowTrackingState _windowTracking = new ExplorerWindowTrackingState();
@@ -42,6 +43,7 @@ namespace KjTabBar
 
         private void Application_Exit(object sender, ExitEventArgs e)
         {
+            if (_isShellWorker) return;
             _appRuntimeCoordinator.Shutdown(new AppRuntimeContext
             {
                 SaveTarget = _bootstrapResult != null && _bootstrapResult.Services != null
@@ -59,6 +61,8 @@ namespace KjTabBar
                 ForegroundEventHook = _bootstrapResult != null ? _bootstrapResult.ForegroundEventHook : null,
                 Mutex = _mutex
             });
+            IDisposable disposableExplorer = _explorerService as IDisposable;
+            if (disposableExplorer != null) disposableExplorer.Dispose();
         }
 
         private void App_DispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
@@ -97,6 +101,14 @@ namespace KjTabBar
 
         private void Application_Startup(object sender, StartupEventArgs e)
         {
+            if (ShellWorkerHost.IsWorkerRequest(e != null ? e.Args : null))
+            {
+                _isShellWorker = true;
+                ShellWorkerHost.Run(e.Args);
+                Shutdown();
+                return;
+            }
+
             if (SetupCustomActions.IsPostInstallHelperRequest(e != null ? e.Args : null))
             {
                 SetupCustomActions.RunPostInstallHelper(e.Args);
@@ -107,13 +119,22 @@ namespace KjTabBar
             ApplyLanguageResource();
             ThemeManager.Instance.ApplyThemeToResources(this.Resources);
 
-            if (StandardUserRelaunchService.ShouldRelaunchAsStandardUser(e))
-            {
-                if (StandardUserRelaunchService.TryRelaunchAsStandardUser())
+            bool canContinue = StandardUserRelaunchService.CanContinueStartup(
+                StandardUserRelaunchService.ShouldRelaunchAsStandardUser(e),
+                StandardUserRelaunchService.HasStartupArgument(e, StandardUserRelaunchService.ShellRelaunchArgument),
+                StandardUserRelaunchService.TryRelaunchAsStandardUser,
+                delegate
                 {
-                    Shutdown();
-                    return;
-                }
+                    AppLogger.LogError("App", "Standard-user relaunch failed; elevated startup was stopped.",
+                        new InvalidOperationException("A standard-user process is required."));
+                    MessageBox.Show(TryFindResource("ErrorStandardUserLaunch") as string ??
+                        "KjTabBar could not start as a standard user. Please start it without administrator privileges.",
+                        "KjTabBar", MessageBoxButton.OK, MessageBoxImage.Error);
+                });
+            if (!canContinue)
+            {
+                Shutdown();
+                return;
             }
 
             ShutdownMode = ShutdownMode.OnExplicitShutdown;

@@ -19,6 +19,8 @@ namespace KjTabBar.Models
 
         public bool Contains(string path)
         {
+            ExplorerManager manager = _explorerService as ExplorerManager;
+            if (manager != null && manager.UsesShellWorker) return manager.DesktopContains(path);
             if (string.IsNullOrEmpty(path))
             {
                 return false;

@@ -10,6 +10,7 @@ namespace KjTabBar.ViewModels
         public static void UpdateTitles(ObservableCollection<TabItemViewModel> tabs, IExplorerService explorerService)
         {
             if (tabs == null || tabs.Count == 0) return;
+            string[] titles = new string[tabs.Count];
 
             for (int i = 0; i < tabs.Count; i++)
             {
@@ -18,13 +19,13 @@ namespace KjTabBar.ViewModels
                 {
                     tab.BaseTitle = explorerService.GetFolderName(tab.Path);
                 }
-                tab.Title = tab.BaseTitle;
+                titles[i] = tab.BaseTitle;
             }
 
             Dictionary<string, List<int>> baseNameGroups = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < tabs.Count; i++)
             {
-                string title = tabs[i].Title;
+                string title = titles[i];
                 if (string.IsNullOrEmpty(title)) title = "Home";
                 if (!baseNameGroups.ContainsKey(title)) baseNameGroups[title] = new List<int>();
                 baseNameGroups[title].Add(i);
@@ -66,7 +67,7 @@ namespace KjTabBar.ViewModels
                     Dictionary<string, List<int>> currentTitleGroups = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
                     foreach (int idx in collisionIndices)
                     {
-                        string title = tabs[idx].Title;
+                        string title = titles[idx];
                         if (string.IsNullOrEmpty(title)) continue;
                         if (!currentTitleGroups.ContainsKey(title)) currentTitleGroups[title] = new List<int>();
                         currentTitleGroups[title].Add(idx);
@@ -78,10 +79,10 @@ namespace KjTabBar.ViewModels
                         {
                             foreach (int idx in entry.Value)
                             {
-                                string nextTitle = GetDeeperTitle(tabs[idx].Path, tabs[idx].Title, explorerService);
-                                if (!string.Equals(nextTitle, tabs[idx].Title, StringComparison.OrdinalIgnoreCase))
+                                string nextTitle = GetDeeperTitle(tabs[idx].Path, titles[idx], explorerService);
+                                if (!string.Equals(nextTitle, titles[idx], StringComparison.OrdinalIgnoreCase))
                                 {
-                                    tabs[idx].Title = nextTitle;
+                                    titles[idx] = nextTitle;
                                     changed = true;
                                 }
                             }
@@ -92,13 +93,13 @@ namespace KjTabBar.ViewModels
 
             for (int i = 0; i < tabs.Count; i++)
             {
-                tabs[i].Title = ShortenTitle(tabs[i].Title, 30);
+                titles[i] = ShortenTitle(titles[i], 30);
             }
 
             Dictionary<string, List<int>> finalTitleGroups = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < tabs.Count; i++)
             {
-                string baseTitle = tabs[i].Title;
+                string baseTitle = titles[i];
                 if (!finalTitleGroups.ContainsKey(baseTitle))
                 {
                     finalTitleGroups[baseTitle] = new List<int>();
@@ -113,11 +114,12 @@ namespace KjTabBar.ViewModels
                     int count = 1;
                     foreach (int idx in kvp.Value)
                     {
-                        tabs[idx].Title = "(" + count.ToString() + ")" + kvp.Key;
+                        titles[idx] = "(" + count.ToString() + ")" + kvp.Key;
                         count++;
                     }
                 }
             }
+            for (int i = 0; i < tabs.Count; i++) tabs[i].Title = titles[i];
         }
 
         internal static string GetDeeperTitle(string path, string currentTitle, IExplorerService explorerService)

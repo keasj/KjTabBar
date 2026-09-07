@@ -84,9 +84,9 @@ namespace KjTabBar.Views
 
             MenuItem reopenItem = new MenuItem() { Header = _window.TryFindResource("MenuReopenClosedTab") as string ?? "閉じたタブを開く(&T)" };
             reopenItem.IsEnabled = vm.HasClosedTabs;
-            reopenItem.Click += (s, ev) =>
+            reopenItem.Click += async (s, ev) =>
             {
-                vm.ReopenClosedTab();
+                await _window.ReopenClosedTabAsync(vm);
             };
             menu.Items.Add(reopenItem);
 
@@ -108,9 +108,9 @@ namespace KjTabBar.Views
 
             MenuItem reopenItem = new MenuItem() { Header = _window.TryFindResource("MenuReopenClosedTab") as string ?? "閉じたタブを開く(&T)" };
             reopenItem.IsEnabled = (vm != null && vm.HasClosedTabs);
-            reopenItem.Click += (s, ev) =>
+            reopenItem.Click += async (s, ev) =>
             {
-                if (vm != null) vm.ReopenClosedTab();
+                await _window.ReopenClosedTabAsync(vm);
             };
             menu.Items.Add(reopenItem);
 

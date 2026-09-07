@@ -9,7 +9,7 @@ namespace KjTabBar.Models
         private readonly Func<string, bool> _fileExists;
 
         public ShellPathAvailabilityEvaluator(Func<string, string> normalizeKnownPath)
-            : this(normalizeKnownPath, System.IO.Directory.Exists, System.IO.File.Exists)
+            : this(normalizeKnownPath, IsDirectoryAvailable, System.IO.File.Exists)
         {
         }
 
@@ -21,6 +21,38 @@ namespace KjTabBar.Models
             _normalizeKnownPath = normalizeKnownPath;
             _directoryExists = directoryExists;
             _fileExists = fileExists;
+        }
+
+        private static bool IsDirectoryAvailable(string path)
+        {
+            return IsDirectoryAvailable(path, Helpers.NativeMethods.GetDriveType, System.IO.File.GetAttributes);
+        }
+
+        internal static bool IsDirectoryAvailable(string path, Func<string, uint> getDriveType,
+            Func<string, System.IO.FileAttributes> getAttributes)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            try
+            {
+                string root = System.IO.Path.GetPathRoot(path);
+                // Only a fixed local drive can provide evidence for automatic removal.
+                if (path.StartsWith(@"\\", StringComparison.Ordinal) || string.IsNullOrEmpty(root) ||
+                    getDriveType(root) != 3) return true;
+                try
+                {
+                    return (getAttributes(path) & System.IO.FileAttributes.Directory) != 0;
+                }
+                catch (System.IO.FileNotFoundException) { }
+                catch (System.IO.DirectoryNotFoundException) { }
+                string parent = System.IO.Path.GetDirectoryName(path.TrimEnd('\\', '/'));
+                if (string.IsNullOrEmpty(parent)) return true;
+                // Confirm the containing directory is readable before treating a child as deleted.
+                return (getAttributes(parent) & System.IO.FileAttributes.Directory) == 0;
+            }
+            catch (System.IO.IOException) { return true; }
+            catch (UnauthorizedAccessException) { return true; }
+            catch (System.Security.SecurityException) { return true; }
+            catch (ArgumentException) { return true; }
         }
 
         public bool IsNavigablePath(string path)

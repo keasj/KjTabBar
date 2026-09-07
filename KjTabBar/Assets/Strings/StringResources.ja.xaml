@@ -34,4 +34,5 @@
     <system:String x:Key="FileOperationStartErrorMessage">ファイル操作の開始に失敗しました。</system:String>
 
     <system:String x:Key="TrayMenuExit">終了</system:String>
+    <system:String x:Key="ErrorStandardUserLaunch">標準ユーザーとして起動できませんでした。管理者として実行せずに KjTabBar を起動してください。</system:String>
 </ResourceDictionary>

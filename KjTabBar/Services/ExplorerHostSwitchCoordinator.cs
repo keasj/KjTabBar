@@ -115,6 +115,25 @@ namespace KjTabBar.Services
 
         public async Task<bool> PrepareForPathAsync(TabBarViewModel viewModel, string targetPath)
         {
+            try
+            {
+                return await PrepareForPathCoreAsync(viewModel, targetPath);
+            }
+            catch (Exception ex)
+            {
+                if (_windowTracking != null) _windowTracking.CancelInternalHostSwitchLaunchRequest();
+                try { CompletePendingReveal(); }
+                catch (Exception cleanupException)
+                {
+                    AppLogger.LogError("ExplorerHostSwitchCoordinator", "Failed to reveal explorer after preparation failed.", cleanupException);
+                }
+                AppLogger.LogError("ExplorerHostSwitchCoordinator", "Failed to prepare the explorer host.", ex);
+                return false;
+            }
+        }
+
+        private async Task<bool> PrepareForPathCoreAsync(TabBarViewModel viewModel, string targetPath)
+        {
             _pendingRevealExplorerHwnd = IntPtr.Zero;
             _pendingRevealHasOriginalRect = false;
             _pendingRevealOriginalRect = default(NativeMethods.RECT);

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using KjTabBar.Helpers;
 using KjTabBar.Models;
@@ -49,7 +50,31 @@ namespace KjTabBar.Services
                 DateTime syncNowUtc = DateTime.UtcNow;
                 if (_viewModel.ActiveTab == null) return;
 
-                if (_viewModel.RemoveUnavailableInactiveTabs(_explorerService.IsTabPathCurrentlyAvailable, currentPath))
+                IntPtr availabilityHost = _viewModel.ExplorerHwnd;
+                List<string> pathsToCheck = new List<string>();
+                foreach (ViewModels.TabItemViewModel tab in _viewModel.Tabs)
+                {
+                    if (!string.IsNullOrEmpty(tab.Path)) pathsToCheck.Add(tab.Path);
+                }
+                Dictionary<string, bool> availability = await ComThreadService.Instance.InvokeAsync(delegate
+                {
+                    ExplorerManager manager = _explorerService as ExplorerManager;
+                    if (manager != null && manager.UsesShellWorker) return manager.GetPathAvailability(pathsToCheck);
+                    Dictionary<string, bool> values = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+                    foreach (string path in pathsToCheck)
+                    {
+                        if (!values.ContainsKey(path)) values[path] = _explorerService.IsTabPathCurrentlyAvailable(path);
+                    }
+                    return values;
+                });
+                if (_viewModel.ExplorerHwnd != availabilityHost || _viewModel.ActiveTab == null) return;
+                Func<string, bool> isAvailable = path =>
+                {
+                    bool value;
+                    return path == null || !availability.TryGetValue(path, out value) || value;
+                };
+
+                if (_viewModel.RemoveUnavailableInactiveTabs(isAvailable, currentPath))
                 {
                     shouldUpdateTitles = true;
                 }
@@ -75,6 +100,8 @@ namespace KjTabBar.Services
                         _viewModel.ActiveTab.Title = _viewModel.ActiveTab.BaseTitle;
                         shouldUpdateTitles = true;
                     }
+                    if (_viewModel.NavigationTracker.PendingSelectedItems != null)
+                        _explorerService.SelectItems(_viewModel.ExplorerHwnd, _viewModel.NavigationTracker.PendingSelectedItems);
                     _viewModel.ClearPendingNavigationTracking();
                     return;
                 }
@@ -108,12 +135,13 @@ namespace KjTabBar.Services
                     return;
                 }
 
-                if (!_explorerService.IsTabPathCurrentlyAvailable(_viewModel.ActiveTab.Path))
+                if (!isAvailable(_viewModel.ActiveTab.Path))
                 {
                     ViewModels.TabItemViewModel matchingTab = _viewModel.FindTabByPath(currentPath);
                     if (matchingTab != null && matchingTab != _viewModel.ActiveTab)
                     {
                         ViewModels.TabItemViewModel unavailableActiveTab = _viewModel.ActiveTab;
+                        _viewModel.RememberRemovedTab(unavailableActiveTab);
                         _viewModel.Tabs.Remove(unavailableActiveTab);
                         _viewModel.SetActiveTabOnly(matchingTab);
                         _viewModel.ClearPendingNavigationTracking();

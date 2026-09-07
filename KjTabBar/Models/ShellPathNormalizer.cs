@@ -294,17 +294,31 @@ namespace KjTabBar.Models
                 }
             }
 
-            if (compactTrimmed.Contains("microsoft.programsandfeatures") || compactTrimmed.Contains("appwiz.cpl"))
+            if (IsKnownControlPanelCommand(trimmed, "appwiz.cpl", "Microsoft.ProgramsAndFeatures"))
             {
                 return _programsAndFeaturesPath;
             }
 
-            if (compactTrimmed.Contains("microsoft.poweroptions") || compactTrimmed.Contains("powercfg.cpl"))
+            if (IsKnownControlPanelCommand(trimmed, "powercfg.cpl", "Microsoft.PowerOptions"))
             {
                 return _powerOptionsPath;
             }
 
             return NormalizeShellNamespacePath(trimmed);
+        }
+
+        internal static bool IsKnownControlPanelCommand(string text, string cplName, string canonicalName)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            string value = text.Trim();
+            string canonical = System.Text.RegularExpressions.Regex.Escape(canonicalName);
+            string cpl = System.Text.RegularExpressions.Regex.Escape(cplName);
+            System.Text.RegularExpressions.RegexOptions options = System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant;
+            return System.Text.RegularExpressions.Regex.IsMatch(value,
+                @"^(?:control(?:\.exe)?\s+)?(?:/name\s+)?" + canonical + @"(?:\s+/page\s+\S+)?$", options) ||
+                System.Text.RegularExpressions.Regex.IsMatch(value,
+                @"^(?:control(?:\.exe)?\s+)?(?:""[^""]*[\\/]" + cpl + @"""|[^\s""]*[\\/]" + cpl + "|" + cpl + @")(?:,\s*\S+)?$", options);
         }
 
         public string NormalizeKnownPath(string path)

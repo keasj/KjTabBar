@@ -11,7 +11,15 @@ namespace KjTabBar.Services
 
         public static bool ShouldRelaunchAsStandardUser(StartupEventArgs e)
         {
-            return !HasStartupArgument(e, ShellRelaunchArgument) && IsRunningAsAdministrator();
+            return IsRunningAsAdministrator();
+        }
+
+        internal static bool CanContinueStartup(bool isAdministrator, bool alreadyRelaunched,
+            Func<bool> relaunch, Action reportFailure)
+        {
+            if (!isAdministrator) return true;
+            if (alreadyRelaunched || !relaunch()) reportFailure();
+            return false;
         }
 
         public static bool TryRelaunchAsStandardUser()
@@ -54,7 +62,7 @@ namespace KjTabBar.Services
             }
         }
 
-        private static bool HasStartupArgument(StartupEventArgs e, string argument)
+        internal static bool HasStartupArgument(StartupEventArgs e, string argument)
         {
             if (e == null || e.Args == null || string.IsNullOrEmpty(argument))
             {
@@ -80,7 +88,7 @@ namespace KjTabBar.Services
                 identity = System.Security.Principal.WindowsIdentity.GetCurrent();
                 if (identity == null)
                 {
-                    return false;
+                    return true;
                 }
 
                 System.Security.Principal.WindowsPrincipal principal =
@@ -90,7 +98,7 @@ namespace KjTabBar.Services
             catch (Exception ex)
             {
                 AppLogger.LogError("StandardUserRelaunchService", "Failed to determine administrator role.", ex);
-                return false;
+                return true;
             }
             finally
             {

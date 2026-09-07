@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using System.ComponentModel;
 using System.IO;
 using System.Windows;
@@ -372,16 +373,16 @@ namespace KjTabBar.Views
             if (vm != null && tab != null)
             {
                 bool hostSwitchPrepared = false;
-                if (ExplorerHostSwitchCoordinator != null &&
-                    !await ExplorerHostSwitchCoordinator.PrepareForPathAsync(vm, tab.Path))
-                {
-                    ReturnFocusToExplorer();
-                    return;
-                }
-
-                hostSwitchPrepared = ExplorerHostSwitchCoordinator != null;
                 try
                 {
+                    if (ExplorerHostSwitchCoordinator != null &&
+                        !await ExplorerHostSwitchCoordinator.PrepareForPathAsync(vm, tab.Path))
+                    {
+                        ReturnFocusToExplorer();
+                        return;
+                    }
+
+                    hostSwitchPrepared = ExplorerHostSwitchCoordinator != null;
                     if (hostSwitchPrepared)
                     {
                         ExecuteTabSelectionWithPendingReveal(
@@ -405,6 +406,24 @@ namespace KjTabBar.Views
             }
             ReturnFocusToExplorer();
             e.Handled = true;
+        }
+
+        internal async Task ReopenClosedTabAsync(TabBarViewModel vm)
+        {
+            if (vm == null) return;
+            try
+            {
+                ExplorerHostSwitchCoordinator coordinator = ExplorerHostSwitchCoordinator;
+                await vm.ReopenClosedTabAsync(
+                    coordinator != null ? new Func<string, Task<bool>>(path => coordinator.PrepareForPathAsync(vm, path)) : null,
+                    coordinator != null ? new Action<Action>(action => ExecuteTabSelectionWithPendingReveal(action, coordinator.CompletePendingReveal)) : null);
+                if (PersistTabState != null) PersistTabState(vm);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("TabBarWindow", "Failed to reopen closed tabs.", ex);
+            }
+            ReturnFocusToExplorer();
         }
 
         internal static void ExecuteTabSelectionWithPendingReveal(Action selectTabAction, Action completePendingReveal)

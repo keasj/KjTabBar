@@ -500,11 +500,11 @@ namespace KjTabBar.Models
             {
                 return _allControlPanelPath;
             }
-            if (compact.Contains("microsoft.programsandfeatures") || compact.Contains("appwiz.cpl"))
+            if (ShellPathNormalizer.IsKnownControlPanelCommand(trimmed, "appwiz.cpl", "Microsoft.ProgramsAndFeatures"))
             {
                 return _programsAndFeaturesPath;
             }
-            if (compact.Contains("microsoft.poweroptions") || compact.Contains("powercfg.cpl"))
+            if (ShellPathNormalizer.IsKnownControlPanelCommand(trimmed, "powercfg.cpl", "Microsoft.PowerOptions"))
             {
                 return _powerOptionsPath;
             }

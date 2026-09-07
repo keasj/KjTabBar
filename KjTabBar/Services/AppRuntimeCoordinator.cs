@@ -114,7 +114,14 @@ namespace KjTabBar.Services
 
             if (context.ExplorerService != null)
             {
-                context.ExplorerService.ReleaseCachedComObjects();
+                try
+                {
+                    context.ExplorerService.ReleaseCachedComObjects();
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.LogError("App", "Failed to release UI COM cache during shutdown.", ex);
+                }
 
                 if (ComThreadService.IsCreated)
                 {
