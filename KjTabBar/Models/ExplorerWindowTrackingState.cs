@@ -24,6 +24,7 @@ namespace KjTabBar.Models
         public HashSet<IntPtr> DesktopLaunchCandidates { get; private set; }
         public HashSet<IntPtr> DesktopInteractiveLaunchCandidates { get; private set; }
         public HashSet<IntPtr> ControlPanelTabLaunchCandidates { get; private set; }
+        public HashSet<IntPtr> ManagedControlPanelLaunchWindows { get; private set; }
         public HashSet<IntPtr> ExplicitIndependentLaunchWindows { get; private set; }
         public Dictionary<IntPtr, DateTime> HiddenPendingAbsorb { get; private set; }
         public Dictionary<IntPtr, NativeMethods.RECT> HiddenOriginalRects { get; private set; }
@@ -57,6 +58,7 @@ namespace KjTabBar.Models
             DesktopLaunchCandidates = new HashSet<IntPtr>();
             DesktopInteractiveLaunchCandidates = new HashSet<IntPtr>();
             ControlPanelTabLaunchCandidates = new HashSet<IntPtr>();
+            ManagedControlPanelLaunchWindows = new HashSet<IntPtr>();
             ExplicitIndependentLaunchWindows = new HashSet<IntPtr>();
             HiddenPendingAbsorb = new Dictionary<IntPtr, DateTime>();
             HiddenOriginalRects = new Dictionary<IntPtr, NativeMethods.RECT>();
@@ -100,6 +102,7 @@ namespace KjTabBar.Models
             RemoveClosedWindows(DesktopLaunchCandidates, explorerWindows);
             RemoveClosedWindows(DesktopInteractiveLaunchCandidates, explorerWindows);
             RemoveClosedWindows(ControlPanelTabLaunchCandidates, explorerWindows);
+            RemoveClosedWindows(ManagedControlPanelLaunchWindows, explorerWindows);
             RemoveClosedWindows(ExplicitIndependentLaunchWindows, explorerWindows);
             RemoveClosedWindows(ProcessingExplorerWindows, explorerWindows);
             RemoveClosedWindowKeys(HiddenPendingAbsorb, explorerWindows);
@@ -113,6 +116,7 @@ namespace KjTabBar.Models
             DesktopLaunchCandidates.Remove(hwnd);
             DesktopInteractiveLaunchCandidates.Remove(hwnd);
             ControlPanelTabLaunchCandidates.Remove(hwnd);
+            ManagedControlPanelLaunchWindows.Remove(hwnd);
         }
 
         public void RememberRecentClosedManagedExplorerRect(NativeMethods.RECT rect, DateTime closedUtc)

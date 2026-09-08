@@ -20,7 +20,7 @@ namespace KjTabBar.Services
 
         public async Task SyncWithExplorerAsync()
         {
-            if (_isSyncing) return;
+            if (_isSyncing || _viewModel.IsRestoringControlPanelHost) return;
             _isSyncing = true;
             bool shouldUpdateTitles = false;
             try
@@ -39,7 +39,7 @@ namespace KjTabBar.Services
 
                     // COM ワーカーでは Explorer のパス取得だけを行い、UI 管理状態には触れない。
                     currentPath = await ComThreadService.Instance.InvokeAsync(() => _explorerService.GetCurrentPath(explorerHwnd));
-                    if (_viewModel.ExplorerHwnd != explorerHwnd)
+                    if (_viewModel.IsRestoringControlPanelHost || _viewModel.ExplorerHwnd != explorerHwnd)
                     {
                         return;
                     }
@@ -67,7 +67,7 @@ namespace KjTabBar.Services
                     }
                     return values;
                 });
-                if (_viewModel.ExplorerHwnd != availabilityHost || _viewModel.ActiveTab == null) return;
+                if (_viewModel.IsRestoringControlPanelHost || _viewModel.ExplorerHwnd != availabilityHost || _viewModel.ActiveTab == null) return;
                 Func<string, bool> isAvailable = path =>
                 {
                     bool value;
@@ -87,7 +87,9 @@ namespace KjTabBar.Services
                     return;
                 }
 
-                if (_explorerService.IsControlPanelRootPath(currentPath))
+                if (_explorerService.IsControlPanelRootPath(currentPath) &&
+                    (_viewModel.NavigationTracker.NavigatingToPath == null ||
+                     _viewModel.PathEquals(_viewModel.NavigationTracker.NavigatingToPath, currentPath)))
                 {
                     string normalizedCPPath = _explorerService.AllControlPanelPath;
                     string localizedCPTitle = _explorerService.GetLocalizedControlPanelTitle();

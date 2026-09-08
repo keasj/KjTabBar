@@ -283,15 +283,20 @@ namespace KjTabBar.Services
                     targetPath ?? string.Empty,
                     previousExplorerWindows.Count));
 
+            // Open the parent first so the restored item has a native Explorer Back entry.
+            string launchPath = _explorerService.IsControlPanelPath(targetPath) &&
+                !_explorerService.IsControlPanelRootPath(targetPath)
+                ? _explorerService.AllControlPanelPath
+                : targetPath;
             _windowTracking.RegisterInternalHostSwitchLaunchRequest();
-            if (!_openInNewWindow(targetPath))
+            if (!_openInNewWindow(launchPath))
             {
                 _windowTracking.CancelInternalHostSwitchLaunchRequest();
                 AppLogger.LogInfo("ExplorerHostSwitchCoordinator", "TrySwitchToFreshExplorerHost openInNewWindowFailed");
                 return false;
             }
 
-            IntPtr newExplorerHwnd = await WaitForNewExplorerWindowAsync(previousExplorerWindows, currentExplorerHwnd, targetPath);
+            IntPtr newExplorerHwnd = await WaitForNewExplorerWindowAsync(previousExplorerWindows, currentExplorerHwnd, launchPath);
             if (newExplorerHwnd == IntPtr.Zero)
             {
                 _windowTracking.CancelInternalHostSwitchLaunchRequest();

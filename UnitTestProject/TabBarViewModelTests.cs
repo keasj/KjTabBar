@@ -401,6 +401,25 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void SyncWithExplorerAsync_KeepsItemNavigationPending_WhileControlPanelParentIsStillDisplayed()
+        {
+            SynchronizerControlPanelExplorerService explorer = new SynchronizerControlPanelExplorerService();
+            explorer.CurrentPath = explorer.AllControlPanelPath;
+            TabBarViewModel viewModel = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer);
+            viewModel.RestoreTabs(new string[] { explorer.PowerOptionsPath }, explorer.PowerOptionsPath, 0, true);
+            viewModel.SelectTab(viewModel.ActiveTab);
+
+            viewModel.SyncWithExplorerAsync().GetAwaiter().GetResult();
+
+            Assert.AreEqual(explorer.PowerOptionsPath, viewModel.ActiveTab.Path);
+            Assert.AreEqual(explorer.PowerOptionsPath, viewModel.NavigationTracker.NavigatingToPath);
+            explorer.CurrentPath = explorer.PowerOptionsPath;
+            viewModel.SyncWithExplorerAsync().GetAwaiter().GetResult();
+            Assert.AreEqual(explorer.PowerOptionsPath, viewModel.ActiveTab.Path);
+            Assert.IsNull(viewModel.NavigationTracker.NavigatingToPath);
+        }
+
+        [TestMethod]
         public void SyncWithExplorerAsync_UpdatesActiveControlPanelItemTab_WhenSeparateRootTabExists()
         {
             SynchronizerControlPanelExplorerService mockExplorer = new SynchronizerControlPanelExplorerService();

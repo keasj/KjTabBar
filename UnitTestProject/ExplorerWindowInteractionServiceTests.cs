@@ -12,6 +12,189 @@ namespace UnitTestProject
     public class ExplorerWindowInteractionServiceTests
     {
         [TestMethod]
+        public void PowerOptionsRegression_ReusesSourceTab_WithoutNavigatingBackToControlPanel()
+        {
+            VerifyManagedPowerOptionsNavigation(false);
+        }
+
+        [TestMethod]
+        public void PowerOptionsRegression_PreservesSourceTab_WhenEquivalentBackgroundTabExists()
+        {
+            VerifyManagedPowerOptionsNavigation(true);
+        }
+
+        private static void VerifyManagedPowerOptionsNavigation(bool addEquivalentBackgroundTab)
+        {
+            PowerOptionsExplorerService explorer = new PowerOptionsExplorerService();
+            TabBarViewModel viewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.AllControlPanelPath);
+            TabItemViewModel sourceTab = viewModel.ActiveTab;
+            if (addEquivalentBackgroundTab)
+            {
+                viewModel.Tabs.Add(new TabItemViewModel(explorer.PowerOptionsPath, "Power Options", explorer));
+            }
+            int initialCount = viewModel.Tabs.Count;
+            ExplorerWindowInteractionService service = CreatePowerOptionsInteraction(explorer, new ExplorerWindowTrackingState(), TestTabPersistenceFactory.Create());
+
+            Assert.IsTrue(service.AbsorbExplorerWindow((IntPtr)200, viewModel, explorer.PowerOptionsPath, true, true, delegate { }, true));
+
+            Assert.AreEqual(initialCount, viewModel.Tabs.Count);
+            Assert.AreSame(sourceTab, viewModel.ActiveTab);
+            Assert.AreEqual(explorer.PowerOptionsPath, sourceTab.Path);
+            Assert.AreEqual(0, explorer.NavigationCount, "Adopting an already open page must not navigate back to the old page.");
+            Assert.IsNull(viewModel.NavigationTracker.NavigatingToPath);
+        }
+
+        [TestMethod]
+        public void PowerOptionsRegression_Restoration_OpensOnlyOnePowerOptionsWindow()
+        {
+            string tabsPath = Path.Combine(Path.GetTempPath(), "KjTabBar.Tests." + Guid.NewGuid().ToString("N") + ".tabs.txt");
+            string activePath = Path.Combine(Path.GetDirectoryName(tabsPath), Path.GetFileNameWithoutExtension(tabsPath) + ".active.txt");
+            try
+            {
+                PowerOptionsExplorerService explorer = new PowerOptionsExplorerService();
+                ProtectedTextStorage.SaveLines(tabsPath, new string[] { @"C:\Saved", explorer.PowerOptionsPath });
+                ProtectedTextStorage.SaveLines(activePath, new string[] { "index=1", explorer.PowerOptionsPath });
+                ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+                TabBarViewModel viewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.HomeFolderPath);
+                ExplorerWindowInteractionService service = CreatePowerOptionsInteraction(explorer, tracking, new TabPersistenceService(tabsPath));
+                bool opened = false;
+                string openedPath = null;
+                explorer.GetCurrentPathFunc = hwnd => hwnd == (IntPtr)200 ? openedPath : explorer.HomeFolderPath;
+                int explicitOpens = 0;
+                ExplorerHostSwitchCoordinator host = new ExplorerHostSwitchCoordinator(
+                    explorer, tracking,
+                    delegate (TabBarViewModel vm, IntPtr hwnd) { vm.SetExplorerHwnd(hwnd); return true; },
+                    delegate { }, delegate { }, delegate { },
+                    delegate { return true; },
+                    delegate { return opened
+                        ? new System.Collections.Generic.List<IntPtr> { (IntPtr)100, (IntPtr)200 }
+                        : new System.Collections.Generic.List<IntPtr> { (IntPtr)100 }; },
+                    delegate (IntPtr hwnd) { return explorer.GetCurrentPath(hwnd); },
+                    delegate (string path) { explicitOpens++; openedPath = path; opened = true; return true; },
+                    delegate { });
+
+                service.InitializeTabsForNewWindow(viewModel, explorer.HomeFolderPath, false);
+                Assert.AreEqual(explorer.PowerOptionsPath, viewModel.ActiveTab.Path);
+                Assert.IsTrue(host.PrepareForPath(viewModel, viewModel.ActiveTab.Path));
+                viewModel.SelectTab(viewModel.ActiveTab);
+                host.CompletePendingReveal();
+
+                Assert.AreEqual(explorer.AllControlPanelPath, openedPath);
+                Assert.AreEqual(1, explorer.NavigationCount);
+                Assert.AreEqual(1, explicitOpens + explorer.PowerOptionsLaunchCount,
+                    "Restoration must not navigate the normal host before opening the dedicated Control Panel host.");
+                Assert.AreEqual(2, viewModel.Tabs.Count);
+                Assert.AreEqual(1, viewModel.ActiveTabIndex);
+                Assert.AreEqual((IntPtr)200, viewModel.ExplorerHwnd);
+            }
+            finally
+            {
+                if (File.Exists(tabsPath)) File.Delete(tabsPath);
+                if (File.Exists(activePath)) File.Delete(activePath);
+            }
+        }
+
+        [TestMethod]
+        public async System.Threading.Tasks.Task PowerOptionsRegression_RemembersLaunchSource_AfterForegroundChanges()
+        {
+            PowerOptionsExplorerService explorer = new PowerOptionsExplorerService();
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+            DesktopForegroundTracker foreground = new DesktopForegroundTracker();
+            IntPtr currentForeground = (IntPtr)100;
+            ExplorerLaunchTracker launch = new ExplorerLaunchTracker(
+                foreground, tracking,
+                delegate (IntPtr hwnd) { return hwnd == (IntPtr)100; },
+                delegate (IntPtr hwnd) { return hwnd == (IntPtr)100; },
+                delegate { return currentForeground; },
+                delegate { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate { return true; });
+            TabBarViewModel viewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.AllControlPanelPath);
+            ExplorerWindowMonitorCoordinator monitor = new ExplorerWindowMonitorCoordinator(
+                new TabBarRegistry(), tracking, foreground, launch,
+                delegate { return "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate { return new NativeMethods.RECT(); }, delegate { }, null, delegate { return DateTime.UtcNow; });
+            foreground.Update(currentForeground, "CabinetWClass");
+            monitor.HandleShowEvent((IntPtr)200, delegate { return viewModel; }, delegate { return true; });
+            currentForeground = (IntPtr)200;
+            foreground.Update(currentForeground, "CabinetWClass");
+            foreground.Update(currentForeground, "CabinetWClass");
+            Assert.IsFalse(launch.WasManagedControlPanelLaunchSource());
+
+            ExplorerWindowInteractionService interaction = CreatePowerOptionsInteraction(explorer, tracking, TestTabPersistenceFactory.Create());
+            ExplorerWindowEvaluationResult observed = null;
+            ExplorerWindowProcessingCoordinator processing = new ExplorerWindowProcessingCoordinator(
+                tracking, launch, new ExplorerWindowEvaluationService(explorer, new DesktopPathClassifier(explorer)), interaction,
+                new ExplorerWindowOutcomeCoordinator(tracking, interaction, delegate { }, delegate { return new MockUserSettings(); }, delegate { }),
+                delegate (Func<ExplorerWindowEvaluationResult> callback)
+                {
+                    observed = callback();
+                    return System.Threading.Tasks.Task.FromResult(observed);
+                });
+            await processing.ProcessAsync((IntPtr)200, viewModel,
+                delegate { return viewModel; }, delegate { return viewModel; },
+                delegate (TabBarViewModel vm, string path) { return vm.FindTabByPath(path) != null; },
+                delegate { return true; }, delegate { return false; }, delegate { return false; });
+
+            Assert.IsTrue(observed.WasManagedControlPanelLaunchSource, "The show event must retain the origin through delayed processing.");
+            Assert.AreEqual(1, viewModel.Tabs.Count);
+            Assert.AreEqual(explorer.PowerOptionsPath, viewModel.ActiveTab.Path);
+        }
+
+        [TestMethod]
+        public async System.Threading.Tasks.Task PowerOptionsRegression_KeepsRestoredTab_WhileHostPreparationIsPending()
+        {
+            PowerOptionsExplorerService explorer = new PowerOptionsExplorerService();
+            TabBarViewModel viewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.HomeFolderPath);
+            viewModel.RestoreTabs(new string[] { @"C:\Saved", explorer.PowerOptionsPath }, explorer.PowerOptionsPath, 1, true);
+
+            await viewModel.SyncWithExplorerAsync();
+
+            Assert.AreEqual(explorer.PowerOptionsPath, viewModel.ActiveTab.Path);
+            Assert.AreEqual(1, viewModel.ActiveTabIndex);
+            Assert.AreEqual(0, explorer.NavigationCount);
+
+            viewModel.SetExplorerHwnd((IntPtr)200);
+            viewModel.SelectTab(viewModel.ActiveTab);
+            Assert.IsFalse(viewModel.IsRestoringControlPanelHost);
+            int pathQueries = 0;
+            explorer.GetCurrentPathFunc = delegate { pathQueries++; return explorer.PowerOptionsPath; };
+            viewModel.NavigationTracker.UpdateCache(null, DateTime.MinValue);
+            await viewModel.SyncWithExplorerAsync();
+            Assert.AreEqual(1, pathQueries, "Synchronization must resume after restoration.");
+        }
+
+        private static ExplorerWindowInteractionService CreatePowerOptionsInteraction(
+            PowerOptionsExplorerService explorer, ExplorerWindowTrackingState tracking, TabPersistenceService persistence)
+        {
+            return new ExplorerWindowInteractionService(explorer, tracking, persistence,
+                delegate { return string.Empty; }, delegate { }, delegate { }, delegate { },
+                delegate (TabBarViewModel vm, IntPtr hwnd) { vm.SetExplorerHwnd(hwnd); return true; },
+                delegate { }, delegate { return null; }, delegate { });
+        }
+
+        private sealed class PowerOptionsExplorerService : MockExplorerService
+        {
+            public int NavigationCount { get; private set; }
+            public int PowerOptionsLaunchCount { get; private set; }
+
+            public PowerOptionsExplorerService()
+            {
+                IsControlPanelPathFunc = path => path == AllControlPanelPath || path == PowerOptionsPath;
+                IsControlPanelRootPathFunc = path => path == AllControlPanelPath;
+                GetCurrentPathFunc = hwnd => hwnd == (IntPtr)200 ? PowerOptionsPath : HomeFolderPath;
+            }
+
+            public override bool Navigate(IntPtr explorerHwnd, string path)
+            {
+                NavigationCount++;
+                if (explorerHwnd == (IntPtr)100 && path == PowerOptionsPath) PowerOptionsLaunchCount++;
+                return true;
+            }
+        }
+
+        [TestMethod]
         public void CleanupClosedWindows_PreservesParkedExplorerOrigin_WhenParkedWindowIsStillAliveButNotEnumerated()
         {
             ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState(

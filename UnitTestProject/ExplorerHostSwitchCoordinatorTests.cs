@@ -11,6 +11,75 @@ namespace UnitTestProject
     public class ExplorerHostSwitchCoordinatorTests
     {
         [TestMethod]
+        public void PrepareForPath_CreatesParentHistory_ForPowerOptions()
+        {
+            VerifyControlPanelParentHistory("PowerOptionsPath");
+        }
+
+        [TestMethod]
+        public void PrepareForPath_CreatesParentHistory_ForStorageSpaces()
+        {
+            VerifyControlPanelParentHistory("StorageSpacesPath");
+        }
+
+        private static void VerifyControlPanelParentHistory(string itemPath)
+        {
+            ControlPanelHistoryExplorerService explorer = new ControlPanelHistoryExplorerService(itemPath);
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+            string launchedPath = null;
+            int launchCount = 0;
+            ExplorerHostSwitchCoordinator coordinator = new ExplorerHostSwitchCoordinator(
+                explorer, tracking,
+                delegate (TabBarViewModel vm, IntPtr hwnd) { vm.SetExplorerHwnd(hwnd); return true; },
+                delegate { }, delegate { }, delegate { },
+                delegate { return true; },
+                delegate { return launchedPath == null
+                    ? new System.Collections.Generic.List<IntPtr> { (IntPtr)100 }
+                    : new System.Collections.Generic.List<IntPtr> { (IntPtr)100, (IntPtr)200 }; },
+                delegate (IntPtr hwnd) { return explorer.GetCurrentPath(hwnd); },
+                delegate (string path) { launchCount++; launchedPath = path; explorer.NewWindowPath = path; return true; },
+                delegate { });
+            TabBarViewModel viewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.HomeFolderPath);
+            viewModel.RestoreTabs(new string[] { itemPath }, itemPath, 0, true);
+
+            Assert.IsTrue(coordinator.PrepareForPath(viewModel, itemPath));
+            viewModel.SelectTab(viewModel.ActiveTab);
+            coordinator.CompletePendingReveal();
+
+            Assert.AreEqual(explorer.AllControlPanelPath, launchedPath, "Open the parent before navigating to the saved item.");
+            Assert.AreEqual(itemPath, explorer.NewWindowPath);
+            Assert.AreEqual(explorer.AllControlPanelPath, explorer.PreviousPath, "Back must lead to the Control Panel parent.");
+            Assert.AreEqual(1, launchCount);
+            Assert.AreEqual(1, viewModel.Tabs.Count);
+            Assert.AreEqual((IntPtr)200, viewModel.ExplorerHwnd);
+        }
+
+        private sealed class ControlPanelHistoryExplorerService : MockExplorerService
+        {
+            public string NewWindowPath { get; set; }
+            public string PreviousPath { get; private set; }
+
+            public ControlPanelHistoryExplorerService(string itemPath)
+            {
+                IsControlPanelPathFunc = path => path == AllControlPanelPath || path == itemPath;
+                IsControlPanelRootPathFunc = path => path == AllControlPanelPath;
+            }
+
+            public override string GetCurrentPath(IntPtr explorerHwnd)
+            {
+                return explorerHwnd == (IntPtr)200 ? NewWindowPath : HomeFolderPath;
+            }
+
+            public override bool Navigate(IntPtr explorerHwnd, string path)
+            {
+                Assert.AreEqual((IntPtr)200, explorerHwnd, "Do not navigate the ordinary host to a Control Panel item.");
+                PreviousPath = NewWindowPath;
+                NewWindowPath = path;
+                return true;
+            }
+        }
+
+        [TestMethod]
         public void PrepareForPath_RestoresParkedExplorerHost_ForNormalPath()
         {
             MockExplorerService explorerService = new MockExplorerService();
@@ -592,7 +661,7 @@ namespace UnitTestProject
 
                 if (hwnd == (IntPtr)300)
                 {
-                    return explorerService.PowerOptionsPath;
+                    return explorerService.AllControlPanelPath;
                 }
 
                 return @"C:\MockPath";
@@ -639,7 +708,7 @@ namespace UnitTestProject
             coordinator.CompletePendingReveal();
 
             Assert.IsTrue(prepared);
-            Assert.AreEqual(explorerService.PowerOptionsPath, explorerService.OpenedInNewWindowPath);
+            Assert.AreEqual(explorerService.AllControlPanelPath, explorerService.OpenedInNewWindowPath);
             Assert.AreEqual((IntPtr)300, reboundHwnd);
             Assert.AreEqual((IntPtr)300, shownHwnd);
             Assert.AreEqual((IntPtr)300, viewModel.ExplorerHwnd);

@@ -115,6 +115,12 @@ namespace KjTabBar.Services
             TabBarViewModel validTarget = findValidTarget != null ? findValidTarget() : null;
             if (validTarget == null) return;
 
+            // Capture the origin before later foreground updates and COM retries lose it.
+            if (_explorerLaunchTracker.WasManagedControlPanelLaunchSource())
+            {
+                _windowTracking.ManagedControlPanelLaunchWindows.Add(rootHwnd);
+            }
+
             bool wasDesktopForegroundRecently = _desktopForegroundTracker.WasDesktopForegroundRecently();
             if ((_explorerLaunchTracker.IsForegroundRelatedWindow(validTarget.ExplorerHwnd) ||
                  _explorerLaunchTracker.WasForegroundRelatedWindow(validTarget.ExplorerHwnd)) &&

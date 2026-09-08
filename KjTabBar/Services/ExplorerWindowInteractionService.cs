@@ -207,6 +207,7 @@ namespace KjTabBar.Services
             ExplorerHostSwitchCoordinator coordinator = tabBarWindow.ExplorerHostSwitchCoordinator;
             if (coordinator == null)
             {
+                viewModel.IsRestoringControlPanelHost = false;
                 return;
             }
 
@@ -216,14 +217,21 @@ namespace KjTabBar.Services
             }
             else
             {
-                if (!coordinator.PrepareForPath(viewModel, activeTab.Path))
+                try
                 {
-                    return;
-                }
+                    if (!coordinator.PrepareForPath(viewModel, activeTab.Path))
+                    {
+                        return;
+                    }
 
-                TabBarWindow.ExecuteTabSelectionWithPendingReveal(
-                    delegate { viewModel.SelectTab(activeTab); },
-                    coordinator.CompletePendingReveal);
+                    TabBarWindow.ExecuteTabSelectionWithPendingReveal(
+                        delegate { viewModel.SelectTab(activeTab); },
+                        coordinator.CompletePendingReveal);
+                }
+                finally
+                {
+                    viewModel.IsRestoringControlPanelHost = false;
+                }
             }
         }
 
@@ -247,6 +255,10 @@ namespace KjTabBar.Services
             {
                 AppLogger.LogError("ExplorerWindowInteractionService", "Failed to restore persisted special active tab host asynchronously.", ex);
             }
+            finally
+            {
+                viewModel.IsRestoringControlPanelHost = false;
+            }
         }
 
         internal void InitializeTabsForNewWindow(TabBarViewModel viewModel, string initialPath, bool useInitialPathOnly)
@@ -256,7 +268,7 @@ namespace KjTabBar.Services
                 return;
             }
 
-            bool loadedSavedTabs = _tabPersistence.LoadTabsTo(viewModel);
+            bool loadedSavedTabs = _tabPersistence.LoadTabsTo(viewModel, deferControlPanelNavigation: true);
 
             if (string.IsNullOrEmpty(initialPath))
             {
@@ -431,13 +443,13 @@ namespace KjTabBar.Services
             TabItemViewModel reusableTab = null;
             if (wasManagedControlPanelLaunchSource)
             {
-                reusableTab = FindEquivalentControlPanelTab(targetViewModel, path);
-                if (reusableTab == null)
+                if (targetViewModel.ActiveTab != null && _explorerService.IsControlPanelPath(targetViewModel.ActiveTab.Path))
                 {
-                    if (targetViewModel.ActiveTab != null && _explorerService.IsControlPanelPath(targetViewModel.ActiveTab.Path))
-                    {
-                        reusableTab = targetViewModel.ActiveTab;
-                    }
+                    reusableTab = targetViewModel.ActiveTab;
+                }
+                else
+                {
+                    reusableTab = FindEquivalentControlPanelTab(targetViewModel, path);
                 }
             }
 
@@ -491,7 +503,14 @@ namespace KjTabBar.Services
                 return false;
             }
 
-            targetViewModel.SelectTab(reusableTab);
+            // The new host already displays this page. Adopt it without navigating to the old tab path.
+            reusableTab.Path = path;
+            reusableTab.BaseTitle = _explorerService.GetFolderName(path);
+            targetViewModel.ClearPendingNavigationTracking();
+            targetViewModel.ClearCancelledNavigationTracking();
+            targetViewModel.NavigationTracker.UpdateCache(path, DateTime.UtcNow);
+            targetViewModel.IsRestoringControlPanelHost = false;
+            targetViewModel.SetActiveTabOnly(reusableTab);
             targetViewModel.UpdateTabTitles();
 
             _forceSetForegroundWindow(newExplorerHwnd);

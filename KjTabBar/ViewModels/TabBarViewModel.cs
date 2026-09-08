@@ -31,6 +31,8 @@ namespace KjTabBar.ViewModels
 
         private readonly TabBarExplorerSynchronizer _synchronizer;
 
+        internal bool IsRestoringControlPanelHost { get; set; }
+
         public IntPtr ExplorerHwnd
         {
             get { return _explorerHwnd; }
@@ -448,6 +450,11 @@ namespace KjTabBar.ViewModels
 
         public void RestoreTabs(string[] paths, string activePath, int? activeIndex)
         {
+            RestoreTabs(paths, activePath, activeIndex, false);
+        }
+
+        internal void RestoreTabs(string[] paths, string activePath, int? activeIndex, bool deferControlPanelNavigation)
+        {
             if (paths == null || paths.Length == 0) return;
 
             string initialPath = null;
@@ -491,26 +498,40 @@ namespace KjTabBar.ViewModels
 
                 if (activeTab != null)
                 {
-                    SelectTab(activeTab);
+                    SelectRestoredTab(activeTab, deferControlPanelNavigation);
                 }
                 else if (!string.IsNullOrEmpty(initialPath))
                 {
                     TabItemViewModel targetTab = FindTabByPath(initialPath);
                     if (targetTab != null)
                     {
-                        SelectTab(targetTab);
+                        SelectRestoredTab(targetTab, deferControlPanelNavigation);
                     }
                     else if (_tabs.Count > 0)
                     {
-                        SelectTab(_tabs[0]);
+                        SelectRestoredTab(_tabs[0], deferControlPanelNavigation);
                     }
                 }
                 else if (_tabs.Count > 0)
                 {
-                    SelectTab(_tabs[0]);
+                    SelectRestoredTab(_tabs[0], deferControlPanelNavigation);
                 }
             }
             UpdateTabTitles();
+        }
+
+        private void SelectRestoredTab(TabItemViewModel tab, bool deferControlPanelNavigation)
+        {
+            if (deferControlPanelNavigation && _explorerService.IsControlPanelPath(tab.Path))
+            {
+                // The interaction service prepares the Control Panel host before navigation.
+                IsRestoringControlPanelHost = true;
+                ClearPendingNavigationTracking();
+                SetActiveTabOnly(tab);
+                return;
+            }
+
+            SelectTab(tab);
         }
 
         private bool IsPersistedTabPathRestorable(string path)
@@ -665,6 +686,7 @@ namespace KjTabBar.ViewModels
         {
             if (tab == null) return;
 
+            IsRestoringControlPanelHost = false;
             ClearCancelledNavigationTracking();
 
             bool shouldUpdateTitles = false;
