@@ -154,7 +154,7 @@ namespace KjTabBar.Services
             IntPtr currentExplorerHwnd = viewModel.ExplorerHwnd;
             bool currentIsControlPanelHost = await IsControlPanelHostAsync(currentExplorerHwnd, viewModel, targetIsControlPanelPath);
             IntPtr parkedExplorerHwnd;
-            AppLogger.LogInfo(
+            AppLogger.LogDiagnostic(
                 "ExplorerHostSwitchCoordinator",
                 string.Format(
                     "PrepareForPath current={0} targetPath={1} targetIsControlPanel={2} currentIsControlPanel={3}",
@@ -164,7 +164,7 @@ namespace KjTabBar.Services
                     currentIsControlPanelHost));
             if (!_windowTracking.TryGetParkedExplorerOrigin(currentExplorerHwnd, out parkedExplorerHwnd))
             {
-                AppLogger.LogInfo(
+                AppLogger.LogDiagnostic(
                     "ExplorerHostSwitchCoordinator",
                     string.Format("PrepareForPath noParkedOrigin current={0}", currentExplorerHwnd));
                 if (currentIsControlPanelHost != targetIsControlPanelPath)
@@ -177,7 +177,7 @@ namespace KjTabBar.Services
 
             if (parkedExplorerHwnd == IntPtr.Zero || (_isWindow != null && !_isWindow(parkedExplorerHwnd)))
             {
-                AppLogger.LogInfo(
+                AppLogger.LogDiagnostic(
                     "ExplorerHostSwitchCoordinator",
                     string.Format("PrepareForPath invalidParkedOrigin current={0} parked={1}", currentExplorerHwnd, parkedExplorerHwnd));
                 _windowTracking.ClearParkedExplorerOrigin(currentExplorerHwnd);
@@ -194,7 +194,7 @@ namespace KjTabBar.Services
 
             if (!shouldSwitchToParkedHost)
             {
-                AppLogger.LogInfo(
+                AppLogger.LogDiagnostic(
                     "ExplorerHostSwitchCoordinator",
                     string.Format(
                         "PrepareForPath keepCurrentHost current={0} parked={1} parkedIsControlPanel={2}",
@@ -207,6 +207,7 @@ namespace KjTabBar.Services
             try
             {
                 NativeMethods.RECT? currentExplorerRect = _getWindowRect != null ? _getWindowRect(currentExplorerHwnd) : null;
+                AlignHostBeforeRebind(parkedExplorerHwnd, currentExplorerRect);
                 if (!_rebindExplorerWindow(viewModel, parkedExplorerHwnd))
                 {
                     return false;
@@ -227,7 +228,7 @@ namespace KjTabBar.Services
                     _pendingRevealHasOriginalRect = false;
                     _pendingRevealOriginalRect = default(NativeMethods.RECT);
                 }
-                AppLogger.LogInfo(
+                AppLogger.LogDiagnostic(
                     "ExplorerHostSwitchCoordinator",
                     string.Format("PrepareForPath switchedToParkedHost current={0} parked={1}", currentExplorerHwnd, parkedExplorerHwnd));
 
@@ -275,7 +276,7 @@ namespace KjTabBar.Services
 
             HashSet<IntPtr> previousExplorerWindows = new HashSet<IntPtr>(_findExplorerWindows());
             NativeMethods.RECT? currentExplorerRect = _getWindowRect != null ? _getWindowRect(currentExplorerHwnd) : null;
-            AppLogger.LogInfo(
+            AppLogger.LogDiagnostic(
                 "ExplorerHostSwitchCoordinator",
                 string.Format(
                     "TrySwitchToFreshExplorerHost current={0} targetPath={1} previousCount={2}",
@@ -292,7 +293,7 @@ namespace KjTabBar.Services
             if (!_openInNewWindow(launchPath))
             {
                 _windowTracking.CancelInternalHostSwitchLaunchRequest();
-                AppLogger.LogInfo("ExplorerHostSwitchCoordinator", "TrySwitchToFreshExplorerHost openInNewWindowFailed");
+                AppLogger.LogDiagnostic("ExplorerHostSwitchCoordinator", "TrySwitchToFreshExplorerHost openInNewWindowFailed");
                 return false;
             }
 
@@ -300,7 +301,7 @@ namespace KjTabBar.Services
             if (newExplorerHwnd == IntPtr.Zero)
             {
                 _windowTracking.CancelInternalHostSwitchLaunchRequest();
-                AppLogger.LogInfo("ExplorerHostSwitchCoordinator", "TrySwitchToFreshExplorerHost noNewExplorerWindowFound");
+                AppLogger.LogDiagnostic("ExplorerHostSwitchCoordinator", "TrySwitchToFreshExplorerHost noNewExplorerWindowFound");
                 return false;
             }
 
@@ -319,8 +320,17 @@ namespace KjTabBar.Services
                 _windowTracking.HiddenPendingAbsorb.Remove(newExplorerHwnd);
                 _windowTracking.HiddenOriginalRects.Remove(newExplorerHwnd);
 
+                NativeMethods.RECT? preparedRect = currentExplorerRect.HasValue &&
+                    NativeMethods.IsUsableWindowRestoreRect(currentExplorerRect.Value)
+                    ? currentExplorerRect
+                    : (hadHiddenOriginalRect ? (NativeMethods.RECT?)hiddenOriginalRect : null);
+                AlignHostBeforeRebind(newExplorerHwnd, preparedRect);
+
+                AppLogger.LogDiagnostic("ExplorerHostSwitchCoordinator", string.Format(
+                    "Rebind requested current={0} new={1}", currentExplorerHwnd, newExplorerHwnd));
                 if (!_rebindExplorerWindow(viewModel, newExplorerHwnd))
                 {
+                    AppLogger.LogDiagnostic("ExplorerHostSwitchCoordinator", "Rebind rejected");
                     RestorePreparedExplorerWindow(newExplorerHwnd, hadHiddenPending, hadHiddenOriginalRect, hiddenOriginalRect);
                     return false;
                 }
@@ -340,7 +350,7 @@ namespace KjTabBar.Services
                         NativeMethods.IsUsableWindowRestoreRect(hiddenOriginalRect);
                     _pendingRevealOriginalRect = hiddenOriginalRect;
                 }
-                AppLogger.LogInfo(
+                AppLogger.LogDiagnostic(
                     "ExplorerHostSwitchCoordinator",
                     string.Format(
                         "TrySwitchToFreshExplorerHost switchedToFreshHost current={0} new={1} hadHiddenPending={2}",
@@ -382,6 +392,16 @@ namespace KjTabBar.Services
             return IntPtr.Zero;
         }
 
+        private void AlignHostBeforeRebind(IntPtr explorerHwnd, NativeMethods.RECT? rect)
+        {
+            // Rebinding immediately updates the tab bar from the host's current coordinates.
+            if (_moveExplorerWindow != null && rect.HasValue &&
+                NativeMethods.IsUsableWindowRestoreRect(rect.Value))
+            {
+                _moveExplorerWindow(explorerHwnd, rect.Value);
+            }
+        }
+
         public void CompletePendingReveal()
         {
             if (_pendingRevealExplorerHwnd == IntPtr.Zero)
@@ -395,7 +415,7 @@ namespace KjTabBar.Services
             NativeMethods.RECT pendingRevealOriginalRect = _pendingRevealOriginalRect;
             _pendingRevealHasOriginalRect = false;
             _pendingRevealOriginalRect = default(NativeMethods.RECT);
-            AppLogger.LogInfo(
+            AppLogger.LogDiagnostic(
                 "ExplorerHostSwitchCoordinator",
                 string.Format("CompletePendingReveal hwnd={0}", pendingRevealExplorerHwnd));
 
@@ -441,6 +461,13 @@ namespace KjTabBar.Services
         private IntPtr FindMatchingNewExplorerWindow(HashSet<IntPtr> previousExplorerWindows, IntPtr currentExplorerHwnd, string targetPath, int retry)
         {
             List<IntPtr> explorerWindows = _findExplorerWindows();
+            if (retry == 0 || retry == 19)
+            {
+                AppLogger.LogDiagnostic("ExplorerHostSwitchCoordinator", string.Format(
+                    "FindNewWindow retry={0} current={1} target={2} previous=[{3}] observed=[{4}]",
+                    retry, currentExplorerHwnd, targetPath,
+                    string.Join(",", previousExplorerWindows), string.Join(",", explorerWindows)));
+            }
             for (int i = 0; i < explorerWindows.Count; i++)
             {
                 IntPtr hwnd = explorerWindows[i];
@@ -455,6 +482,12 @@ namespace KjTabBar.Services
                 }
 
                 string currentPath = _getCurrentPath != null ? _getCurrentPath(hwnd) : null;
+                if (retry == 0 || retry == 19)
+                {
+                    AppLogger.LogDiagnostic("ExplorerHostSwitchCoordinator", string.Format(
+                        "NewWindowCandidate retry={0} hwnd={1} currentPath={2} targetPath={3}",
+                        retry, hwnd, currentPath ?? "<null>", targetPath));
+                }
                 if (_explorerService == null || string.IsNullOrEmpty(currentPath))
                 {
                     continue;
@@ -465,7 +498,7 @@ namespace KjTabBar.Services
                     continue;
                 }
 
-                AppLogger.LogInfo(
+                AppLogger.LogDiagnostic(
                     "ExplorerHostSwitchCoordinator",
                     string.Format(
                         "WaitForNewExplorerWindow matched hwnd={0} retry={1} currentPath={2}",
@@ -483,6 +516,13 @@ namespace KjTabBar.Services
             if (_explorerService == null || string.IsNullOrEmpty(currentPath) || string.IsNullOrEmpty(targetPath))
             {
                 return false;
+            }
+
+            // Explorer can report the Control Panel root with a different namespace GUID.
+            if (_explorerService.IsControlPanelRootPath(currentPath) &&
+                _explorerService.IsControlPanelRootPath(targetPath))
+            {
+                return true;
             }
 
             string normalizedCurrentPath = _explorerService.NormalizeKnownPath(currentPath);

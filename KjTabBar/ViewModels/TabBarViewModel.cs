@@ -51,7 +51,7 @@ namespace KjTabBar.ViewModels
             {
                 _navigationTracker.NotifyExplorerHostChanged();
             }
-            AppLogger.LogInfo(
+            AppLogger.LogDiagnostic(
                 "TabBarViewModel",
                 string.Format(
                     "SetExplorerHwnd previous={0} current={1} activeTab={2}",
@@ -718,7 +718,7 @@ namespace KjTabBar.ViewModels
             }
 
             string currentPath = GetCurrentPathForSelection();
-            AppLogger.LogInfo(
+            AppLogger.LogDiagnostic(
                 "TabBarViewModel",
                 string.Format(
                     "SelectTab explorer={0} currentPath={1} targetPath={2} activeBefore={3}",
@@ -751,7 +751,7 @@ namespace KjTabBar.ViewModels
 
             if (_explorerService.Navigate(_explorerHwnd, path))
             {
-                AppLogger.LogInfo(
+                AppLogger.LogDiagnostic(
                     "TabBarViewModel",
                     string.Format(
                         "SelectTab navigateStarted explorer={0} targetPath={1}",
@@ -765,7 +765,7 @@ namespace KjTabBar.ViewModels
             }
             else
             {
-                AppLogger.LogInfo(
+                AppLogger.LogDiagnostic(
                     "TabBarViewModel",
                     string.Format(
                         "SelectTab navigateRejected explorer={0} targetPath={1}",

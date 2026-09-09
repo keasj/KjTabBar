@@ -22,6 +22,50 @@ namespace UnitTestProject
             VerifyControlPanelParentHistory("StorageSpacesPath");
         }
 
+        [TestMethod]
+        public void PrepareForPath_MatchesControlPanelRootWithDifferentGuid()
+        {
+            VerifyControlPanelRootWindow("::{21EC2020-3AEA-1069-A2DD-08002B30309D}", true);
+        }
+
+        [TestMethod]
+        public void PrepareForPath_DoesNotMatchControlPanelChildAsRoot()
+        {
+            VerifyControlPanelRootWindow("::{26EE0668-A00A-44D7-9371-BEB064C98683}\\0\\::{025A5937-A6BE-4686-A844-36FE4BEC8B6D}", false);
+        }
+
+        private static void VerifyControlPanelRootWindow(string observedPath, bool expectedMatch)
+        {
+            const string targetPath = "::{26EE0668-A00A-44D7-9371-BEB064C98683}";
+            ExplorerManager pathService = new ExplorerManager();
+            MockExplorerService explorer = new MockExplorerService();
+            explorer.IsControlPanelPathFunc = pathService.IsControlPanelPath;
+            explorer.IsControlPanelRootPathFunc = pathService.IsControlPanelRootPath;
+            explorer.NormalizeKnownPathFunc = pathService.NormalizeKnownPath;
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+            bool launched = false;
+            IntPtr reboundHwnd = IntPtr.Zero;
+            IntPtr shownHwnd = IntPtr.Zero;
+            ExplorerHostSwitchCoordinator coordinator = new ExplorerHostSwitchCoordinator(
+                explorer, tracking,
+                delegate (TabBarViewModel vm, IntPtr hwnd) { reboundHwnd = hwnd; vm.SetExplorerHwnd(hwnd); return true; },
+                delegate (IntPtr hwnd) { shownHwnd = hwnd; }, delegate { }, delegate { },
+                delegate { return true; },
+                delegate { return launched
+                    ? new System.Collections.Generic.List<IntPtr> { (IntPtr)200 }
+                    : new System.Collections.Generic.List<IntPtr>(); },
+                delegate (IntPtr hwnd) { return hwnd == (IntPtr)200 ? observedPath : explorer.HomeFolderPath; },
+                delegate (string path) { Assert.AreEqual(targetPath, path); launched = true; return true; },
+                delegate { });
+            TabBarViewModel viewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.HomeFolderPath);
+
+            Assert.AreEqual(expectedMatch, coordinator.PrepareForPath(viewModel, targetPath));
+            coordinator.CompletePendingReveal();
+            Assert.AreEqual(expectedMatch ? (IntPtr)200 : IntPtr.Zero, reboundHwnd);
+            Assert.AreEqual(expectedMatch ? (IntPtr)200 : IntPtr.Zero, shownHwnd);
+            Assert.AreEqual(expectedMatch ? (IntPtr)200 : (IntPtr)100, viewModel.ExplorerHwnd);
+        }
+
         private static void VerifyControlPanelParentHistory(string itemPath)
         {
             ControlPanelHistoryExplorerService explorer = new ControlPanelHistoryExplorerService(itemPath);
@@ -109,12 +153,14 @@ namespace UnitTestProject
             IntPtr shownHwnd = IntPtr.Zero;
             IntPtr closedHwnd = IntPtr.Zero;
             NativeMethods.RECT movedRect = default(NativeMethods.RECT);
+            NativeMethods.RECT rectAtRebind = default(NativeMethods.RECT);
             ExplorerHostSwitchCoordinator coordinator = new ExplorerHostSwitchCoordinator(
                 explorerService,
                 trackingState,
                 delegate (TabBarViewModel vm, IntPtr hwnd)
                 {
                     reboundHwnd = hwnd;
+                    rectAtRebind = movedRect;
                     vm.SetExplorerHwnd(hwnd);
                     return true;
                 },
@@ -151,6 +197,7 @@ namespace UnitTestProject
             coordinator.CompletePendingReveal();
 
             Assert.IsTrue(prepared);
+            Assert.AreEqual(30, rectAtRebind.Left, "Align the host before rebinding updates the tab bar position.");
             Assert.AreEqual((IntPtr)100, reboundHwnd);
             Assert.AreEqual((IntPtr)100, shownHwnd);
             Assert.AreEqual(IntPtr.Zero, closedHwnd);
@@ -517,11 +564,13 @@ namespace UnitTestProject
 
             IntPtr shownHwnd = IntPtr.Zero;
             NativeMethods.RECT movedRect = default(NativeMethods.RECT);
+            NativeMethods.RECT rectAtRebind = default(NativeMethods.RECT);
             ExplorerHostSwitchCoordinator coordinator = new ExplorerHostSwitchCoordinator(
                 explorerService,
                 trackingState,
                 delegate (TabBarViewModel vm, IntPtr hwnd)
                 {
+                    rectAtRebind = movedRect;
                     vm.SetExplorerHwnd(hwnd);
                     return true;
                 },
@@ -557,6 +606,7 @@ namespace UnitTestProject
             coordinator.CompletePendingReveal();
 
             Assert.IsTrue(prepared);
+            Assert.AreEqual(10, rectAtRebind.Left, "Align the host before rebinding updates the tab bar position.");
             Assert.AreEqual((IntPtr)300, shownHwnd);
             Assert.AreEqual(10, movedRect.Left);
             Assert.AreEqual(20, movedRect.Top);

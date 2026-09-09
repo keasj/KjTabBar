@@ -38,6 +38,18 @@ namespace KjTabBar.Helpers
 #endif
         }
 
+        // Enable only for a diagnostic run; keep normal Release logging unchanged.
+        private static readonly bool DiagnosticsEnabled =
+            string.Equals(Environment.GetEnvironmentVariable("KJTB_DIAGNOSTICS"), "1", StringComparison.Ordinal);
+
+        public static void LogDiagnostic(string source, string message)
+        {
+            if (DiagnosticsEnabled) Write("DIAG", source, message, null);
+#if DEBUG
+            else Write("INFO", source, message, null);
+#endif
+        }
+
         public static void LogError(string source, string message, Exception exception)
         {
             Write("ERROR", source, message, exception);
