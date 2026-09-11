@@ -56,9 +56,9 @@ namespace KjTabBar.Views
             menu.Items.Add(new Separator());
 
             MenuItem closeItem = new MenuItem() { Header = _window.TryFindResource("MenuCloseTab") as string ?? "タブを閉じる(&C)" };
-            closeItem.Click += (s, ev) =>
+            closeItem.Click += async (s, ev) =>
             {
-                vm.CloseTab(tabVM);
+                await _window.CloseTabsAsync(vm, tabVM);
             };
             menu.Items.Add(closeItem);
 
@@ -66,17 +66,17 @@ namespace KjTabBar.Views
 
             MenuItem closeToRightItem = new MenuItem() { Header = _window.TryFindResource("MenuCloseTabsToRight") as string ?? "右側のタブを閉じる(&R)" };
             closeToRightItem.IsEnabled = (tabIndex >= 0 && tabIndex < vm.Tabs.Count - 1);
-            closeToRightItem.Click += (s, ev) =>
+            closeToRightItem.Click += async (s, ev) =>
             {
-                vm.CloseTabsToRight(tabVM);
+                await _window.CloseTabsAsync(vm, tabVM, 1);
             };
             menu.Items.Add(closeToRightItem);
 
             MenuItem closeToLeftItem = new MenuItem() { Header = _window.TryFindResource("MenuCloseTabsToLeft") as string ?? "左側のタブを閉じる(&L)" };
             closeToLeftItem.IsEnabled = (tabIndex > 0);
-            closeToLeftItem.Click += (s, ev) =>
+            closeToLeftItem.Click += async (s, ev) =>
             {
-                vm.CloseTabsToLeft(tabVM);
+                await _window.CloseTabsAsync(vm, tabVM, -1);
             };
             menu.Items.Add(closeToLeftItem);
 

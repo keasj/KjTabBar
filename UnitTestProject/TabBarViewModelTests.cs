@@ -98,6 +98,155 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void CloseTabs_PreparesNormalHostBeforeClosingControlPanel()
+        {
+            VerifyCloseTabsHostSwitch(false, false);
+        }
+
+        [TestMethod]
+        public void CloseTabs_LastControlPanelTab_PreparesHomeHost()
+        {
+            VerifyCloseTabsHostSwitch(true, false);
+        }
+
+        [TestMethod]
+        public void CloseTabs_FailedHostSwitch_KeepsTabAndHistory()
+        {
+            VerifyCloseTabsHostSwitch(false, true);
+        }
+
+        [TestMethod]
+        public void CloseTabs_Range_PreparesRemainingTabAndRecordsBatch()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, @"C:\Remaining");
+            vm.InsertTabWithPath(@"C:\Other", 1);
+            vm.InsertTabWithPath(explorer.AllControlPanelPath, 2, true);
+            bool prepared = false;
+            vm.CloseTabsAsync(1, 2, path =>
+            {
+                Assert.AreEqual(@"C:\Remaining", path);
+                Assert.AreEqual(explorer.AllControlPanelPath, vm.ActiveTab.Path);
+                prepared = true;
+                return System.Threading.Tasks.Task.FromResult(true);
+            }, null).GetAwaiter().GetResult();
+            Assert.IsTrue(prepared);
+            Assert.AreEqual(1, vm.Tabs.Count);
+            vm.ReopenClosedTab();
+            Assert.AreEqual(3, vm.Tabs.Count);
+        }
+
+        [TestMethod]
+        public void CloseTabs_InactiveTab_DoesNotSwitchHost()
+        {
+            TabBarViewModel vm = CreateViewModel();
+            TabItemViewModel closedTab = vm.ActiveTab;
+            vm.InsertTabWithPath(@"C:\Selected", 1);
+            TabItemViewModel activeTab = vm.ActiveTab;
+            vm.CloseTabsAsync(0, 1, path =>
+            {
+                Assert.Fail("Closing an inactive tab must not switch the host.");
+                return System.Threading.Tasks.Task.FromResult(false);
+            }, () => Assert.Fail("No host needs revealing.")).GetAwaiter().GetResult();
+            Assert.AreSame(activeTab, vm.ActiveTab);
+            Assert.IsFalse(vm.Tabs.Contains(closedTab));
+        }
+
+        [TestMethod]
+        public void CloseTabs_ChangedCollectionWhilePreparing_DoesNotCloseAnotherTab()
+        {
+            TabBarViewModel vm = CreateViewModel();
+            TabItemViewModel closedTab = vm.ActiveTab;
+            System.Threading.Tasks.TaskCompletionSource<bool> prepared = new System.Threading.Tasks.TaskCompletionSource<bool>();
+            bool revealed = false;
+            System.Threading.Tasks.Task closing = vm.CloseTabsAsync(0, 1, path => prepared.Task, () => revealed = true);
+            vm.InsertTabWithPath(@"C:\AddedWhileWaiting", 0);
+            prepared.SetResult(true);
+            closing.GetAwaiter().GetResult();
+            Assert.AreEqual(2, vm.Tabs.Count);
+            Assert.IsTrue(vm.Tabs.Contains(closedTab));
+            Assert.IsFalse(vm.HasClosedTabs);
+            Assert.IsTrue(revealed);
+        }
+
+        [TestMethod]
+        public void CloseTabs_ControlPanel_UsesParkedNormalExplorerForNavigation()
+        {
+            CloseHostExplorerService explorer = new CloseHostExplorerService();
+            TabBarViewModel vm = new TabBarViewModel((IntPtr)200, new MockUserSettings(), explorer, explorer.AllControlPanelPath);
+            vm.RestoreTabs(new string[] { explorer.AllControlPanelPath, @"C:\Remaining" }, explorer.AllControlPanelPath, 0, true);
+            KjTabBar.Models.ExplorerWindowTrackingState tracking = new KjTabBar.Models.ExplorerWindowTrackingState();
+            tracking.RememberParkedExplorerOrigin((IntPtr)200, (IntPtr)100);
+            IntPtr shownHwnd = IntPtr.Zero;
+            KjTabBar.Services.ExplorerHostSwitchCoordinator coordinator = new KjTabBar.Services.ExplorerHostSwitchCoordinator(
+                explorer, tracking,
+                (model, hwnd) => { model.SetExplorerHwnd(hwnd); return true; },
+                hwnd => shownHwnd = hwnd, delegate { }, delegate { },
+                delegate { return true; }, () => new System.Collections.Generic.List<IntPtr>(),
+                hwnd => explorer.GetCurrentPath(hwnd), delegate { return false; }, delegate { });
+            vm.CloseTabsAsync(0, 1, path => coordinator.PrepareForPathAsync(vm, path),
+                coordinator.CompletePendingReveal).GetAwaiter().GetResult();
+            Assert.AreEqual((IntPtr)100, explorer.NavigatedHwnd);
+            Assert.AreEqual((IntPtr)100, shownHwnd);
+            Assert.AreEqual(@"C:\Remaining", vm.ActiveTab.Path);
+        }
+
+        private sealed class CloseHostExplorerService : MockExplorerService
+        {
+            public IntPtr NavigatedHwnd;
+            public override string GetCurrentPath(IntPtr hwnd)
+            {
+                return hwnd == (IntPtr)200 ? AllControlPanelPath : @"C:\Previous";
+            }
+            public override bool Navigate(IntPtr hwnd, string path)
+            {
+                NavigatedHwnd = hwnd;
+                return true;
+            }
+        }
+
+        private static void VerifyCloseTabsHostSwitch(bool lastTab, bool reject)
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.AllControlPanelPath);
+            TabItemViewModel closedTab = vm.ActiveTab;
+            if (!lastTab)
+            {
+                vm.InsertTabWithPath(@"C:\Remaining", 1);
+                vm.SelectTab(closedTab);
+            }
+            int originalCount = vm.Tabs.Count;
+            bool prepared = false;
+            bool revealed = false;
+            vm.CloseTabsAsync(0, 1, path =>
+            {
+                Assert.AreSame(closedTab, vm.ActiveTab, "Prepare while the original host tab is still active.");
+                Assert.AreEqual(originalCount, vm.Tabs.Count);
+                Assert.IsFalse(vm.HasClosedTabs);
+                Assert.AreEqual(lastTab ? explorer.GetResolvedHomeFolderPath() : @"C:\Remaining", path);
+                prepared = true;
+                if (!reject) vm.SetExplorerHwnd((IntPtr)200);
+                return System.Threading.Tasks.Task.FromResult(!reject);
+            }, () => revealed = true).GetAwaiter().GetResult();
+
+            Assert.IsTrue(prepared, "Closing must prepare the destination Explorer host.");
+            if (reject)
+            {
+                Assert.AreEqual(originalCount, vm.Tabs.Count);
+                Assert.AreSame(closedTab, vm.ActiveTab);
+                Assert.IsFalse(vm.HasClosedTabs);
+            }
+            else
+            {
+                Assert.AreEqual((IntPtr)200, vm.ExplorerHwnd);
+                Assert.AreEqual(lastTab ? explorer.GetResolvedHomeFolderPath() : @"C:\Remaining", vm.ActiveTab.Path);
+                Assert.IsFalse(vm.Tabs.Contains(closedTab));
+                Assert.IsTrue(vm.HasClosedTabs);
+                Assert.IsTrue(revealed);
+            }
+        }
+
+        [TestMethod]
         public void CloseTabsToRight_Closes_All_Tabs_To_The_Right_Of_Specified_Tab()
         {
             MockUserSettings mockSettings = new MockUserSettings();

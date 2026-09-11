@@ -352,14 +352,15 @@ namespace KjTabBar.Views
             ReturnFocusToExplorer();
         }
 
-        private void CloseTab_Click(object sender, RoutedEventArgs e)
+        private async void CloseTab_Click(object sender, RoutedEventArgs e)
         {
+            e.Handled = true;
             Button button = (Button)sender;
             TabItemViewModel tab = (TabItemViewModel)button.DataContext;
             TabBarViewModel vm = GetVM();
             if (vm != null)
             {
-                vm.CloseTab(tab);
+                await CloseTabsAsync(vm, tab);
             }
             ReturnFocusToExplorer();
             e.Handled = true;
@@ -406,6 +407,28 @@ namespace KjTabBar.Views
             }
             ReturnFocusToExplorer();
             e.Handled = true;
+        }
+
+        internal async Task CloseTabsAsync(TabBarViewModel vm, TabItemViewModel tab, int direction = 0)
+        {
+            if (vm == null || tab == null) return;
+            int index = vm.Tabs.IndexOf(tab);
+            if (index < 0) return;
+            int startIndex = direction < 0 ? 0 : direction > 0 ? index + 1 : index;
+            int count = direction < 0 ? index : direction > 0 ? vm.Tabs.Count - index - 1 : 1;
+            try
+            {
+                ExplorerHostSwitchCoordinator coordinator = ExplorerHostSwitchCoordinator;
+                await vm.CloseTabsAsync(startIndex, count,
+                    coordinator != null ? new Func<string, Task<bool>>(path => coordinator.PrepareForPathAsync(vm, path)) : null,
+                    coordinator != null ? new Action(coordinator.CompletePendingReveal) : null);
+                if (PersistTabState != null) PersistTabState(vm);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("TabBarWindow", "Failed to close tabs.", ex);
+            }
+            ReturnFocusToExplorer();
         }
 
         internal async Task ReopenClosedTabAsync(TabBarViewModel vm)

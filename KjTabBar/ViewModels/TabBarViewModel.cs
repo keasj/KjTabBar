@@ -28,6 +28,7 @@ namespace KjTabBar.ViewModels
         private System.Windows.Threading.Dispatcher _metadataDispatcher;
         private int _metadataUpdateQueued;
         private bool _isReopeningClosedTabs;
+        private bool _isClosingTabs;
 
         private readonly TabBarExplorerSynchronizer _synchronizer;
 
@@ -542,6 +543,53 @@ namespace KjTabBar.ViewModels
         private string NormalizeTabPath(string path)
         {
             return _explorerService.NormalizeKnownPath(path);
+        }
+
+        internal async Task CloseTabsAsync(int startIndex, int count,
+            Func<string, Task<bool>> preparePath, Action completePendingReveal)
+        {
+            if (_isClosingTabs || startIndex < 0 || count <= 0 || startIndex > _tabs.Count - count) return;
+            _isClosingTabs = true;
+            bool preparingHost = false;
+            try
+            {
+                int activeIndex = GetTabIndex(_activeTab);
+                bool changesSelection = _activeTab == null ||
+                    (activeIndex >= startIndex && activeIndex < startIndex + count);
+                if (changesSelection && preparePath != null)
+                {
+                    // Prepare before removing the active tab: host detection needs its old path.
+                    string targetPath = count == _tabs.Count
+                        ? _explorerService.GetResolvedHomeFolderPath()
+                        : (startIndex + count < _tabs.Count
+                            ? _tabs[startIndex + count].Path : _tabs[startIndex - 1].Path);
+                    List<TabItemViewModel> originalTabs = new List<TabItemViewModel>(_tabs);
+                    TabItemViewModel originalActiveTab = _activeTab;
+                    preparingHost = true;
+                    if (!await preparePath(targetPath)) return;
+
+                    // An asynchronous host launch must not close tabs changed in the meantime.
+                    if (_activeTab != originalActiveTab || _tabs.Count != originalTabs.Count) return;
+                    for (int i = 0; i < originalTabs.Count; i++)
+                    {
+                        if (_tabs[i] != originalTabs[i]) return;
+                    }
+                }
+
+                if (count == 1) CloseTab(_tabs[startIndex]);
+                else CloseTabRange(startIndex, count);
+            }
+            finally
+            {
+                try
+                {
+                    if (preparingHost && completePendingReveal != null) completePendingReveal();
+                }
+                finally
+                {
+                    _isClosingTabs = false;
+                }
+            }
         }
 
         public void CloseTab(TabItemViewModel tab)
