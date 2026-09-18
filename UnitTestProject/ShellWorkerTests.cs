@@ -112,6 +112,58 @@ namespace UnitTestProject
             });
         }
 
+        [TestMethod]
+        public void ClosedTarget_DoesNotStartWorker()
+        {
+            using (ShellWorkerClient client = new ShellWorkerClient(
+                () => { Assert.Fail("A closed target must not start a worker."); return null; },
+                TimeSpan.FromSeconds(2), window => false))
+            {
+                Assert.IsNull(client.Invoke(ShellOperation.CurrentPath, "123")[0]);
+                Assert.IsFalse(client.IsStarted);
+            }
+        }
+
+        [TestMethod]
+        public void TargetClosesDuringBlockedRead_StopsHelperAndAllowsNextRequest()
+        {
+            string marker = Path.Combine(Path.GetTempPath(), "KjTabBar.TargetClosed." + Guid.NewGuid().ToString("N"));
+            try
+            {
+                WithFakeWorker(delegate(ShellWorkerClient client)
+                {
+                    int oldId = int.Parse(client.Invoke(ShellOperation.Ping)[0]);
+                    Stopwatch timer = Stopwatch.StartNew();
+                    Assert.IsNull(client.Invoke(ShellOperation.CurrentPath, "123", "blockTarget", marker)[0]);
+                    Assert.IsTrue(File.Exists(marker), "The request must reach the helper before closure.");
+                    Assert.IsTrue(timer.Elapsed < TimeSpan.FromSeconds(1.5), "Do not wait for the two-second timeout.");
+                    AssertExited(oldId);
+                    Assert.AreNotEqual(oldId, int.Parse(client.Invoke(ShellOperation.CurrentPath, "124")[0]));
+                }, window => window != (IntPtr)123 || !File.Exists(marker));
+            }
+            finally { if (File.Exists(marker)) File.Delete(marker); }
+        }
+
+        [TestMethod]
+        public void LiveTargetBlockedRead_StillUsesTimeout()
+        {
+            string marker = Path.Combine(Path.GetTempPath(), "KjTabBar.LiveTarget." + Guid.NewGuid().ToString("N"));
+            try
+            {
+                WithFakeWorker(delegate(ShellWorkerClient client)
+                {
+                    int oldId = int.Parse(client.Invoke(ShellOperation.Ping)[0]);
+                    try
+                    {
+                        client.Invoke(ShellOperation.CurrentPath, "123", "blockTarget", marker);
+                        Assert.Fail("Expected timeout for a live target.");
+                    }
+                    catch (TimeoutException) { }
+                    AssertExited(oldId);
+                }, window => true);
+            }
+            finally { if (File.Exists(marker)) File.Delete(marker); }
+        }
         private static void AssertExited(int processId)
         {
             try
@@ -122,7 +174,7 @@ namespace UnitTestProject
             catch (ArgumentException) { }
         }
 
-        private static void WithFakeWorker(Action<ShellWorkerClient> action)
+        private static void WithFakeWorker(Action<ShellWorkerClient> action, Func<IntPtr, bool> isWindow = null)
         {
             string directory = Path.Combine(Path.GetTempPath(), "KjTabBar.WorkerTest." + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(directory);
@@ -141,7 +193,7 @@ namespace UnitTestProject
                 }
                 using (ShellWorkerClient client = new ShellWorkerClient(
                     () => new ProcessStartInfo(exe, "\"" + typeof(ShellWorkerClient).Assembly.Location + "\""),
-                    TimeSpan.FromSeconds(2)))
+                    TimeSpan.FromSeconds(2), isWindow))
                 {
                     action(client);
                 }
@@ -176,6 +228,11 @@ class FakeWorker
             string[] request;
             try { request = (string[])read.Invoke(null, new object[] { input }); }
             catch { return; }
+            if (request.Length > 3 && request[2] == ""blockTarget"")
+            {
+                File.WriteAllText(request[3], ""received"");
+                Thread.Sleep(Timeout.Infinite);
+            }
             if (request.Length > 1 && request[1] == ""block"") Thread.Sleep(Timeout.Infinite);
             if (request.Length > 1 && request[1] == ""exit"") return;
             if (request.Length > 1 && request[1] == ""oversized"")

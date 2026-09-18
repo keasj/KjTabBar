@@ -67,6 +67,8 @@ namespace KjTabBar.Services
             string path = request.Length > 1 ? request[1] : string.Empty;
             switch (operation)
             {
+                case ShellOperation.DesktopInvokedShortcut:
+                    return new[] { DesktopRepeatedLaunchService.ResolveInvokedShortcut(ParseWindow(path), int.Parse(request[2], CultureInfo.InvariantCulture), explorer) };
                 case ShellOperation.Ping: return new[] { Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture) };
                 case ShellOperation.CurrentPath: return new[] { explorer.GetCurrentPath(ParseWindow(path)) };
                 case ShellOperation.SelectedItems: return explorer.GetSelectedItems(ParseWindow(path)).ToArray();

@@ -83,6 +83,12 @@ namespace KjTabBar.Services
                 bundle.ExplorerWindowEvaluationService,
                 bundle.ExplorerWindowInteractionService,
                 bundle.ExplorerWindowOutcomeCoordinator);
+            bundle.ExplorerWindowProcessingCoordinator.FindHostSwitchCoordinator = delegate (ViewModels.TabBarViewModel viewModel)
+            {
+                Views.TabBarWindow window;
+                return viewModel != null && tabBars.TryGetTabBarWindow(viewModel.ExplorerHwnd, out window)
+                    ? window.ExplorerHostSwitchCoordinator : null;
+            };
             bundle.AppMonitorCycleCoordinator = new AppMonitorCycleCoordinator(
                 explorerService,
                 bundle.ExplorerLaunchTracker,

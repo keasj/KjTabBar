@@ -26,7 +26,7 @@ namespace KjTabBar.Models
             _tabsFilePath = tabsFilePath;
         }
 
-        public bool LoadTabsTo(TabBarViewModel viewModel, bool deferControlPanelNavigation = false)
+        public bool LoadTabsTo(TabBarViewModel viewModel, bool deferControlPanelNavigation = false, bool deferNavigation = false)
         {
             try
             {
@@ -37,7 +37,7 @@ namespace KjTabBar.Models
                     string[] paths = ProtectedTextStorage.LoadLines(file);
                     PersistedActiveTabSelection activeTabSelection = LoadActiveTabSelectionSafe();
                     _tabsLoadFailed = false;
-                    viewModel.RestoreTabs(paths, activeTabSelection.Path, activeTabSelection.Index, deferControlPanelNavigation);
+                    viewModel.RestoreTabs(paths, activeTabSelection.Path, activeTabSelection.Index, deferControlPanelNavigation, deferNavigation);
                     _lastSavedTabs = BuildPersistedStateString(paths, activeTabSelection.Path, activeTabSelection.Index);
                     if (!isProtectedFile && paths.Length > 0)
                     {

@@ -127,6 +127,7 @@ namespace KjTabBar.Models
 
         private string GetCurrentPathCore(IntPtr explorerHwnd)
         {
+            Stopwatch diagnosticTimer = AppLogger.StartDiagnosticTiming();
             string cachedPath = TryGetCachedCurrentPath(explorerHwnd, DateTime.UtcNow);
             if (cachedPath != null)
             {
@@ -140,6 +141,7 @@ namespace KjTabBar.Models
                 return null;
             }
 
+            AppLogger.LogDiagnosticTiming("CurrentPath.ShellWindows", explorerHwnd, diagnosticTimer);
             object windows = windowsObject;
             try
             {
@@ -173,24 +175,31 @@ namespace KjTabBar.Models
 
                         if (!_shellExplorerWindowMatcher.MatchesTargetWindow(hwnd, explorerHwnd)) continue;
 
+                        AppLogger.LogDiagnosticTiming("CurrentPath.MatchedWindow", explorerHwnd, diagnosticTimer);
                         string locationUrl = "";
                         try { locationUrl = (string)GetComProperty(window, "LocationURL"); }
                         catch (Exception ex) { AppLogger.LogErrorThrottled("ShellWindowComInterop", "GetCurrentPathLocationUrl", "Failed to read LocationURL while getting current path.", ex, TimeSpan.FromMinutes(5)); }
 
+                        AppLogger.LogDiagnosticTiming("CurrentPath.LocationUrl", explorerHwnd, diagnosticTimer);
                         string locationName = "";
                         try { locationName = (string)GetComProperty(window, "LocationName"); }
                         catch (Exception ex) { AppLogger.LogErrorThrottled("ShellWindowComInterop", "GetCurrentPathLocationName", "Failed to read LocationName while getting current path.", ex, TimeSpan.FromMinutes(5)); }
 
-                        string folderPath = null;
-                        try
+                        AppLogger.LogDiagnosticTiming("CurrentPath.LocationName", explorerHwnd, diagnosticTimer);
+                        result = _shellCurrentPathResolver.ResolveWithFolderPathReader(locationUrl, locationName, delegate
                         {
-                            folderPath = _shellFolderPathReader.ReadFolderPath(window);
-                        }
-                        catch (Exception ex)
-                        {
-                            AppLogger.LogErrorThrottled("ShellWindowComInterop", "GetCurrentPathDocumentPath", "Failed to read folder path from explorer document.", ex, TimeSpan.FromMinutes(5));
-                        }
-                        result = _shellCurrentPathResolver.Resolve(locationUrl, locationName, folderPath);
+                            string folderPath = null;
+                            try
+                            {
+                                folderPath = _shellFolderPathReader.ReadFolderPath(window);
+                            }
+                            catch (Exception ex)
+                            {
+                                AppLogger.LogErrorThrottled("ShellWindowComInterop", "GetCurrentPathDocumentPath", "Failed to read folder path from explorer document.", ex, TimeSpan.FromMinutes(5));
+                            }
+                            AppLogger.LogDiagnosticTiming("CurrentPath.FolderPath", explorerHwnd, diagnosticTimer);
+                            return folderPath;
+                        });
                         break;
                     }
                     catch (Exception ex)
@@ -215,6 +224,7 @@ namespace KjTabBar.Models
             }
 
             UpdateCurrentPathCache(explorerHwnd, result, DateTime.UtcNow);
+            AppLogger.LogDiagnosticTiming("CurrentPath.Completed", explorerHwnd, diagnosticTimer);
             return result;
         }
 

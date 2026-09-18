@@ -212,6 +212,14 @@ namespace KjTabBar.Models
             return _comInterop.FindExplorerWindows();
         }
 
+        internal string ResolveDesktopInvokedShortcut(IntPtr source, int child)
+        {
+            if (_shellWorker != null) return _shellWorker.Invoke(Services.ShellOperation.DesktopInvokedShortcut,
+                source.ToInt64().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                child.ToString(System.Globalization.CultureInfo.InvariantCulture))[0];
+            return Services.DesktopRepeatedLaunchService.ResolveInvokedShortcut(source, child, this);
+        }
+
         public string GetCurrentPath(IntPtr explorerHwnd)
         {
             if (_shellWorker != null) return _shellWorker.Invoke(Services.ShellOperation.CurrentPath, explorerHwnd.ToInt64().ToString(System.Globalization.CultureInfo.InvariantCulture))[0];

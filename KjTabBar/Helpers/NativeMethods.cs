@@ -26,6 +26,23 @@ namespace KjTabBar.Helpers
         [DllImport("user32.dll", ExactSpelling = true)]
         public static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
 
+        [StructLayout(LayoutKind.Sequential)]
+        public struct WINDOWPLACEMENT
+        {
+            public uint length;
+            public uint flags;
+            public uint showCmd;
+            public POINT ptMinPosition;
+            public POINT ptMaxPosition;
+            public RECT rcNormalPosition;
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool GetWindowPlacement(IntPtr hwnd, ref WINDOWPLACEMENT placement);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool SetWindowPlacement(IntPtr hwnd, ref WINDOWPLACEMENT placement);
+
         public const uint GA_PARENT = 1;
         public const uint GA_ROOT = 2;
         public const uint GA_ROOTOWNER = 3;
@@ -85,8 +102,21 @@ namespace KjTabBar.Helpers
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool IsIconic(IntPtr hWnd);
 
-        [DllImport("user32.dll")]
-        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        [DllImport("user32.dll", EntryPoint = "ShowWindow")]
+        private static extern bool ShowWindowNative(IntPtr hWnd, int nCmdShow);
+
+        public static bool ShowWindow(IntPtr hWnd, int nCmdShow)
+        {
+            System.Diagnostics.Stopwatch timer = AppLogger.StartDiagnosticTiming();
+            if (timer != null) AppLogger.LogDiagnosticPlacement("ShowWindow.Before.Command" + nCmdShow, hWnd);
+            bool previouslyVisible = ShowWindowNative(hWnd, nCmdShow);
+            if (timer != null)
+            {
+                AppLogger.LogDiagnosticPlacement("ShowWindow.After.Command" + nCmdShow, hWnd);
+                AppLogger.LogDiagnosticTiming("ShowWindow.Command" + nCmdShow, hWnd, timer);
+            }
+            return previouslyVisible;
+        }
 
         [DllImport("user32.dll")]
         public static extern IntPtr GetDC(IntPtr hWnd);
@@ -115,6 +145,12 @@ namespace KjTabBar.Helpers
 
         [DllImport("user32.dll")]
         public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        public const uint GW_HWNDPREV = 3;
+        public const uint GW_OWNER = 4;
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
 
         [DllImport("kernel32.dll")]
         public static extern uint GetCurrentThreadId();
@@ -215,9 +251,13 @@ namespace KjTabBar.Helpers
         public const uint SWP_NOMOVE = 0x0002;
         public const uint SWP_NOZORDER = 0x0004;
         public const uint SWP_NOACTIVATE = 0x0010;
+        public const uint SWP_FRAMECHANGED = 0x0020;
+        public const uint SWP_NOOWNERZORDER = 0x0200;
+        public const uint SWP_ASYNCWINDOWPOS = 0x4000;
 
         public const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
         public const uint EVENT_SYSTEM_MOVESIZEEND = 0x000B;
+        public const uint EVENT_OBJECT_CREATE = 0x8000;
         public const uint EVENT_OBJECT_SHOW = 0x8002;
         public const uint EVENT_OBJECT_DESTROY = 0x8001;
         public const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;

@@ -11,6 +11,187 @@ namespace UnitTestProject
     public class ExplorerHostSwitchCoordinatorTests
     {
         [TestMethod]
+        public void FolderLaunchFromControlPanel_RestoresMaximizedParkedHost()
+        {
+            VerifyFolderLaunchRestoreState(true, 2, 2, 3);
+        }
+
+        [TestMethod]
+        public void FolderLaunchFromControlPanel_RestoresMaximizedFreshHost()
+        {
+            VerifyFolderLaunchRestoreState(false, 2, 2, 3);
+        }
+
+        [TestMethod]
+        public void FolderLaunchFromControlPanel_RestoresNormalMinimizedHost()
+        {
+            VerifyFolderLaunchRestoreState(true, 2, 0, 1);
+        }
+
+        [TestMethod]
+        public void FolderLaunchFromControlPanel_PreservesRestoredNormalState()
+        {
+            VerifyFolderLaunchRestoreState(true, 1, 2, 1);
+        }
+
+        private static void VerifyFolderLaunchRestoreState(bool parked, uint showCommand, uint flags, uint expected)
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            explorer.IsControlPanelPathFunc = path => path == explorer.PowerOptionsPath;
+            NativeMethods.RECT normal = new NativeMethods.RECT { Left = 200, Top = 150, Right = 1200, Bottom = 850 };
+            NativeMethods.WINDOWPLACEMENT source = new NativeMethods.WINDOWPLACEMENT
+                { showCmd = showCommand, flags = flags, rcNormalPosition = normal };
+            int writes = 0;
+            bool rebound = false;
+            bool launched = false;
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState(
+                hwnd => true, hwnd => { }, hwnd => { },
+                hwnd => hwnd == (IntPtr)100 ? source : (NativeMethods.WINDOWPLACEMENT?)null,
+                (hwnd, placement) =>
+                {
+                    Assert.IsTrue(rebound);
+                    Assert.AreEqual((IntPtr)200, hwnd);
+                    Assert.AreEqual(expected, placement.showCmd);
+                    Assert.AreEqual(normal, placement.rcNormalPosition);
+                    writes++;
+                    return true;
+                });
+            if (parked) tracking.RememberParkedExplorerOrigin((IntPtr)100, (IntPtr)200);
+            ExplorerHostSwitchCoordinator coordinator = new ExplorerHostSwitchCoordinator(
+                explorer, tracking, (vm, hwnd) => { vm.SetExplorerHwnd(hwnd); rebound = true; return true; },
+                hwnd => { Assert.AreEqual(1, writes); }, delegate { }, delegate { }, hwnd => true,
+                () => launched ? new System.Collections.Generic.List<IntPtr> { (IntPtr)100, (IntPtr)200 }
+                    : new System.Collections.Generic.List<IntPtr> { (IntPtr)100 },
+                hwnd => hwnd == (IntPtr)100 ? explorer.PowerOptionsPath : @"C:\Work",
+                hwnd => new NativeMethods.RECT { Left = -32000, Top = -32000, Right = -31840, Bottom = -31972 },
+                path => { launched = true; return true; }, delegate { });
+            TabBarViewModel viewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.PowerOptionsPath);
+            Assert.IsTrue(coordinator.PrepareForPath(viewModel, @"C:\Work"));
+            Assert.AreEqual(0, writes, "Preparation must not reveal a host before tab navigation completes.");
+            ExplorerWindowInteractionService interaction = new ExplorerWindowInteractionService(
+                explorer, tracking, TestTabPersistenceFactory.Create(), delegate { return string.Empty; },
+                delegate { }, delegate { Assert.AreEqual(1, writes, "Apply the inherited state before foreground activation."); },
+                delegate { }, delegate { return null; }, delegate { });
+            Assert.IsTrue(interaction.AbsorbExplorerWindow((IntPtr)300, viewModel, @"C:\Work", false, false, delegate { }));
+            coordinator.CompletePendingReveal();
+            Assert.AreEqual(1, writes);
+        }
+
+        [TestMethod]
+        public void PrepareForPath_ExposesDestinationHostTypeBeforeRebind_AndRestoresFolderType()
+        {
+            VerifyHostTypeDuringRebind(0);
+        }
+
+        [TestMethod]
+        public void PrepareForPath_RestoresHostTypeWhenRebindIsRejected()
+        {
+            VerifyHostTypeDuringRebind(1);
+        }
+
+        [TestMethod]
+        public void PrepareForPath_RestoresHostTypeWhenRebindThrows()
+        {
+            VerifyHostTypeDuringRebind(2);
+        }
+
+        private static void VerifyHostTypeDuringRebind(int failureMode)
+        {
+            const string target = "::{21EC2020-3AEA-1069-A2DD-08002B30309D}";
+            const string folder = @"C:\Work";
+            ExplorerManager paths = new ExplorerManager();
+            MockExplorerService explorer = new MockExplorerService();
+            explorer.IsControlPanelPathFunc = paths.IsControlPanelPath;
+            explorer.IsControlPanelRootPathFunc = paths.IsControlPanelRootPath;
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+            bool launched = false;
+            int rebindCalls = 0;
+            ExplorerHostSwitchCoordinator coordinator = null;
+            coordinator = new ExplorerHostSwitchCoordinator(
+                explorer, tracking,
+                delegate (TabBarViewModel vm, IntPtr hwnd)
+                {
+                    rebindCalls++;
+                    Assert.AreEqual((bool?)(hwnd == (IntPtr)200), coordinator.CurrentHostIsControlPanel,
+                        "Owner selection must see the destination before the view model is rebound.");
+                    if (hwnd == (IntPtr)100 && failureMode == 1) return false;
+                    if (hwnd == (IntPtr)100 && failureMode == 2) throw new InvalidOperationException("Rejected rebind");
+                    vm.SetExplorerHwnd(hwnd);
+                    return true;
+                },
+                delegate { }, delegate { }, delegate { }, delegate { return true; },
+                delegate { return launched
+                    ? new System.Collections.Generic.List<IntPtr> { (IntPtr)100, (IntPtr)200 }
+                    : new System.Collections.Generic.List<IntPtr> { (IntPtr)100 }; },
+                delegate (IntPtr hwnd) { return hwnd == (IntPtr)200 ? target : folder; },
+                delegate { launched = true; return true; }, delegate { });
+            TabBarViewModel viewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, folder);
+
+            Assert.IsNull(coordinator.CurrentHostIsControlPanel);
+            Assert.IsTrue(coordinator.PrepareForPath(viewModel, target));
+            Assert.AreEqual((bool?)true, coordinator.CurrentHostIsControlPanel);
+            Assert.AreEqual((IntPtr)200, viewModel.ExplorerHwnd);
+            // Navigation commits the selected path after the host preparation callback.
+            viewModel.ActiveTab.Path = target;
+
+            Assert.AreEqual(failureMode == 0, coordinator.PrepareForPath(viewModel, folder));
+            Assert.AreEqual(2, rebindCalls);
+            Assert.AreEqual((bool?)(failureMode != 0), coordinator.CurrentHostIsControlPanel);
+            Assert.AreEqual(failureMode == 0 ? (IntPtr)100 : (IntPtr)200, viewModel.ExplorerHwnd);
+        }
+
+        [TestMethod]
+        public void PrepareForPath_AcceptsHostThatAppearsAfterFiveSeconds()
+        {
+            VerifySlowHostLaunch(false);
+        }
+
+        [TestMethod]
+        public void PrepareForPath_StopsWaitingWhenOriginalWindowCloses()
+        {
+            VerifySlowHostLaunch(true);
+        }
+
+        private static void VerifySlowHostLaunch(bool closeOriginal)
+        {
+            const string target = "::{21EC2020-3AEA-1069-A2DD-08002B30309D}";
+            ExplorerManager paths = new ExplorerManager();
+            MockExplorerService explorer = new MockExplorerService();
+            explorer.IsControlPanelPathFunc = paths.IsControlPanelPath;
+            explorer.IsControlPanelRootPathFunc = paths.IsControlPanelRootPath;
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+            int delays = 0;
+            int launches = 0;
+            IntPtr shown = IntPtr.Zero;
+            ExplorerHostSwitchCoordinator coordinator = new ExplorerHostSwitchCoordinator(
+                explorer, tracking,
+                delegate (TabBarViewModel vm, IntPtr hwnd) { vm.SetExplorerHwnd(hwnd); return true; },
+                delegate (IntPtr hwnd) { shown = hwnd; }, delegate { }, delegate { },
+                delegate { return !closeOriginal || delays < 3; },
+                delegate { return delays >= 50
+                    ? new System.Collections.Generic.List<IntPtr> { (IntPtr)100, (IntPtr)200 }
+                    : new System.Collections.Generic.List<IntPtr> { (IntPtr)100 }; },
+                delegate (IntPtr hwnd) { return hwnd == (IntPtr)200 ? target : explorer.HomeFolderPath; },
+                delegate { launches++; return true; },
+                delegate (int milliseconds)
+                {
+                    Assert.AreEqual(100, milliseconds);
+                    Assert.AreEqual(IntPtr.Zero, shown);
+                    delays++;
+                });
+            TabBarViewModel viewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.HomeFolderPath);
+
+            bool prepared = coordinator.PrepareForPath(viewModel, target);
+            coordinator.CompletePendingReveal();
+
+            Assert.AreEqual(!closeOriginal, prepared);
+            Assert.AreEqual(closeOriginal ? 3 : 50, delays);
+            Assert.AreEqual(1, launches);
+            Assert.AreEqual(closeOriginal ? IntPtr.Zero : (IntPtr)200, shown);
+            if (closeOriginal) Assert.IsFalse(tracking.HasPendingInternalHostSwitchLaunchRequest());
+        }
+
+        [TestMethod]
         public void PrepareForPath_CreatesParentHistory_ForPowerOptions()
         {
             VerifyControlPanelParentHistory("PowerOptionsPath");

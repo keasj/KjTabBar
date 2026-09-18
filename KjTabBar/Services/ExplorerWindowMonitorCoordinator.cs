@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using KjTabBar.Helpers;
 using KjTabBar.Models;
 using KjTabBar.ViewModels;
+using KjTabBar.Views;
 
 namespace KjTabBar.Services
 {
@@ -14,6 +15,7 @@ namespace KjTabBar.Services
 
     internal sealed class ExplorerWindowMonitorCoordinator
     {
+        private readonly HashSet<IntPtr> _preparedBeforeShow = new HashSet<IntPtr>();
         private readonly TabBarRegistry _tabBars;
         private readonly ExplorerWindowTrackingState _windowTracking;
         private readonly DesktopForegroundTracker _desktopForegroundTracker;
@@ -24,6 +26,8 @@ namespace KjTabBar.Services
         private readonly Action<IntPtr> _moveWindowOffscreen;
         private readonly Action<TabBarViewModel> _persistClosingTabBarState;
         private readonly Func<DateTime> _getUtcNow;
+        private readonly Func<IntPtr, bool> _isWindowVisible;
+        private readonly Action<IntPtr> _hideWindow;
 
         public ExplorerWindowMonitorCoordinator(
             TabBarRegistry tabBars,
@@ -54,7 +58,9 @@ namespace KjTabBar.Services
             Func<IntPtr, NativeMethods.RECT?> getWindowRect,
             Action<IntPtr> moveWindowOffscreen,
             Action<TabBarViewModel> persistClosingTabBarState,
-            Func<DateTime> getUtcNow)
+            Func<DateTime> getUtcNow,
+            Func<IntPtr, bool> isWindowVisible = null,
+            Action<IntPtr> hideWindow = null)
         {
             _tabBars = tabBars;
             _windowTracking = windowTracking;
@@ -66,9 +72,23 @@ namespace KjTabBar.Services
             _moveWindowOffscreen = moveWindowOffscreen ?? MoveWindowOffscreenCore;
             _persistClosingTabBarState = persistClosingTabBarState;
             _getUtcNow = getUtcNow ?? delegate { return DateTime.UtcNow; };
+            _isWindowVisible = isWindowVisible ?? NativeMethods.IsWindowVisible;
+            _hideWindow = hideWindow ?? delegate (IntPtr hwnd) { NativeMethods.ShowWindow(hwnd, NativeMethods.SW_HIDE); };
         }
 
-        public void HandleShowEvent(IntPtr hwnd, Func<TabBarViewModel> findValidTarget, Func<TabBarViewModel, bool> hasActiveControlPanelTab)
+        public void HandleCreateEvent(IntPtr hwnd, Func<TabBarViewModel> findValidTarget)
+        {
+            if (hwnd == IntPtr.Zero || _getClassName(hwnd) != "CabinetWClass") return;
+            if (findValidTarget != null && findValidTarget() != null &&
+                !_windowTracking.HasPendingInternalHostSwitchLaunchRequest()) return;
+            NativeMethods.RECT? rect = _getWindowRect(hwnd);
+            if (!rect.HasValue || !NativeMethods.IsUsableWindowRestoreRect(rect.Value)) return;
+
+            HandleShowEvent(hwnd, findValidTarget, null);
+            if (_windowTracking.HiddenPendingAbsorb.ContainsKey(hwnd)) _preparedBeforeShow.Add(hwnd);
+        }
+
+        public void HandleShowEvent(IntPtr hwnd, Func<TabBarViewModel> findValidTarget, Func<TabBarViewModel, bool> hasActiveControlPanelTab, Action requestImmediateCycle = null)
         {
             if (hwnd == IntPtr.Zero)
             {
@@ -81,9 +101,32 @@ namespace KjTabBar.Services
                 return;
             }
 
-            if (_tabBars.Contains(rootHwnd)) return;
+            TabBarWindow registeredWindow;
+            if (_tabBars.TryGetTabBarWindow(rootHwnd, out registeredWindow))
+            {
+                TabBarViewModel registeredViewModel = registeredWindow.DataContext as TabBarViewModel;
+                // Explorer can show Home after we have registered and hidden it.
+                if (registeredViewModel != null && registeredViewModel.ExplorerHwnd == rootHwnd &&
+                    registeredViewModel.IsRestoringControlPanelHost && _isWindowVisible(rootHwnd))
+                {
+                    AppLogger.LogDiagnosticPlacement("Restore.RehideRegisteredHome.Before", rootHwnd);
+                    _hideWindow(rootHwnd);
+                    AppLogger.LogDiagnosticPlacement("Restore.RehideRegisteredHome.After", rootHwnd);
+                }
+                return;
+            }
             if (_windowTracking.IgnoredWindows.Contains(rootHwnd)) return;
-            if (_windowTracking.HiddenPendingAbsorb.ContainsKey(rootHwnd)) return;
+            if (_windowTracking.HiddenPendingAbsorb.ContainsKey(rootHwnd))
+            {
+                if (_preparedBeforeShow.Remove(rootHwnd))
+                {
+                    // Explorer may reposition itself between CREATE and SHOW.
+                    _moveWindowOffscreen(rootHwnd);
+                    if (!_windowTracking.InternalHostSwitchLaunchWindows.Contains(rootHwnd))
+                        requestImmediateCycle?.Invoke();
+                }
+                return;
+            }
             if (_windowTracking.AbsorbPathRetryCounts.ContainsKey(rootHwnd)) return;
 
             if (_getClassName(rootHwnd) != "CabinetWClass") return;
@@ -113,7 +156,22 @@ namespace KjTabBar.Services
             }
 
             TabBarViewModel validTarget = findValidTarget != null ? findValidTarget() : null;
-            if (validTarget == null) return;
+            if (validTarget == null)
+            {
+                // First/reopened host: avoid waiting for the next background timer tick.
+                if (!_windowTracking.ProcessingExplorerWindows.Contains(rootHwnd))
+                {
+                    // Keep the initial Home page offscreen until the saved selection is known.
+                    NativeMethods.RECT? initialRect = _getWindowRect(rootHwnd);
+                    if (initialRect.HasValue && NativeMethods.IsUsableWindowRestoreRect(initialRect.Value))
+                    {
+                        _windowTracking.AddHiddenPendingWindow(rootHwnd, initialRect.Value, _getUtcNow());
+                        _moveWindowOffscreen(rootHwnd);
+                    }
+                    requestImmediateCycle?.Invoke();
+                }
+                return;
+            }
 
             // Capture the origin before later foreground updates and COM retries lose it.
             if (_explorerLaunchTracker.WasManagedControlPanelLaunchSource())
@@ -158,6 +216,7 @@ namespace KjTabBar.Services
         {
             List<ExplorerWindowProcessRequest> requests = new List<ExplorerWindowProcessRequest>();
 
+            _preparedBeforeShow.RemoveWhere(hwnd => !_windowTracking.HiddenPendingAbsorb.ContainsKey(hwnd));
             _windowTracking.AddHiddenPendingWindows(explorerWindows);
             _tabBars.RemoveInvalidWindows(explorerWindows, _persistClosingTabBarState);
             _windowTracking.CleanupClosedWindows(explorerWindows);
@@ -166,7 +225,19 @@ namespace KjTabBar.Services
             {
                 IntPtr hwnd = explorerWindows[i];
                 if (_tabBars.Contains(hwnd)) continue;
-                if (_windowTracking.IsParkedExplorerOriginValue(hwnd))
+                if (_preparedBeforeShow.Contains(hwnd))
+                {
+                    // SHOW delivery can lag even though Windows has already shown the host.
+                    // Only recover first hosts here; the switch coordinator owns replacements.
+                    if (_windowTracking.InternalHostSwitchLaunchWindows.Contains(hwnd) || !_isWindowVisible(hwnd))
+                        continue;
+                    _moveWindowOffscreen(hwnd);
+                    _preparedBeforeShow.Remove(hwnd);
+                    AppLogger.LogDiagnostic("ReopenDecision", "VisibleBeforeShowCallback hwnd=" + hwnd);
+                }
+                bool desktopReshow = _windowTracking.DesktopLaunchCandidates.Contains(hwnd) &&
+                    _windowTracking.HiddenPendingAbsorb.ContainsKey(hwnd);
+                if (_windowTracking.IsParkedExplorerOriginValue(hwnd) && !desktopReshow)
                 {
                     AppLogger.LogInfo(
                         "ExplorerWindowMonitorCoordinator",
@@ -223,6 +294,9 @@ namespace KjTabBar.Services
 
         private static void MoveWindowOffscreenCore(IntPtr hwnd)
         {
+            System.Diagnostics.Stopwatch timer = AppLogger.StartDiagnosticTiming();
+            AppLogger.LogDiagnosticTiming("Offscreen.Begin", hwnd, timer);
+            AppLogger.LogDiagnosticPlacement("Offscreen.Before", hwnd);
             NativeMethods.SetWindowPos(
                 hwnd,
                 IntPtr.Zero,
@@ -231,6 +305,8 @@ namespace KjTabBar.Services
                 0,
                 0,
                 NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER);
+            AppLogger.LogDiagnosticPlacement("Offscreen.After", hwnd);
+            AppLogger.LogDiagnosticTiming("Offscreen.Completed", hwnd, timer);
         }
 
         private IntPtr GetRootWindowOrSelf(IntPtr hwnd)

@@ -11,7 +11,7 @@ namespace KjTabBar.Services
     {
         public TabBarViewModel SaveTarget { get; set; }
         public TabPersistenceService TabPersistence { get; set; }
-        public DispatcherTimer MonitorTimer { get; set; }
+        public ExplorerMonitorTimer MonitorTimer { get; set; }
         public EventHandler MonitorTickHandler { get; set; }
         public IExplorerService ExplorerService { get; set; }
         public TabBarRegistry TabBars { get; set; }
@@ -76,13 +76,12 @@ namespace KjTabBar.Services
             }
         }
 
-        public DispatcherTimer CreateMonitorTimer(TimeSpan interval, EventHandler tickHandler)
+        public ExplorerMonitorTimer CreateMonitorTimer(TimeSpan interval, EventHandler tickHandler)
         {
-            DispatcherTimer timer = new DispatcherTimer();
-            timer.Interval = interval;
-            timer.Tick += tickHandler;
-            timer.Start();
-            return timer;
+            Dispatcher dispatcher = Dispatcher.CurrentDispatcher;
+            return new ExplorerMonitorTimer(interval,
+                callback => dispatcher.BeginInvoke(DispatcherPriority.Normal, callback),
+                () => tickHandler(null, EventArgs.Empty));
         }
 
         public void Shutdown(AppRuntimeContext context)
@@ -106,8 +105,7 @@ namespace KjTabBar.Services
 
             if (context.MonitorTimer != null)
             {
-                context.MonitorTimer.Tick -= context.MonitorTickHandler;
-                context.MonitorTimer.Stop();
+                context.MonitorTimer.Dispose();
             }
 
             ThemeManager.Instance.StopMonitoring();

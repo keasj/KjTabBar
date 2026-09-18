@@ -32,16 +32,22 @@ namespace KjTabBar.Models
             }
 
             _lastMaintenanceUtc = nowUtc;
+            System.Diagnostics.Stopwatch timer = AppLogger.StartDiagnosticTiming();
+            AppLogger.LogDiagnosticTiming("Maintenance.Begin", IntPtr.Zero, timer);
 
             try
             {
                 _explorerService.ReleaseCachedComObjects();
+                AppLogger.LogDiagnosticTiming("Maintenance.UiRelease", IntPtr.Zero, timer);
                 _ = ComThreadService.Instance.InvokeAsync(() =>
                 {
+                    AppLogger.LogDiagnosticTiming("Maintenance.WorkerStart", IntPtr.Zero, timer);
                     _explorerService.ReleaseCachedComObjects();
+                    AppLogger.LogDiagnosticTiming("Maintenance.WorkerRelease", IntPtr.Zero, timer);
                 });
 
                 System.Runtime.InteropServices.Marshal.CleanupUnusedObjectsInCurrentContext();
+                AppLogger.LogDiagnosticTiming("Maintenance.UiComplete", IntPtr.Zero, timer);
             }
             catch (Exception ex)
             {

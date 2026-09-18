@@ -9,6 +9,8 @@ namespace KjTabBar.Services
 {
     internal sealed class ExplorerHostSwitchCoordinator
     {
+        internal bool? CurrentHostIsControlPanel { get; private set; }
+        private const int NewHostPollingAttempts = 80;
         private IntPtr _pendingRevealExplorerHwnd;
         private bool _pendingRevealHasOriginalRect;
         private NativeMethods.RECT _pendingRevealOriginalRect;
@@ -152,7 +154,9 @@ namespace KjTabBar.Services
 
             bool targetIsControlPanelPath = _explorerService.IsControlPanelPath(targetPath);
             IntPtr currentExplorerHwnd = viewModel.ExplorerHwnd;
+            System.Diagnostics.Stopwatch hostTypeTimer = AppLogger.StartDiagnosticTiming();
             bool currentIsControlPanelHost = await IsControlPanelHostAsync(currentExplorerHwnd, viewModel, targetIsControlPanelPath);
+            AppLogger.LogDiagnosticTiming("Host.CurrentType", currentExplorerHwnd, hostTypeTimer);
             IntPtr parkedExplorerHwnd;
             AppLogger.LogDiagnostic(
                 "ExplorerHostSwitchCoordinator",
@@ -206,13 +210,18 @@ namespace KjTabBar.Services
 
             try
             {
-                NativeMethods.RECT? currentExplorerRect = _getWindowRect != null ? _getWindowRect(currentExplorerHwnd) : null;
+                NativeMethods.RECT deferredRect;
+                NativeMethods.RECT? currentExplorerRect = _windowTracking.DeferredOriginRestoreRects.TryGetValue(currentExplorerHwnd, out deferredRect)
+                    ? deferredRect : (_getWindowRect != null ? _getWindowRect(currentExplorerHwnd) : null);
+                NativeMethods.WINDOWPLACEMENT? currentPlacement = _windowTracking.GetHostSwitchRestorePlacement(currentExplorerHwnd);
                 AlignHostBeforeRebind(parkedExplorerHwnd, currentExplorerRect);
-                if (!_rebindExplorerWindow(viewModel, parkedExplorerHwnd))
+                if (!RebindWithHostType(viewModel, parkedExplorerHwnd, parkedIsControlPanelHost))
                 {
                     return false;
                 }
 
+                _windowTracking.StageRestorePlacement(parkedExplorerHwnd, currentPlacement);
+                _windowTracking.TransferRestorePlacement(currentExplorerHwnd, parkedExplorerHwnd);
                 _windowTracking.ClearParkedExplorerOrigin(currentExplorerHwnd);
                 _windowTracking.RememberParkedExplorerOrigin(parkedExplorerHwnd, currentExplorerHwnd);
                 NativeMethods.ShowWindow(currentExplorerHwnd, NativeMethods.SW_HIDE);
@@ -275,7 +284,10 @@ namespace KjTabBar.Services
             }
 
             HashSet<IntPtr> previousExplorerWindows = new HashSet<IntPtr>(_findExplorerWindows());
-            NativeMethods.RECT? currentExplorerRect = _getWindowRect != null ? _getWindowRect(currentExplorerHwnd) : null;
+            NativeMethods.WINDOWPLACEMENT? currentPlacement = _windowTracking.GetHostSwitchRestorePlacement(currentExplorerHwnd);
+            NativeMethods.RECT deferredRect;
+            NativeMethods.RECT? currentExplorerRect = _windowTracking.DeferredOriginRestoreRects.TryGetValue(currentExplorerHwnd, out deferredRect)
+                ? deferredRect : (_getWindowRect != null ? _getWindowRect(currentExplorerHwnd) : null);
             AppLogger.LogDiagnostic(
                 "ExplorerHostSwitchCoordinator",
                 string.Format(
@@ -289,6 +301,7 @@ namespace KjTabBar.Services
                 !_explorerService.IsControlPanelRootPath(targetPath)
                 ? _explorerService.AllControlPanelPath
                 : targetPath;
+            System.Diagnostics.Stopwatch launchTimer = AppLogger.StartDiagnosticTiming();
             _windowTracking.RegisterInternalHostSwitchLaunchRequest();
             if (!_openInNewWindow(launchPath))
             {
@@ -297,7 +310,9 @@ namespace KjTabBar.Services
                 return false;
             }
 
+            AppLogger.LogDiagnosticTiming("Host.LaunchReturned", currentExplorerHwnd, launchTimer);
             IntPtr newExplorerHwnd = await WaitForNewExplorerWindowAsync(previousExplorerWindows, currentExplorerHwnd, launchPath);
+            AppLogger.LogDiagnosticTiming("Host.WindowMatched", currentExplorerHwnd, launchTimer);
             if (newExplorerHwnd == IntPtr.Zero)
             {
                 _windowTracking.CancelInternalHostSwitchLaunchRequest();
@@ -328,13 +343,15 @@ namespace KjTabBar.Services
 
                 AppLogger.LogDiagnostic("ExplorerHostSwitchCoordinator", string.Format(
                     "Rebind requested current={0} new={1}", currentExplorerHwnd, newExplorerHwnd));
-                if (!_rebindExplorerWindow(viewModel, newExplorerHwnd))
+                if (!RebindWithHostType(viewModel, newExplorerHwnd, _explorerService.IsControlPanelPath(targetPath)))
                 {
                     AppLogger.LogDiagnostic("ExplorerHostSwitchCoordinator", "Rebind rejected");
                     RestorePreparedExplorerWindow(newExplorerHwnd, hadHiddenPending, hadHiddenOriginalRect, hiddenOriginalRect);
                     return false;
                 }
 
+                _windowTracking.StageRestorePlacement(newExplorerHwnd, currentPlacement);
+                _windowTracking.TransferRestorePlacement(currentExplorerHwnd, newExplorerHwnd);
                 _windowTracking.RememberParkedExplorerOrigin(newExplorerHwnd, currentExplorerHwnd);
                 NativeMethods.ShowWindow(currentExplorerHwnd, NativeMethods.SW_HIDE);
                 _pendingRevealExplorerHwnd = newExplorerHwnd;
@@ -374,10 +391,16 @@ namespace KjTabBar.Services
                 return IntPtr.Zero;
             }
 
-            for (int retry = 0; retry < 20; retry++)
+            for (int retry = 0; retry < NewHostPollingAttempts; retry++)
             {
+                if (_isWindow != null && !_isWindow(currentExplorerHwnd)) return IntPtr.Zero;
+                System.Diagnostics.Stopwatch pollTimer = AppLogger.StartDiagnosticTiming();
                 IntPtr matchedExplorerHwnd = await Services.ComThreadService.Instance.InvokeAsync(() =>
-                    FindMatchingNewExplorerWindow(previousExplorerWindows, currentExplorerHwnd, targetPath, retry));
+                {
+                    AppLogger.LogDiagnosticTiming("Poll.QueueWait." + retry, currentExplorerHwnd, pollTimer);
+                    return FindMatchingNewExplorerWindow(previousExplorerWindows, currentExplorerHwnd, targetPath, retry);
+                });
+                AppLogger.LogDiagnosticTiming("Poll.Completed." + retry, currentExplorerHwnd, pollTimer);
                 if (matchedExplorerHwnd != IntPtr.Zero)
                 {
                     return matchedExplorerHwnd;
@@ -392,6 +415,25 @@ namespace KjTabBar.Services
             return IntPtr.Zero;
         }
 
+        private bool RebindWithHostType(TabBarViewModel viewModel, IntPtr hwnd, bool isControlPanel)
+        {
+            bool? previous = CurrentHostIsControlPanel;
+            bool succeeded = false;
+            // Rebind updates the owner before the active tab changes.
+            CurrentHostIsControlPanel = isControlPanel;
+            try
+            {
+                succeeded = _rebindExplorerWindow(viewModel, hwnd);
+                return succeeded;
+            }
+            finally
+            {
+                if (!succeeded)
+                {
+                    CurrentHostIsControlPanel = previous;
+                }
+            }
+        }
         private void AlignHostBeforeRebind(IntPtr explorerHwnd, NativeMethods.RECT? rect)
         {
             // Rebinding immediately updates the tab bar from the host's current coordinates.
@@ -399,6 +441,7 @@ namespace KjTabBar.Services
                 NativeMethods.IsUsableWindowRestoreRect(rect.Value))
             {
                 _moveExplorerWindow(explorerHwnd, rect.Value);
+                _windowTracking.DeferredOriginRestoreRects.Remove(explorerHwnd);
             }
         }
 
@@ -428,7 +471,10 @@ namespace KjTabBar.Services
 
             if (_showExplorerWindow != null)
             {
+                AppLogger.LogDiagnosticPlacement("Reveal.Before", pendingRevealExplorerHwnd);
+                _windowTracking.RestoreNormalPositionBeforeShow(pendingRevealExplorerHwnd);
                 _showExplorerWindow(pendingRevealExplorerHwnd);
+                AppLogger.LogDiagnosticPlacement("Reveal.After", pendingRevealExplorerHwnd);
             }
         }
 
@@ -461,7 +507,7 @@ namespace KjTabBar.Services
         private IntPtr FindMatchingNewExplorerWindow(HashSet<IntPtr> previousExplorerWindows, IntPtr currentExplorerHwnd, string targetPath, int retry)
         {
             List<IntPtr> explorerWindows = _findExplorerWindows();
-            if (retry == 0 || retry == 19)
+            if (retry == 0 || retry == NewHostPollingAttempts - 1)
             {
                 AppLogger.LogDiagnostic("ExplorerHostSwitchCoordinator", string.Format(
                     "FindNewWindow retry={0} current={1} target={2} previous=[{3}] observed=[{4}]",
@@ -482,7 +528,7 @@ namespace KjTabBar.Services
                 }
 
                 string currentPath = _getCurrentPath != null ? _getCurrentPath(hwnd) : null;
-                if (retry == 0 || retry == 19)
+                if (retry == 0 || retry == NewHostPollingAttempts - 1)
                 {
                     AppLogger.LogDiagnostic("ExplorerHostSwitchCoordinator", string.Format(
                         "NewWindowCandidate retry={0} hwnd={1} currentPath={2} targetPath={3}",

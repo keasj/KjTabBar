@@ -454,7 +454,7 @@ namespace KjTabBar.ViewModels
             RestoreTabs(paths, activePath, activeIndex, false);
         }
 
-        internal void RestoreTabs(string[] paths, string activePath, int? activeIndex, bool deferControlPanelNavigation)
+        internal void RestoreTabs(string[] paths, string activePath, int? activeIndex, bool deferControlPanelNavigation, bool deferNavigation = false)
         {
             if (paths == null || paths.Length == 0) return;
 
@@ -484,7 +484,7 @@ namespace KjTabBar.ViewModels
                 _tabs.Add(newTab);
             }
 
-            if (!isFirstValidTab)
+            if (!isFirstValidTab && !deferNavigation)
             {
                 TabItemViewModel activeTab = null;
                 if (activeIndex.HasValue && activeIndex.Value >= 0 && activeIndex.Value < _tabs.Count)

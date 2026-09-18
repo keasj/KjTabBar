@@ -67,6 +67,7 @@
     <Reference Include="System.Xaml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="DesktopRepeatedLaunchServiceTests.cs" />
     <Compile Include="UnitTest1.cs" />
     <Compile Include="Release130RegressionTests.cs" />
     <Compile Include="ShellWorkerTests.cs" />
@@ -83,6 +84,7 @@
     <Compile Include="ExplorerWindowTrackingStateTests.cs" />
     <Compile Include="ExplorerTabTargetResolverTests.cs" />
     <Compile Include="AppMonitorCycleCoordinatorTests.cs" />
+    <Compile Include="ExplorerMonitorTimerTests.cs" />
     <Compile Include="ComThreadServiceTests.cs" />
     <Compile Include="MemoryMaintenanceServiceTests.cs" />
     <Compile Include="TabExternalDragOpenDeciderTests.cs" />

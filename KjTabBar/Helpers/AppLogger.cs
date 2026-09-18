@@ -42,6 +42,34 @@ namespace KjTabBar.Helpers
         private static readonly bool DiagnosticsEnabled =
             string.Equals(Environment.GetEnvironmentVariable("KJTB_DIAGNOSTICS"), "1", StringComparison.Ordinal);
 
+        internal static System.Diagnostics.Stopwatch StartDiagnosticTiming()
+        {
+            return DiagnosticsEnabled ? System.Diagnostics.Stopwatch.StartNew() : null;
+        }
+
+        internal static void LogDiagnosticTiming(string stage, IntPtr hwnd, System.Diagnostics.Stopwatch timer)
+        {
+            if (timer == null) return;
+            LogDiagnostic("ReopenTiming", string.Format(CultureInfo.InvariantCulture,
+                "stage={0} hwnd={1} elapsedMs={2:0.0}", stage, hwnd, timer.Elapsed.TotalMilliseconds));
+        }
+
+        internal static void LogDiagnosticPlacement(string stage, IntPtr hwnd)
+        {
+            if (!DiagnosticsEnabled) return;
+            NativeMethods.WINDOWPLACEMENT placement = new NativeMethods.WINDOWPLACEMENT();
+            placement.length = (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.WINDOWPLACEMENT));
+            bool hasPlacement = NativeMethods.GetWindowPlacement(hwnd, ref placement);
+            NativeMethods.RECT rect = placement.rcNormalPosition;
+            NativeMethods.RECT currentRect;
+            bool hasRect = NativeMethods.GetWindowRect(hwnd, out currentRect);
+            LogDiagnostic("WindowPlacement", string.Format(CultureInfo.InvariantCulture,
+                "stage={0} hwnd={1} alive={2} visible={3} iconic={4} hasPlacement={5} show={6} normal={7},{8},{9},{10} hasRect={11} rect={12},{13},{14},{15}",
+                stage, hwnd, NativeMethods.IsWindow(hwnd), NativeMethods.IsWindowVisible(hwnd), NativeMethods.IsIconic(hwnd),
+                hasPlacement, placement.showCmd, rect.Left, rect.Top, rect.Right, rect.Bottom,
+                hasRect, currentRect.Left, currentRect.Top, currentRect.Right, currentRect.Bottom));
+        }
+
         public static void LogDiagnostic(string source, string message)
         {
             if (DiagnosticsEnabled) Write("DIAG", source, message, null);

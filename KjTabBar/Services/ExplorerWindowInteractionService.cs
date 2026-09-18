@@ -16,6 +16,7 @@ namespace KjTabBar.Services
         private readonly TabPersistenceService _tabPersistence;
         private readonly Func<IntPtr, string> _getWindowTitle;
         private readonly Action<IntPtr> _showExplorerWindow;
+        private readonly Action<IntPtr> _hideExplorerWindow;
         private readonly Action<IntPtr> _forceSetForegroundWindow;
         private readonly Action<IntPtr, NativeMethods.RECT> _moveExplorerWindow;
         private readonly Action<IntPtr> _postCloseWindow;
@@ -33,7 +34,7 @@ namespace KjTabBar.Services
                   windowTracking,
                   tabPersistence,
                   GetWindowTitleCore,
-                  delegate (IntPtr hwnd) { NativeMethods.ShowWindow(hwnd, NativeMethods.SW_SHOW); },
+                  ShowExplorerWindowCore,
                   NativeMethods.ForceSetForegroundWindow,
                   MoveExplorerWindowCore,
                   DefaultRebindExplorerWindow,
@@ -54,7 +55,7 @@ namespace KjTabBar.Services
                   windowTracking,
                   tabPersistence,
                   GetWindowTitleCore,
-                  delegate (IntPtr hwnd) { NativeMethods.ShowWindow(hwnd, NativeMethods.SW_SHOW); },
+                  ShowExplorerWindowCore,
                   NativeMethods.ForceSetForegroundWindow,
                   MoveExplorerWindowCore,
                   rebindExplorerWindow ?? DefaultRebindExplorerWindow,
@@ -77,13 +78,14 @@ namespace KjTabBar.Services
             Action<IntPtr> postCloseWindow,
             Func<TabBarWindow> createTabBarWindow,
             Action<TabBarWindow> showTabBarWindow,
-            Func<IExplorerService, ExplorerWindowTrackingState, Func<TabBarViewModel, IntPtr, bool>, Action<IntPtr>, Action<IntPtr, NativeMethods.RECT>, Action<IntPtr>, ExplorerHostSwitchCoordinator> createHostSwitchCoordinator)
+            Func<IExplorerService, ExplorerWindowTrackingState, Func<TabBarViewModel, IntPtr, bool>, Action<IntPtr>, Action<IntPtr, NativeMethods.RECT>, Action<IntPtr>, ExplorerHostSwitchCoordinator> createHostSwitchCoordinator, Action<IntPtr> hideExplorerWindow = null)
         {
             _explorerService = explorerService;
             _windowTracking = windowTracking;
             _tabPersistence = tabPersistence;
             _getWindowTitle = getWindowTitle;
             _showExplorerWindow = showExplorerWindow;
+            _hideExplorerWindow = hideExplorerWindow ?? delegate (IntPtr hwnd) { NativeMethods.ShowWindow(hwnd, NativeMethods.SW_HIDE); };
             _forceSetForegroundWindow = forceSetForegroundWindow;
             _moveExplorerWindow = moveExplorerWindow;
             _rebindExplorerWindow = rebindExplorerWindow;
@@ -154,35 +156,64 @@ namespace KjTabBar.Services
             string initialPath,
             bool useInitialPathOnly)
         {
-            RestorePreparedExplorerWindowForCreate(hwnd);
-
-            TabBarViewModel viewModel = new TabBarViewModel(hwnd, userSettings, _explorerService, initialPath);
-            InitializeTabsForNewWindow(viewModel, initialPath, useInitialPathOnly);
-
-            TabBarWindow tabBarWindow = _createTabBarWindow();
-            tabBarWindow.ExplorerService = _explorerService;
-            tabBarWindow.PersistTabState = delegate (TabBarViewModel currentViewModel)
+            try
             {
-                if (_tabPersistence != null && currentViewModel != null)
+                System.Diagnostics.Stopwatch createTimer = AppLogger.StartDiagnosticTiming();
+                TabBarViewModel viewModel = new TabBarViewModel(hwnd, userSettings, _explorerService, initialPath);
+                AppLogger.LogDiagnosticTiming("Create.ViewModel", hwnd, createTimer);
+                InitializeTabsForNewWindow(viewModel, initialPath, useInitialPathOnly);
+                AppLogger.LogDiagnosticTiming("Create.SavedTabsLoaded", hwnd, createTimer);
+                if (createTimer != null) AppLogger.LogDiagnostic("RestoreDecision", string.Format(
+                    "hwnd={0} restoringControlPanel={1} activeControlPanel={2} initialHomeLiteral={3} initialOnly={4}",
+                    hwnd, viewModel.IsRestoringControlPanelHost,
+                    viewModel.ActiveTab != null && _explorerService.IsControlPanelPath(viewModel.ActiveTab.Path),
+                    string.Equals(initialPath, _explorerService.HomeFolderPath, StringComparison.OrdinalIgnoreCase), useInitialPathOnly));
+                AppLogger.LogDiagnosticPlacement("Create.BeforePositionPrepared", hwnd);
+                RestorePreparedExplorerWindowForCreate(hwnd, viewModel.IsRestoringControlPanelHost);
+                AppLogger.LogDiagnosticPlacement("Create.AfterPositionPrepared", hwnd);
+                AppLogger.LogDiagnosticTiming("Create.PositionPrepared", hwnd, createTimer);
+
+                TabBarWindow tabBarWindow = _createTabBarWindow();
+                tabBarWindow.ExplorerService = _explorerService;
+                tabBarWindow.PersistTabState = delegate (TabBarViewModel currentViewModel)
                 {
-                    _tabPersistence.SaveTabsIfChanged(currentViewModel, true);
+                    if (_tabPersistence != null && currentViewModel != null)
+                    {
+                        _tabPersistence.SaveTabsIfChanged(currentViewModel, true);
+                    }
+                };
+                tabBarWindow.WindowTrackingState = _windowTracking;
+                tabBarWindow.ExplorerHostSwitchCoordinator = _createHostSwitchCoordinator(
+                    _explorerService,
+                    _windowTracking,
+                    _rebindExplorerWindow,
+                    _showExplorerWindow,
+                    _moveExplorerWindow,
+                    _postCloseWindow);
+                // Visibility is bound in XAML; assigning a visible DataContext can show
+                // the window even without an explicit Show call.
+                if (viewModel.IsRestoringControlPanelHost) viewModel.WindowVisibility = System.Windows.Visibility.Hidden;
+                tabBarWindow.DataContext = viewModel;
+                AppLogger.LogDiagnosticPlacement("Create.AfterDataContext", hwnd);
+                // Register before asynchronous host preparation so rebinding can find
+                // this window without showing the temporary Home tab bar first.
+                if (viewModel.IsRestoringControlPanelHost)
+                {
+                    if (registerTabBar != null) registerTabBar(viewModel.ExplorerHwnd, tabBarWindow);
+                    RestorePersistedSpecialActiveTabHost(tabBarWindow, viewModel);
                 }
-            };
-            tabBarWindow.WindowTrackingState = _windowTracking;
-            tabBarWindow.ExplorerHostSwitchCoordinator = _createHostSwitchCoordinator(
-                _explorerService,
-                _windowTracking,
-                _rebindExplorerWindow,
-                _showExplorerWindow,
-                _moveExplorerWindow,
-                _postCloseWindow);
-            tabBarWindow.DataContext = viewModel;
-            _showTabBarWindow(tabBarWindow);
-            RestorePersistedSpecialActiveTabHost(tabBarWindow, viewModel);
-
-            if (registerTabBar != null)
+                else
+                {
+                    _showTabBarWindow(tabBarWindow);
+                    AppLogger.LogDiagnosticTiming("Create.TabBarShown", hwnd, createTimer);
+                    if (registerTabBar != null) registerTabBar(viewModel.ExplorerHwnd, tabBarWindow);
+                }
+            }
+            catch
             {
-                registerTabBar(viewModel.ExplorerHwnd, tabBarWindow);
+                _windowTracking.RestoreHiddenWindow(hwnd);
+                _showExplorerWindow(hwnd);
+                throw;
             }
         }
 
@@ -207,39 +238,38 @@ namespace KjTabBar.Services
             ExplorerHostSwitchCoordinator coordinator = tabBarWindow.ExplorerHostSwitchCoordinator;
             if (coordinator == null)
             {
-                viewModel.IsRestoringControlPanelHost = false;
+                CompletePersistedHostRestoration(viewModel, viewModel.ExplorerHwnd);
+                viewModel.WindowVisibility = System.Windows.Visibility.Visible;
+                _showTabBarWindow(tabBarWindow);
                 return;
             }
 
+            Action showRestoredTabBar = delegate
+            {
+                if (NativeMethods.IsWindow(viewModel.ExplorerHwnd))
+                {
+                    viewModel.WindowVisibility = System.Windows.Visibility.Visible;
+                    _showTabBarWindow(tabBarWindow);
+                }
+            };
+
             if (System.Threading.SynchronizationContext.Current is System.Windows.Threading.DispatcherSynchronizationContext)
             {
-                RestorePersistedSpecialActiveTabHostAsync(coordinator, viewModel, activeTab);
+                _ = RestorePersistedSpecialActiveTabHostAsync(coordinator, viewModel, activeTab, showRestoredTabBar);
             }
             else
             {
-                try
-                {
-                    if (!coordinator.PrepareForPath(viewModel, activeTab.Path))
-                    {
-                        return;
-                    }
-
-                    TabBarWindow.ExecuteTabSelectionWithPendingReveal(
-                        delegate { viewModel.SelectTab(activeTab); },
-                        coordinator.CompletePendingReveal);
-                }
-                finally
-                {
-                    viewModel.IsRestoringControlPanelHost = false;
-                }
+                RestorePersistedSpecialActiveTabHostAsync(coordinator, viewModel, activeTab, showRestoredTabBar).GetAwaiter().GetResult();
             }
         }
 
-        private async void RestorePersistedSpecialActiveTabHostAsync(
+        internal async System.Threading.Tasks.Task RestorePersistedSpecialActiveTabHostAsync(
             ExplorerHostSwitchCoordinator coordinator,
             TabBarViewModel viewModel,
-            TabItemViewModel activeTab)
+            TabItemViewModel activeTab, Action showRestoredTabBar = null)
         {
+            IntPtr originalHwnd = viewModel.ExplorerHwnd;
+            System.Diagnostics.Stopwatch restoreTimer = AppLogger.StartDiagnosticTiming();
             try
             {
                 if (!await coordinator.PrepareForPathAsync(viewModel, activeTab.Path))
@@ -247,9 +277,15 @@ namespace KjTabBar.Services
                     return;
                 }
 
+                AppLogger.LogDiagnosticTiming("Restore.HostReady", originalHwnd, restoreTimer);
                 TabBarWindow.ExecuteTabSelectionWithPendingReveal(
-                    delegate { viewModel.SelectTab(activeTab); },
+                    delegate
+                    {
+                        viewModel.SelectTab(activeTab);
+                        AppLogger.LogDiagnosticTiming("Restore.TabSelected", originalHwnd, restoreTimer);
+                    },
                     coordinator.CompletePendingReveal);
+                AppLogger.LogDiagnosticTiming("Restore.Revealed", originalHwnd, restoreTimer);
             }
             catch (Exception ex)
             {
@@ -257,7 +293,25 @@ namespace KjTabBar.Services
             }
             finally
             {
-                viewModel.IsRestoringControlPanelHost = false;
+                CompletePersistedHostRestoration(viewModel, originalHwnd);
+                if (showRestoredTabBar != null) showRestoredTabBar();
+            }
+        }
+
+        private void CompletePersistedHostRestoration(TabBarViewModel viewModel, IntPtr originalHwnd)
+        {
+            viewModel.IsRestoringControlPanelHost = false;
+            // A failed switch (or an already suitable host) must not leave Explorer hidden.
+            if (viewModel.ExplorerHwnd == originalHwnd)
+            {
+                NativeMethods.RECT restoreRect;
+                if (_windowTracking.DeferredOriginRestoreRects.TryGetValue(originalHwnd, out restoreRect))
+                {
+                    _moveExplorerWindow(originalHwnd, restoreRect);
+                    _windowTracking.DeferredOriginRestoreRects.Remove(originalHwnd);
+                }
+                _windowTracking.RestoreNormalPositionBeforeShow(originalHwnd);
+                _showExplorerWindow(originalHwnd);
             }
         }
 
@@ -268,14 +322,17 @@ namespace KjTabBar.Services
                 return;
             }
 
-            bool loadedSavedTabs = _tabPersistence.LoadTabsTo(viewModel, deferControlPanelNavigation: true);
+            // An explicit launch target must not race a saved-tab navigation.
+            bool preserveInitialPath = !string.IsNullOrEmpty(initialPath) && !IsHomeInitialPath(initialPath);
+            bool loadedSavedTabs = _tabPersistence.LoadTabsTo(viewModel,
+                deferControlPanelNavigation: true, deferNavigation: preserveInitialPath);
 
             if (string.IsNullOrEmpty(initialPath))
             {
                 return;
             }
 
-            if (loadedSavedTabs && IsHomeInitialPath(initialPath))
+            if (loadedSavedTabs && !preserveInitialPath)
             {
                 return;
             }
@@ -335,26 +392,40 @@ namespace KjTabBar.Services
                    string.Equals(normalizedPath, resolvedHomePath.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
         }
 
-        private void RestorePreparedExplorerWindowForCreate(IntPtr hwnd)
+        internal void RestorePreparedExplorerWindowForCreate(IntPtr hwnd, bool deferShow)
         {
-            if (hwnd == IntPtr.Zero)
-            {
-                return;
-            }
+            if (hwnd == IntPtr.Zero) return;
 
-            if (_windowTracking.HiddenPendingAbsorb.ContainsKey(hwnd))
+            NativeMethods.RECT originalRect;
+            bool hasOriginalRect = _windowTracking.HiddenOriginalRects.TryGetValue(hwnd, out originalRect);
+            AppLogger.LogDiagnostic("WindowRecovery", string.Format("Create hwnd={0} defer={1} hasOriginal={2} original={3},{4},{5},{6}", hwnd, deferShow, hasOriginalRect, originalRect.Left, originalRect.Top, originalRect.Right, originalRect.Bottom));
+            if (deferShow)
             {
-                _windowTracking.HiddenPendingAbsorb.Remove(hwnd);
-                _windowTracking.HiddenOriginalRects.Remove(hwnd);
+                // Explorer may show Home again during startup; keep its bounds offscreen.
+                _hideExplorerWindow(hwnd);
             }
 
             NativeMethods.RECT recentClosedRect;
-            if (_windowTracking.TryTakeRecentClosedManagedExplorerRect(DateTime.UtcNow, out recentClosedRect))
+            NativeMethods.WINDOWPLACEMENT? recentPlacement;
+            if (_windowTracking.TryTakeRecentClosedManagedExplorerRect(DateTime.UtcNow, out recentClosedRect, out recentPlacement, deferShow))
             {
-                _moveExplorerWindow(hwnd, recentClosedRect);
+                _windowTracking.StageRestorePlacement(hwnd, recentPlacement);
+                if (deferShow) _windowTracking.DeferredOriginRestoreRects[hwnd] = recentClosedRect;
+                else _moveExplorerWindow(hwnd, recentClosedRect);
+            }
+            else if (hasOriginalRect)
+            {
+                if (deferShow) _windowTracking.DeferredOriginRestoreRects[hwnd] = originalRect;
+                else _moveExplorerWindow(hwnd, originalRect);
             }
 
-            _showExplorerWindow(hwnd);
+            _windowTracking.HiddenPendingAbsorb.Remove(hwnd);
+            _windowTracking.HiddenOriginalRects.Remove(hwnd);
+            if (!deferShow)
+            {
+                _windowTracking.RestoreNormalPositionBeforeShow(hwnd);
+                _showExplorerWindow(hwnd);
+            }
         }
 
         public string GetDesktopVirtualPathFromWindowTitle(IntPtr explorerHwnd)
@@ -413,6 +484,12 @@ namespace KjTabBar.Services
             return true;
         }
 
+        internal void RestoreUnabsorbedWindow(IntPtr hwnd)
+        {
+            _windowTracking.RestoreHiddenWindow(hwnd);
+            _showExplorerWindow(hwnd);
+        }
+
         public void RestoreHiddenWindow(IntPtr hwnd)
         {
             _windowTracking.RestoreHiddenWindow(hwnd);
@@ -464,7 +541,15 @@ namespace KjTabBar.Services
             }
 
             IntPtr previousExplorerHwnd = targetViewModel.ExplorerHwnd;
+            bool previousHostIsControlPanel = targetViewModel.ActiveTab != null &&
+                _explorerService.IsControlPanelPath(targetViewModel.ActiveTab.Path);
+            IntPtr originalFolderHwnd = IntPtr.Zero;
+            if (previousHostIsControlPanel)
+            {
+                _windowTracking.TryGetParkedExplorerOrigin(previousExplorerHwnd, out originalFolderHwnd);
+            }
             NativeMethods.RECT previousExplorerRect = GetWindowBoundsForMove(previousExplorerHwnd);
+            NativeMethods.WINDOWPLACEMENT? previousPlacement = _windowTracking.GetHostSwitchRestorePlacement(previousExplorerHwnd);
             bool hadHiddenPending = _windowTracking.HiddenPendingAbsorb.ContainsKey(newExplorerHwnd);
             NativeMethods.RECT hiddenOriginalRect = default(NativeMethods.RECT);
             bool hadHiddenOriginalRect = _windowTracking.HiddenOriginalRects.TryGetValue(newExplorerHwnd, out hiddenOriginalRect);
@@ -513,11 +598,28 @@ namespace KjTabBar.Services
             targetViewModel.SetActiveTabOnly(reusableTab);
             targetViewModel.UpdateTabTitles();
 
+            _windowTracking.StageRestorePlacement(newExplorerHwnd, previousPlacement);
+            _windowTracking.RestoreNormalPositionBeforeShow(newExplorerHwnd);
             _forceSetForegroundWindow(newExplorerHwnd);
 
             if (previousExplorerHwnd != IntPtr.Zero && previousExplorerHwnd != newExplorerHwnd)
             {
-                _windowTracking.RememberParkedExplorerOrigin(newExplorerHwnd, previousExplorerHwnd);
+                if (previousHostIsControlPanel)
+                {
+                    // A second Control Panel shortcut replaces the same kind of host.
+                    // Its parked partner must remain the original folder Explorer.
+                    _windowTracking.ClearParkedExplorerOrigin(previousExplorerHwnd);
+                    if (originalFolderHwnd != IntPtr.Zero && originalFolderHwnd != newExplorerHwnd)
+                    {
+                        _windowTracking.RememberParkedExplorerOrigin(newExplorerHwnd, originalFolderHwnd);
+                    }
+                    _windowTracking.MarkAbsorbedWindow(previousExplorerHwnd);
+                    _postCloseWindow(previousExplorerHwnd);
+                }
+                else
+                {
+                    _windowTracking.RememberParkedExplorerOrigin(newExplorerHwnd, previousExplorerHwnd);
+                }
                 NativeMethods.ShowWindow(previousExplorerHwnd, NativeMethods.SW_HIDE);
                 AppLogger.LogInfo(
                     "ExplorerWindowInteractionService",
@@ -611,7 +713,16 @@ namespace KjTabBar.Services
 
         private void FinalizeAbsorbedWindow(IntPtr newExplorerHwnd, IntPtr targetExplorerHwnd)
         {
+            _windowTracking.RestoreNormalPositionBeforeShow(targetExplorerHwnd);
             _forceSetForegroundWindow(targetExplorerHwnd);
+            if (newExplorerHwnd == targetExplorerHwnd)
+            {
+                // Windows reused the parked host; it is now the managed window, not disposable.
+                _windowTracking.ClearAbsorptionState(newExplorerHwnd);
+                _windowTracking.HiddenPendingAbsorb.Remove(newExplorerHwnd);
+                _windowTracking.HiddenOriginalRects.Remove(newExplorerHwnd);
+                return;
+            }
             _windowTracking.MarkAbsorbedWindow(newExplorerHwnd);
             _postCloseWindow(newExplorerHwnd);
         }
@@ -653,6 +764,23 @@ namespace KjTabBar.Services
             return true;
         }
 
+        private static void ShowExplorerWindowCore(IntPtr explorerHwnd)
+        {
+            if (explorerHwnd == IntPtr.Zero || !NativeMethods.IsWindow(explorerHwnd))
+            {
+                return;
+            }
+
+            NativeMethods.ShowWindow(explorerHwnd, NativeMethods.SW_SHOW);
+            // A restored Explorer can retain missing caption buttons until its frame is recalculated.
+            // Post the same size-preserving refresh verified on the affected Explorer window.
+            NativeMethods.SetWindowPos(
+                explorerHwnd, IntPtr.Zero, 0, 0, 0, 0,
+                NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOZORDER |
+                NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOOWNERZORDER |
+                NativeMethods.SWP_FRAMECHANGED | NativeMethods.SWP_ASYNCWINDOWPOS);
+        }
+
         private static void MoveExplorerWindowCore(IntPtr explorerHwnd, NativeMethods.RECT rect)
         {
             if (explorerHwnd == IntPtr.Zero || rect.Width <= 0 || rect.Height <= 0)
@@ -660,7 +788,8 @@ namespace KjTabBar.Services
                 return;
             }
 
-            NativeMethods.MoveWindow(explorerHwnd, rect.Left, rect.Top, rect.Width, rect.Height, false);
+            // Restoring an offscreen window must invalidate both its frame and folder view.
+            NativeMethods.MoveWindow(explorerHwnd, rect.Left, rect.Top, rect.Width, rect.Height, true);
         }
 
         private static string GetWindowTitleCore(IntPtr hwnd)

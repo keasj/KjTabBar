@@ -12,6 +12,277 @@ namespace UnitTestProject
     public class ExplorerWindowInteractionServiceTests
     {
         [TestMethod]
+        public void SuccessiveControlPanelShortcuts_KeepOriginalFolderHost()
+        {
+            PowerOptionsExplorerService explorer = new PowerOptionsExplorerService();
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+            System.Collections.Generic.List<IntPtr> closed = new System.Collections.Generic.List<IntPtr>();
+            ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                explorer, tracking, TestTabPersistenceFactory.Create(), delegate { return string.Empty; },
+                delegate { }, delegate { }, hwnd => closed.Add(hwnd), delegate { return null; }, delegate { });
+            TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, @"C:\Work");
+            Assert.IsTrue(service.AbsorbExplorerWindow((IntPtr)200, vm, explorer.AllControlPanelPath, true, true, delegate { }));
+            Assert.IsTrue(service.AbsorbExplorerWindow((IntPtr)300, vm, explorer.PowerOptionsPath, true, true, delegate { }));
+            Assert.AreEqual((IntPtr)100, tracking.ParkedExplorerOrigins[(IntPtr)300],
+                "Return to the original folder Explorer, preserving its collapsed ribbon.");
+            Assert.IsFalse(tracking.ParkedExplorerOrigins.ContainsKey((IntPtr)200));
+            CollectionAssert.AreEqual(new IntPtr[] { (IntPtr)200 }, closed);
+            Assert.IsTrue(service.AbsorbExplorerWindow((IntPtr)400, vm, explorer.AllControlPanelPath, true, true, delegate { }));
+            Assert.AreEqual((IntPtr)100, tracking.ParkedExplorerOrigins[(IntPtr)400]);
+            CollectionAssert.AreEqual(new IntPtr[] { (IntPtr)200, (IntPtr)300 }, closed);
+        }
+
+        [TestMethod]
+        public void ControlPanelLaunch_RestoresMaximizedStateAfterMinimize()
+        {
+            VerifyControlPanelRestoreState(2, 2, 3);
+        }
+
+        [TestMethod]
+        public void ControlPanelLaunch_RestoresNormalStateAfterMinimize()
+        {
+            VerifyControlPanelRestoreState(2, 0, 1);
+        }
+
+        [TestMethod]
+        public void ControlPanelLaunch_DoesNotReapplyOldMaximizeFlagToNormalWindow()
+        {
+            VerifyControlPanelRestoreState(1, 2, 1);
+        }
+
+        private static void VerifyControlPanelRestoreState(uint showCommand, uint flags, uint expectedShowCommand)
+        {
+            PowerOptionsExplorerService explorer = new PowerOptionsExplorerService();
+            NativeMethods.RECT normal = new NativeMethods.RECT { Left = 100, Top = 100, Right = 1100, Bottom = 800 };
+            NativeMethods.WINDOWPLACEMENT source = new NativeMethods.WINDOWPLACEMENT
+                { showCmd = showCommand, flags = flags, rcNormalPosition = normal };
+            int writes = 0;
+            bool rebound = false;
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState(
+                hwnd => true, hwnd => { }, hwnd => { },
+                hwnd => hwnd == (IntPtr)100 ? source : (NativeMethods.WINDOWPLACEMENT?)null,
+                (hwnd, placement) =>
+                {
+                    Assert.IsTrue(rebound, "Do not reveal the replacement before rebinding succeeds.");
+                    Assert.AreEqual((IntPtr)200, hwnd);
+                    Assert.AreEqual(expectedShowCommand, placement.showCmd);
+                    Assert.AreEqual(normal, placement.rcNormalPosition);
+                    writes++;
+                    return true;
+                });
+            ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                explorer, tracking, TestTabPersistenceFactory.Create(), delegate { return string.Empty; },
+                delegate { }, delegate { Assert.AreEqual(1, writes, "Restore state before foreground activation."); },
+                delegate { }, (vm, hwnd) => { vm.SetExplorerHwnd(hwnd); rebound = true; return true; },
+                delegate { }, delegate { return null; }, delegate { }, null);
+            TabBarViewModel viewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.AllControlPanelPath);
+            Assert.IsTrue(service.AbsorbExplorerWindow((IntPtr)200, viewModel, explorer.PowerOptionsPath, true, true, delegate { }));
+            Assert.AreEqual(1, writes);
+        }
+
+        [TestMethod]
+        public void InitializeTabsForNewWindow_DoesNotNavigateToSavedTabBeforeExplicitShortcut()
+        {
+            string tabsFilePath = Path.Combine(Path.GetTempPath(), "KjTabBar.Tests." + Guid.NewGuid().ToString("N") + ".shortcut.tabs.txt");
+            try
+            {
+                ProtectedTextStorage.SaveLines(tabsFilePath, new string[] { @"C:\SavedFolder" });
+                PendingShortcutExplorerService explorer = new PendingShortcutExplorerService();
+                ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                    explorer, new ExplorerWindowTrackingState(), new TabPersistenceService(tabsFilePath),
+                    delegate { return string.Empty; }, delegate { }, delegate { }, delegate { },
+                    delegate { return null; }, delegate { });
+                TabBarViewModel viewModel = new TabBarViewModel((IntPtr)403, new MockUserSettings(), explorer, @"C:\Assets");
+
+                service.InitializeTabsForNewWindow(viewModel, @"C:\Assets", true);
+
+                Assert.AreEqual(@"C:\Assets", viewModel.ActiveTab.Path);
+                Assert.IsNull(explorer.PendingPath,
+                    "A saved-folder navigation must not remain queued after selecting the already-open shortcut target.");
+                Assert.AreEqual(2, viewModel.Tabs.Count);
+            }
+            finally
+            {
+                if (File.Exists(tabsFilePath)) File.Delete(tabsFilePath);
+            }
+        }
+
+        private sealed class PendingShortcutExplorerService : MockExplorerService
+        {
+            public string PendingPath { get; private set; }
+            public override string GetCurrentPath(IntPtr hwnd) { return @"C:\Assets"; }
+            public override bool Navigate(IntPtr hwnd, string path)
+            {
+                // Shell accepts navigation before its current location changes.
+                PendingPath = path;
+                return true;
+            }
+        }
+
+        [TestMethod]
+        public void ReopenControlPanel_KeepsSavedNormalStateUntilFinalReveal()
+        {
+            VerifySavedPlacementAtReveal(1);
+        }
+
+        [TestMethod]
+        public void ReopenControlPanel_KeepsMaximizedStateAndSeparateNormalBounds()
+        {
+            VerifySavedPlacementAtReveal(3);
+        }
+
+        [TestMethod]
+        public void ReopenControlPanel_AfterOneMinute_KeepsSavedNormalPlacement()
+        {
+            VerifySavedPlacementAtReveal(1, 60);
+        }
+
+        [TestMethod]
+        public void ReopenControlPanel_AfterOneMinute_KeepsMaximizedPlacement()
+        {
+            VerifySavedPlacementAtReveal(3, 60);
+        }
+
+        private static void VerifySavedPlacementAtReveal(uint savedShowCommand, int closedAgeSeconds = 0)
+        {
+            NativeMethods.RECT normal = new NativeMethods.RECT { Left = 220, Top = 140, Right = 1220, Bottom = 840 };
+            NativeMethods.RECT maximized = new NativeMethods.RECT { Left = -8, Top = -8, Right = 1928, Bottom = 1040 };
+            NativeMethods.WINDOWPLACEMENT saved = new NativeMethods.WINDOWPLACEMENT
+                { length = 44, showCmd = savedShowCommand, rcNormalPosition = normal };
+            NativeMethods.WINDOWPLACEMENT current = new NativeMethods.WINDOWPLACEMENT
+                { length = 44, showCmd = 3, rcNormalPosition = maximized };
+            int writes = 0;
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState(
+                hwnd => true, hwnd => { }, hwnd => { }, hwnd => current,
+                (hwnd, placement) => { current = placement; writes++; return true; });
+            tracking.AddHiddenPendingWindow((IntPtr)100, maximized, DateTime.UtcNow);
+            tracking.RememberRecentClosedManagedExplorerRect(savedShowCommand == 3 ? maximized : normal, DateTime.UtcNow.AddSeconds(-closedAgeSeconds), saved);
+            ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                new PowerOptionsExplorerService(), tracking, TestTabPersistenceFactory.Create(),
+                delegate { return string.Empty; }, delegate { Assert.Fail("Home must stay hidden"); }, delegate { },
+                delegate { }, delegate { return true; }, delegate { }, delegate { return null; }, delegate { }, null,
+                delegate { });
+
+            service.RestorePreparedExplorerWindowForCreate((IntPtr)100, true);
+            Assert.AreEqual(0, writes, "Placement can show a window and must wait for the final reveal.");
+            tracking.RestoreNormalPositionBeforeShow((IntPtr)100);
+            Assert.AreEqual(1, writes);
+            Assert.AreEqual(savedShowCommand, current.showCmd);
+            Assert.AreEqual(normal, current.rcNormalPosition, "A maximized frame must not become the normal restore bounds.");
+            tracking.RestoreNormalPositionBeforeShow((IntPtr)100);
+            Assert.AreEqual(1, writes, "Saved placement must be consumed only once.");
+        }
+
+        [TestMethod]
+        public async System.Threading.Tasks.Task ReopenControlPanel_KeepsHomeHidden_AfterSuccessfulSwitch()
+        {
+            await VerifyReopenVisibility(true);
+        }
+
+        [TestMethod]
+        public async System.Threading.Tasks.Task ReopenControlPanel_RestoresHome_WhenHostLaunchFails()
+        {
+            await VerifyReopenVisibility(false);
+        }
+
+        private static async System.Threading.Tasks.Task VerifyReopenVisibility(bool launchSucceeds)
+        {
+            PowerOptionsExplorerService explorer = new PowerOptionsExplorerService();
+            System.Collections.Generic.List<string> events = new System.Collections.Generic.List<string>();
+            NativeMethods.RECT original = new NativeMethods.RECT { Left = 100, Top = 100, Right = 900, Bottom = 700 };
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState(
+                hwnd => true, hwnd => { }, hwnd => { }, hwnd => null,
+                (hwnd, placement) =>
+                {
+                    Assert.AreEqual((uint)1, placement.showCmd);
+                    Assert.AreEqual(original, placement.rcNormalPosition);
+                    events.Add("placement:" + hwnd);
+                    return true;
+                });
+            tracking.RememberRecentClosedManagedExplorerRect(original, DateTime.UtcNow,
+                new NativeMethods.WINDOWPLACEMENT { length = 44, showCmd = 1, rcNormalPosition = original });
+            tracking.AddHiddenPendingWindow((IntPtr)100, original, DateTime.UtcNow);
+            ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                explorer, tracking, TestTabPersistenceFactory.Create(),
+                delegate { return string.Empty; },
+                delegate (IntPtr hwnd) { events.Add("show:" + hwnd); },
+                delegate { },
+                delegate (IntPtr hwnd, NativeMethods.RECT rect) { events.Add("move:" + hwnd); Assert.AreEqual(100, rect.Left); },
+                delegate (TabBarViewModel vm, IntPtr hwnd) { vm.SetExplorerHwnd(hwnd); return true; },
+                delegate { }, delegate { return null; }, delegate { }, null,
+                delegate (IntPtr hwnd) { events.Add("hide:" + hwnd); });
+            TabBarViewModel viewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.HomeFolderPath);
+            viewModel.RestoreTabs(new string[] { explorer.PowerOptionsPath }, explorer.PowerOptionsPath, 0, true);
+
+            service.RestorePreparedExplorerWindowForCreate((IntPtr)100, viewModel.IsRestoringControlPanelHost);
+            CollectionAssert.AreEqual(new string[] { "hide:100" }, events);
+            Assert.AreEqual(original, tracking.DeferredOriginRestoreRects[(IntPtr)100], "Preserve bounds without moving Home onscreen.");
+            Assert.AreEqual(0, tracking.HiddenPendingAbsorb.Count);
+            Assert.AreEqual(0, tracking.HiddenOriginalRects.Count);
+
+            bool opened = false;
+            explorer.GetCurrentPathFunc = hwnd => hwnd == (IntPtr)200 ? explorer.AllControlPanelPath : explorer.HomeFolderPath;
+            ExplorerHostSwitchCoordinator host = new ExplorerHostSwitchCoordinator(
+                explorer, tracking,
+                delegate (TabBarViewModel vm, IntPtr hwnd) { vm.SetExplorerHwnd(hwnd); return true; },
+                delegate (IntPtr hwnd) { events.Add("show:" + hwnd); },
+                delegate (IntPtr hwnd, NativeMethods.RECT rect)
+                {
+                    Assert.AreEqual((IntPtr)200, hwnd);
+                    Assert.AreEqual(original, rect, "The CP host must receive Home's saved onscreen bounds.");
+                    events.Add("move:" + hwnd);
+                }, delegate { }, delegate { return true; },
+                delegate { return opened
+                    ? new System.Collections.Generic.List<IntPtr> { (IntPtr)100, (IntPtr)200 }
+                    : new System.Collections.Generic.List<IntPtr> { (IntPtr)100 }; },
+                delegate (IntPtr hwnd) { return explorer.GetCurrentPath(hwnd); },
+                delegate (string path)
+                {
+                    Assert.AreEqual(explorer.AllControlPanelPath, path, "Keep the native Back history.");
+                    Assert.IsFalse(events.Contains("show:100"), "Home must remain hidden throughout preparation.");
+                    opened = launchSucceeds;
+                    return launchSucceeds;
+                }, delegate { });
+
+            await service.RestorePersistedSpecialActiveTabHostAsync(host, viewModel, viewModel.ActiveTab, delegate
+            {
+                Assert.IsFalse(viewModel.IsRestoringControlPanelHost);
+                Assert.IsTrue(events.Contains(launchSucceeds ? "show:200" : "show:100"));
+                events.Add("show:tabbar");
+            });
+            string restoredHost = launchSucceeds ? "200" : "100";
+            Assert.IsTrue(events.IndexOf("placement:" + restoredHost) >= 0);
+            Assert.IsTrue(events.IndexOf("placement:" + restoredHost) < events.IndexOf("show:" + restoredHost));
+            Assert.AreEqual("show:tabbar", events[events.Count - 1]);
+            Assert.IsFalse(viewModel.IsRestoringControlPanelHost);
+            Assert.AreEqual(launchSucceeds ? (IntPtr)200 : (IntPtr)100, viewModel.ExplorerHwnd);
+            Assert.AreEqual(!launchSucceeds, events.Contains("show:100"));
+            Assert.AreEqual(launchSucceeds, events.Contains("show:200"));
+            Assert.AreEqual(!launchSucceeds, events.Contains("move:100"), "Home stays offscreen unless restoration fails.");
+            Assert.AreEqual(launchSucceeds, tracking.DeferredOriginRestoreRects.ContainsKey((IntPtr)100));
+        }
+
+        [TestMethod]
+        public void ReopenNormalFolder_RestoresOriginalPositionBeforeShowing()
+        {
+            PowerOptionsExplorerService explorer = new PowerOptionsExplorerService();
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+            System.Collections.Generic.List<string> events = new System.Collections.Generic.List<string>();
+            tracking.AddHiddenPendingWindow((IntPtr)100,
+                new NativeMethods.RECT { Left = 120, Top = 100, Right = 900, Bottom = 700 }, DateTime.UtcNow);
+            ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                explorer, tracking, TestTabPersistenceFactory.Create(), delegate { return string.Empty; },
+                delegate { events.Add("show"); }, delegate { },
+                delegate (IntPtr hwnd, NativeMethods.RECT rect) { Assert.AreEqual(120, rect.Left); events.Add("move"); },
+                delegate { return true; }, delegate { }, delegate { return null; }, delegate { }, null,
+                delegate { Assert.Fail("Normal host must not stay hidden."); });
+
+            service.RestorePreparedExplorerWindowForCreate((IntPtr)100, false);
+            CollectionAssert.AreEqual(new string[] { "move", "show" }, events);
+            Assert.AreEqual(0, tracking.HiddenPendingAbsorb.Count);
+        }
+
+        [TestMethod]
         public void PowerOptionsRegression_ReusesSourceTab_WithoutNavigatingBackToControlPanel()
         {
             VerifyManagedPowerOptionsNavigation(false);
@@ -335,8 +606,8 @@ namespace UnitTestProject
             Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.Tabs[3].Path);
             Assert.AreEqual((IntPtr)201, foregroundHwnd);
             Assert.AreEqual((IntPtr)201, targetViewModel.ExplorerHwnd);
-            Assert.AreEqual(IntPtr.Zero, closedHwnd);
-            Assert.AreEqual((IntPtr)100, trackingState.ParkedExplorerOrigins[(IntPtr)201]);
+            Assert.AreEqual((IntPtr)100, closedHwnd);
+            Assert.IsFalse(trackingState.ParkedExplorerOrigins.ContainsKey((IntPtr)201));
         }
 
         [TestMethod]
@@ -374,8 +645,8 @@ namespace UnitTestProject
             Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.Tabs[2].Path);
             Assert.AreEqual((IntPtr)202, foregroundHwnd);
             Assert.AreEqual((IntPtr)202, targetViewModel.ExplorerHwnd);
-            Assert.AreEqual(IntPtr.Zero, closedHwnd);
-            Assert.AreEqual((IntPtr)100, trackingState.ParkedExplorerOrigins[(IntPtr)202]);
+            Assert.AreEqual((IntPtr)100, closedHwnd);
+            Assert.IsFalse(trackingState.ParkedExplorerOrigins.ContainsKey((IntPtr)202));
         }
 
         [TestMethod]
@@ -531,8 +802,8 @@ namespace UnitTestProject
             Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.Tabs[2].Path);
             Assert.AreEqual((IntPtr)204, foregroundHwnd);
             Assert.AreEqual((IntPtr)204, targetViewModel.ExplorerHwnd);
-            Assert.AreEqual(IntPtr.Zero, closedHwnd);
-            Assert.AreEqual((IntPtr)100, trackingState.ParkedExplorerOrigins[(IntPtr)204]);
+            Assert.AreEqual((IntPtr)100, closedHwnd);
+            Assert.IsFalse(trackingState.ParkedExplorerOrigins.ContainsKey((IntPtr)204));
         }
 
         [TestMethod]

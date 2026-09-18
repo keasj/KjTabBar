@@ -15,6 +15,7 @@ namespace KjTabBar.Services
         private readonly TabPersistenceService _tabPersistence;
         private readonly MemoryMaintenanceService _memoryMaintenance;
         private readonly TimeSpan _maxHiddenDuration;
+        private bool _immediateCyclePending;
 
         public AppMonitorCycleCoordinator(
             IExplorerService explorerService,
@@ -34,16 +35,48 @@ namespace KjTabBar.Services
             _maxHiddenDuration = maxHiddenDuration;
         }
 
+        // Called on the UI thread. Coalesce show events and avoid running inside the hook.
+        public void RequestImmediateCycle(Action<Action> enqueue, Action runCycle)
+        {
+            if (_immediateCyclePending) return;
+
+            _immediateCyclePending = true;
+            try
+            {
+                enqueue(delegate
+                {
+                    try
+                    {
+                        runCycle();
+                    }
+                    finally
+                    {
+                        _immediateCyclePending = false;
+                    }
+                });
+            }
+            catch
+            {
+                _immediateCyclePending = false;
+                throw;
+            }
+        }
+
         public List<ExplorerWindowProcessRequest> RunCycle(
             Func<TabBarViewModel> findValidTarget,
             DateTime nowUtc)
         {
+            System.Diagnostics.Stopwatch cycleTimer = AppLogger.StartDiagnosticTiming();
+            AppLogger.LogDiagnosticTiming("Cycle.Begin", IntPtr.Zero, cycleTimer);
             _explorerLaunchTracker.UpdateForegroundState();
 
             List<IntPtr> explorerWindows = _explorerService.FindExplorerWindows();
+            AppLogger.LogDiagnosticTiming("Cycle.Enumerated", IntPtr.Zero, cycleTimer);
             List<ExplorerWindowProcessRequest> requests = _monitorCoordinator.PrepareProcessRequests(explorerWindows, findValidTarget);
+            AppLogger.LogDiagnosticTiming("Cycle.Prepared", IntPtr.Zero, cycleTimer);
 
             TabBarViewModel saveTarget = findValidTarget != null ? findValidTarget() : null;
+            AppLogger.LogDiagnosticTiming("Cycle.TargetFound", IntPtr.Zero, cycleTimer);
             if (saveTarget != null)
             {
                 _tabPersistence.SaveTabsIfChanged(saveTarget);
@@ -60,6 +93,7 @@ namespace KjTabBar.Services
                 _memoryMaintenance.PerformIfDue();
             }
 
+            AppLogger.LogDiagnosticTiming("Cycle.Completed", IntPtr.Zero, cycleTimer);
             return requests;
         }
     }

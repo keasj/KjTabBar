@@ -13,6 +13,241 @@ namespace UnitTestProject
     public class ExplorerWindowMonitorCoordinatorTests
     {
         [TestMethod]
+        public void PrepareProcessRequests_EvaluatesParkedHostReshownFromDesktop()
+        {
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+            tracking.RememberParkedExplorerOrigin((IntPtr)20, (IntPtr)10);
+            tracking.DesktopLaunchCandidates.Add((IntPtr)10);
+            tracking.HiddenPendingAbsorb[(IntPtr)10] = DateTime.UtcNow;
+            TabBarViewModel target = new TabBarViewModel((IntPtr)20, new MockUserSettings(), new MockExplorerService());
+            ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                new TabBarRegistry(), tracking, new DesktopForegroundTracker(), CreateLaunchTracker(tracking),
+                hwnd => "CabinetWClass", (hwnd, flags) => hwnd, hwnd => null, delegate { },
+                null, () => DateTime.UtcNow);
+
+            List<ExplorerWindowProcessRequest> requests = coordinator.PrepareProcessRequests(
+                new List<IntPtr> { (IntPtr)10, (IntPtr)20 }, () => target);
+
+            Assert.IsTrue(requests.Exists(request => request.ExplorerHwnd == (IntPtr)10),
+                "A desktop-reshown parked host must not remain hidden and excluded from processing.");
+        }
+
+        [TestMethod]
+        public void HandleShowEvent_RehidesRegisteredHostOnlyWhileControlPanelRestoreIsPending()
+        {
+            IntPtr host = (IntPtr)123;
+            TabBarViewModel vm = new TabBarViewModel(host, new MockUserSettings(), new MockExplorerService());
+            vm.WindowVisibility = System.Windows.Visibility.Hidden;
+            vm.IsRestoringControlPanelHost = true;
+            TabBarWindow window = new TabBarWindow();
+            window.DataContext = vm;
+            TabBarRegistry registry = new TabBarRegistry();
+            registry.Add(host, window);
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState(
+                hwnd => true, hwnd => { }, hwnd => { }, hwnd => null);
+            int hides = 0;
+            int requests = 0;
+            bool visible = true;
+            ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                registry, tracking, new DesktopForegroundTracker(), CreateLaunchTracker(tracking),
+                hwnd => "CabinetWClass", (hwnd, flags) => host, hwnd => null,
+                hwnd => Assert.Fail("Registered restore must not enter absorption again."),
+                null, () => DateTime.UtcNow, hwnd => visible,
+                hwnd => { Assert.AreEqual(host, hwnd); hides++; visible = false; });
+            try
+            {
+                coordinator.HandleShowEvent(host, () => vm, null, () => requests++);
+                Assert.AreEqual(1, hides, "Windows showed Home again after the restore had hidden it.");
+                coordinator.HandleShowEvent(host, () => vm, null, () => requests++);
+                Assert.AreEqual(1, hides, "A delayed notification for an already hidden host does nothing.");
+                vm.IsRestoringControlPanelHost = false;
+                visible = true;
+                coordinator.HandleShowEvent(host, () => vm, null, () => requests++);
+                Assert.AreEqual(1, hides, "Completed restoration must permit the host to be shown.");
+                Assert.AreEqual(0, requests);
+                Assert.AreEqual(0, tracking.HiddenPendingAbsorb.Count);
+            }
+            finally
+            {
+                registry.ClearAndCloseAll();
+            }
+        }
+
+        [TestMethod]
+        public void PrepareProcessRequests_RecoversVisibleFirstHostBeforeDelayedShowCallback()
+        {
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState(
+                hwnd => true, hwnd => { }, hwnd => { }, hwnd => null);
+            bool visible = false;
+            int moves = 0;
+            ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                new TabBarRegistry(), tracking, new DesktopForegroundTracker(), CreateLaunchTracker(tracking),
+                hwnd => "CabinetWClass", (hwnd, flags) => hwnd,
+                hwnd => new NativeMethods.RECT { Left = 100, Top = 100, Right = 900, Bottom = 700 },
+                hwnd => moves++, null, () => DateTime.UtcNow, hwnd => visible);
+            IntPtr host = (IntPtr)123;
+            List<IntPtr> windows = new List<IntPtr> { host };
+            coordinator.HandleCreateEvent(host, () => null);
+            Assert.AreEqual(0, coordinator.PrepareProcessRequests(windows, () => null).Count);
+
+            visible = true; // Windows has shown it; its out-of-context callback has not arrived.
+            Assert.AreEqual(1, coordinator.PrepareProcessRequests(windows, () => null).Count);
+            Assert.AreEqual(2, moves, "Reapply offscreen placement before starting restoration.");
+            Assert.AreEqual(100, tracking.HiddenOriginalRects[host].Left);
+            int immediateRequests = 0;
+            coordinator.HandleShowEvent(host, () => null, null, () => immediateRequests++);
+            Assert.AreEqual(0, immediateRequests);
+            Assert.AreEqual(0, coordinator.PrepareProcessRequests(windows, () => null).Count,
+                "Late notifications must not start a duplicate restoration.");
+        }
+
+        [TestMethod]
+        public void PrepareProcessRequests_DoesNotTakeVisibleInternalReplacementHost()
+        {
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState(
+                hwnd => true, hwnd => { }, hwnd => { }, hwnd => null);
+            ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                new TabBarRegistry(), tracking, new DesktopForegroundTracker(), CreateLaunchTracker(tracking),
+                hwnd => "CabinetWClass", (hwnd, flags) => hwnd,
+                hwnd => new NativeMethods.RECT { Left = 100, Top = 100, Right = 900, Bottom = 700 },
+                hwnd => { }, null, () => DateTime.UtcNow, hwnd => true);
+            tracking.RegisterInternalHostSwitchLaunchRequest();
+            coordinator.HandleCreateEvent((IntPtr)123, () => null);
+            Assert.AreEqual(0, coordinator.PrepareProcessRequests(new List<IntPtr> { (IntPtr)123 }, () => null).Count);
+            Assert.IsTrue(tracking.InternalHostSwitchLaunchWindows.Contains((IntPtr)123));
+        }
+
+        [TestMethod]
+        public void CreateEvent_PreparesOffscreen_ButWaitsForShowBeforeProcessing()
+        {
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+            int moves = 0;
+            int requests = 0;
+            ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                new TabBarRegistry(), tracking, new DesktopForegroundTracker(), CreateLaunchTracker(tracking),
+                hwnd => "CabinetWClass", (hwnd, flags) => hwnd,
+                hwnd => new NativeMethods.RECT { Left = 100, Top = 100, Right = 900, Bottom = 700 },
+                hwnd => moves++, null, () => DateTime.UtcNow);
+            coordinator.HandleCreateEvent((IntPtr)123, () => null);
+            Assert.AreEqual(1, moves);
+            Assert.AreEqual(0, coordinator.PrepareProcessRequests(new List<IntPtr> { (IntPtr)123 }, () => null).Count);
+            coordinator.HandleShowEvent((IntPtr)123, () => null, null, () => requests++);
+            Assert.AreEqual(2, moves);
+            Assert.AreEqual(1, requests);
+            Assert.AreEqual(100, tracking.HiddenOriginalRects[(IntPtr)123].Left);
+            Assert.AreEqual(1, coordinator.PrepareProcessRequests(new List<IntPtr> { (IntPtr)123 }, () => null).Count);
+        }
+
+        [TestMethod]
+        public void CreateEvent_PreservesIndependentLaunch_AndConsumesInternalLaunchOnce()
+        {
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+            int moves = 0;
+            int requests = 0;
+            ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                new TabBarRegistry(), tracking, new DesktopForegroundTracker(), CreateLaunchTracker(tracking),
+                hwnd => "CabinetWClass", (hwnd, flags) => hwnd,
+                hwnd => new NativeMethods.RECT { Left = 100, Top = 100, Right = 900, Bottom = 700 },
+                hwnd => moves++, null, () => DateTime.UtcNow);
+            tracking.RegisterExplicitIndependentLaunchRequest();
+            coordinator.HandleCreateEvent((IntPtr)123, () => null);
+            Assert.AreEqual(0, moves);
+            Assert.IsTrue(tracking.ExplicitIndependentLaunchWindows.Contains((IntPtr)123));
+            tracking.RegisterInternalHostSwitchLaunchRequest();
+            coordinator.HandleCreateEvent((IntPtr)456, () => null);
+            Assert.IsFalse(tracking.HasPendingInternalHostSwitchLaunchRequest());
+            coordinator.HandleShowEvent((IntPtr)456, () => null, null, () => requests++);
+            Assert.AreEqual(2, moves);
+            Assert.AreEqual(0, requests);
+            Assert.IsTrue(tracking.InternalHostSwitchLaunchWindows.Contains((IntPtr)456));
+        }
+
+        [TestMethod]
+        public void Registry_Keeps_Unloaded_TabBar_While_Live_Host_Is_Hidden()
+        {
+            System.Windows.Interop.HwndSourceParameters parameters =
+                new System.Windows.Interop.HwndSourceParameters("HiddenRestoreTest");
+            parameters.WindowStyle = 0;
+            parameters.Width = 1;
+            parameters.Height = 1;
+            using (System.Windows.Interop.HwndSource host = new System.Windows.Interop.HwndSource(parameters))
+            {
+                TabBarViewModel vm = new TabBarViewModel(host.Handle, new MockUserSettings(), new MockExplorerService());
+                vm.WindowVisibility = System.Windows.Visibility.Hidden;
+                TabBarWindow window = new TabBarWindow();
+                window.DataContext = vm;
+                TabBarRegistry registry = new TabBarRegistry();
+                registry.Add(host.Handle, window);
+                try
+                {
+                    Assert.IsFalse(window.IsLoaded);
+                    registry.RemoveInvalidWindows(new List<IntPtr>());
+                    Assert.IsTrue(registry.Contains(host.Handle));
+                    Assert.IsTrue(window.IsExplorerAlive());
+                }
+                finally
+                {
+                    registry.ClearAndCloseAll();
+                }
+            }
+        }
+
+        [TestMethod]
+        public void HandleShowEvent_HidesFirstHostUntilRestorationAndRequestsImmediateCycle()
+        {
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+            DesktopForegroundTracker foreground = new DesktopForegroundTracker();
+            ExplorerLaunchTracker launches = new ExplorerLaunchTracker(
+                foreground, tracking,
+                delegate (IntPtr hwnd) { return false; },
+                delegate (IntPtr hwnd) { return false; },
+                delegate { return IntPtr.Zero; },
+                delegate (IntPtr hwnd) { return string.Empty; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return true; });
+            int moved = 0;
+            int requested = 0;
+            ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                new TabBarRegistry(), tracking, foreground, launches,
+                delegate (IntPtr hwnd) { return hwnd == (IntPtr)99 ? "OtherWindow" : "CabinetWClass"; },
+                delegate (IntPtr hwnd, uint flags) { return hwnd; },
+                delegate (IntPtr hwnd) { return new NativeMethods.RECT { Left = 100, Top = 100, Right = 900, Bottom = 700 }; },
+                delegate (IntPtr hwnd) { moved++; }, null,
+                delegate { return DateTime.UtcNow; });
+            Action request = delegate { requested++; };
+
+            coordinator.HandleShowEvent((IntPtr)10, delegate { return null; }, null, request);
+            Assert.AreEqual(1, requested);
+            Assert.AreEqual(1, moved);
+            Assert.AreEqual(1, tracking.HiddenPendingAbsorb.Count);
+
+            tracking.HiddenPendingAbsorb.Clear();
+            tracking.HiddenOriginalRects.Clear();
+            tracking.ProcessingExplorerWindows.Add((IntPtr)10);
+            tracking.AbsorbPathRetryCounts[(IntPtr)11] = 1;
+            tracking.IgnoredWindows.Add((IntPtr)12);
+            coordinator.HandleShowEvent((IntPtr)10, delegate { return null; }, null, request);
+            coordinator.HandleShowEvent((IntPtr)11, delegate { return null; }, null, request);
+            coordinator.HandleShowEvent((IntPtr)12, delegate { return null; }, null, request);
+            coordinator.HandleShowEvent((IntPtr)99, delegate { return null; }, null, request);
+            coordinator.HandleShowEvent(IntPtr.Zero, delegate { return null; }, null, request);
+            Assert.AreEqual(1, requested);
+
+            tracking.RegisterExplicitIndependentLaunchRequest();
+            coordinator.HandleShowEvent((IntPtr)20, delegate { return null; }, null, request);
+            Assert.IsTrue(tracking.ExplicitIndependentLaunchWindows.Contains((IntPtr)20));
+            tracking.RegisterInternalHostSwitchLaunchRequest();
+            coordinator.HandleShowEvent((IntPtr)21, delegate { return null; }, null, request);
+            Assert.IsTrue(tracking.InternalHostSwitchLaunchWindows.Contains((IntPtr)21));
+            Assert.AreEqual(1, requested);
+
+            TabBarViewModel existing = new TabBarViewModel(
+                (IntPtr)30, new MockUserSettings(), new MockExplorerService());
+            coordinator.HandleShowEvent((IntPtr)31, delegate { return existing; }, null, request);
+            Assert.AreEqual(1, requested, "Existing host absorption must retain its timing.");
+        }
+
+        [TestMethod]
         public void HandleShowEvent_HidesDesktopCandidateAndRegistersControlPanelCandidate()
         {
             TabBarRegistry tabBars = new TabBarRegistry();

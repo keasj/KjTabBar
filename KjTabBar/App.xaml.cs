@@ -30,7 +30,10 @@ namespace KjTabBar
         private TabPersistenceService _tabPersistence = new TabPersistenceService();
         private LanguageResourceService _languageResourceService = new LanguageResourceService();
         private AppBootstrapResult _bootstrapResult;
+        private DesktopRepeatedLaunchService _desktopRepeatedLaunch;
         private bool _hasRestoredHiddenExplorerWindowsAfterFatalException;
+        private System.Threading.Timer _diagnosticDispatcherProbe;
+        private Stopwatch _pendingDiagnosticProbe;
 
         private static readonly TimeSpan MaxHiddenDuration = TimeSpan.FromSeconds(2);
 
@@ -44,6 +47,8 @@ namespace KjTabBar
         private void Application_Exit(object sender, ExitEventArgs e)
         {
             if (_isShellWorker) return;
+            if (_desktopRepeatedLaunch != null) _desktopRepeatedLaunch.Dispose();
+            if (_diagnosticDispatcherProbe != null) _diagnosticDispatcherProbe.Dispose();
             _appRuntimeCoordinator.Shutdown(new AppRuntimeContext
             {
                 SaveTarget = _bootstrapResult != null && _bootstrapResult.Services != null
@@ -138,6 +143,7 @@ namespace KjTabBar
             }
 
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            StartDiagnosticDispatcherTiming();
 
             if (_appBootstrapper == null)
             {
@@ -171,6 +177,8 @@ namespace KjTabBar
             }
 
             _mutex = _bootstrapResult.Mutex;
+            _desktopRepeatedLaunch = new DesktopRepeatedLaunchService((ExplorerManager)_explorerService,
+                _bootstrapResult.Services.AppUiDispatcherAdapter.FindValidTabBarTarget);
 
             ThemeManager.Instance.StartMonitoring();
 
@@ -214,27 +222,144 @@ namespace KjTabBar
         /// EVENT_OBJECT_SHOW コールバック。
         /// 新規エクスプローラーウィンドウが表示された瞬間に非表示にし、
         /// タイマーTickでの吸収処理まで表示を抑制する。
+        /// 既存タブバーがない場合は、次のTickを待たず監視処理を予約する。
         /// </summary>
+        private void StartDiagnosticDispatcherTiming()
+        {
+            if (AppLogger.StartDiagnosticTiming() == null) return;
+            System.Reflection.FieldInfo methodField = typeof(DispatcherOperation).GetField(
+                "_method", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            Dictionary<DispatcherOperation, Tuple<Stopwatch, string>> active =
+                new Dictionary<DispatcherOperation, Tuple<Stopwatch, string>>();
+            System.Collections.Concurrent.ConcurrentDictionary<DispatcherOperation, Tuple<Stopwatch, DispatcherPriority>> pending =
+                new System.Collections.Concurrent.ConcurrentDictionary<DispatcherOperation, Tuple<Stopwatch, DispatcherPriority>>();
+            Dispatcher.Hooks.OperationPosted += delegate (object sender, DispatcherHookEventArgs args)
+            {
+                pending[args.Operation] = Tuple.Create(Stopwatch.StartNew(), args.Operation.Priority);
+            };
+            Dispatcher.Hooks.OperationStarted += delegate (object sender, DispatcherHookEventArgs args)
+            {
+                string name = "unknown";
+                try
+                {
+                    Delegate callback = methodField != null ? methodField.GetValue(args.Operation) as Delegate : null;
+                    if (callback != null) name = callback.Method.DeclaringType.FullName + "." + callback.Method.Name;
+                }
+                catch { }
+                Tuple<Stopwatch, DispatcherPriority> queued;
+                if (pending.TryRemove(args.Operation, out queued) && queued.Item1.ElapsedMilliseconds >= 100)
+                    AppLogger.LogDiagnosticTiming("DispatcherQueue." + queued.Item2 + "." + name, IntPtr.Zero, queued.Item1);
+                active[args.Operation] = Tuple.Create(Stopwatch.StartNew(), name);
+            };
+            Dispatcher.Hooks.OperationCompleted += delegate (object sender, DispatcherHookEventArgs args)
+            {
+                Tuple<Stopwatch, string> entry;
+                if (!active.TryGetValue(args.Operation, out entry)) return;
+                active.Remove(args.Operation);
+                if (entry.Item1.ElapsedMilliseconds >= 100)
+                    AppLogger.LogDiagnosticTiming("Dispatcher." + entry.Item2, IntPtr.Zero, entry.Item1);
+            };
+            Dispatcher.Hooks.OperationAborted += delegate (object sender, DispatcherHookEventArgs args)
+            {
+                active.Remove(args.Operation);
+                Tuple<Stopwatch, DispatcherPriority> queued;
+                pending.TryRemove(args.Operation, out queued);
+            };
+            // Opt-in active probe: posting a message can change the observed wake-up timing.
+            if (Environment.GetEnvironmentVariable("KJTB_DISPATCHER_PROBE") == "1")
+                _diagnosticDispatcherProbe = new System.Threading.Timer(ProbeDiagnosticDispatcher, null, 1000, 1000);
+        }
+
+        private void ProbeDiagnosticDispatcher(object state)
+        {
+            if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+            Stopwatch timer = Stopwatch.StartNew();
+            Stopwatch previous = System.Threading.Interlocked.CompareExchange(ref _pendingDiagnosticProbe, timer, null);
+            if (previous != null)
+            {
+                AppLogger.LogDiagnosticTiming("DispatcherProbe.Pending", IntPtr.Zero, previous);
+                return;
+            }
+            try
+            {
+                Dispatcher.BeginInvoke(DispatcherPriority.Normal, new Action(delegate
+                {
+                    AppLogger.LogDiagnosticTiming("DispatcherProbe.Completed", IntPtr.Zero, timer);
+                    System.Threading.Interlocked.CompareExchange(ref _pendingDiagnosticProbe, null, timer);
+                }));
+            }
+            catch (InvalidOperationException)
+            {
+                System.Threading.Interlocked.CompareExchange(ref _pendingDiagnosticProbe, null, timer);
+            }
+        }
+
         private void ShowEventCallback(
             IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
             int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
         {
+            Stopwatch eventTimer = null;
+            bool isExplorerEvent = false;
             try
             {
+                if (idObject != 0 || idChild != 0) return;
+                if (eventType != NativeMethods.EVENT_OBJECT_CREATE && eventType != NativeMethods.EVENT_OBJECT_SHOW) return;
+                eventTimer = AppLogger.StartDiagnosticTiming();
+                if (eventTimer != null)
+                {
+                    StringBuilder eventClass = new StringBuilder(256);
+                    NativeMethods.GetClassName(hwnd, eventClass, eventClass.Capacity);
+                    if (eventClass.ToString() == "CabinetWClass")
+                    {
+                        isExplorerEvent = true;
+                        uint deliveryMs = unchecked((uint)Environment.TickCount - dwmsEventTime);
+                        AppLogger.LogDiagnostic("ReopenEvent", string.Format(
+                            "event={0} hwnd={1} deliveryMs={2}", eventType, hwnd, deliveryMs));
+                    }
+                }
+                if (eventType == NativeMethods.EVENT_OBJECT_CREATE)
+                {
+                    if (_desktopRepeatedLaunch != null && DesktopRepeatedLaunchService.ClassName(hwnd) == "CabinetWClass")
+                        _desktopRepeatedLaunch.CancelForNewWindow();
+                    _bootstrapResult.Services.ExplorerWindowMonitorCoordinator.HandleCreateEvent(
+                        hwnd, _bootstrapResult.Services.AppUiDispatcherAdapter.FindValidTabBarTarget);
+                    return;
+                }
                 if (eventType != NativeMethods.EVENT_OBJECT_SHOW) return;
-                if (idObject != 0) return;
                 _bootstrapResult.Services.ExplorerWindowMonitorCoordinator.HandleShowEvent(
                     hwnd,
                     _bootstrapResult.Services.AppUiDispatcherAdapter.FindValidTabBarTarget,
-                    _bootstrapResult.Services.ExplorerTabTargetResolver.HasActiveControlPanelTab);
+                    _bootstrapResult.Services.ExplorerTabTargetResolver.HasActiveControlPanelTab,
+                    delegate
+                    {
+                        _bootstrapResult.Services.AppMonitorCycleCoordinator.RequestImmediateCycle(
+                            delegate (Action callback) { Dispatcher.BeginInvoke(DispatcherPriority.Background, callback); },
+                            delegate
+                            {
+                                if (!Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
+                                {
+                                    MonitorTimer_Tick(null, null);
+                                }
+                            });
+                    });
             }
             catch (Exception ex)
             {
                 Helpers.AppLogger.LogError("App", "Failed while hiding a pending explorer window.", ex);
             }
+            finally
+            {
+                if (eventTimer != null && (isExplorerEvent || eventTimer.ElapsedMilliseconds >= 100))
+                {
+                    AppLogger.LogDiagnosticTiming("Event.Callback." + eventType, hwnd, eventTimer);
+                    if (!isExplorerEvent)
+                        AppLogger.LogDiagnostic("ReopenSlowChildEvent", string.Format(
+                            "hwnd={0} root={1} event={2}", hwnd, NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOT), eventType));
+                }
+            }
         }
 
-        private void ForegroundEventCallback(
+        private async void ForegroundEventCallback(
             IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
             int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
         {
@@ -246,6 +371,7 @@ namespace KjTabBar
                 StringBuilder className = new StringBuilder(256);
                 NativeMethods.GetClassName(hwnd, className, className.Capacity);
                 _bootstrapResult.Services.ExplorerLaunchTracker.UpdateForegroundState(hwnd, className.ToString());
+                if (_desktopRepeatedLaunch != null) await _desktopRepeatedLaunch.OnForegroundAsync(hwnd);
             }
             catch (Exception ex)
             {

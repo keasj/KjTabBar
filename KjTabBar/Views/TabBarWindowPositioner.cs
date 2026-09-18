@@ -15,6 +15,7 @@ namespace KjTabBar.Views
         private double _dpiScale = 1.0;
         private IntPtr _windowHwnd = IntPtr.Zero;
         private NativeMethods.RECT? _lastKnownExplorerWindowRect;
+        internal NativeMethods.WINDOWPLACEMENT? LastKnownExplorerWindowPlacement { get; private set; }
 
         public double DpiScale
         {
@@ -129,13 +130,31 @@ namespace KjTabBar.Views
             NativeMethods.RECT contentRect = _explorerService.GetExplorerWindowRect(explorerHwnd);
             if (contentRect.Width <= 0) return;
             NativeMethods.RECT explorerWindowRect;
-            if (NativeMethods.GetWindowRect(explorerHwnd, out explorerWindowRect))
+            if (NativeMethods.GetWindowRect(explorerHwnd, out explorerWindowRect) &&
+                NativeMethods.IsUsableWindowRestoreRect(explorerWindowRect))
             {
+                NativeMethods.WINDOWPLACEMENT placement = new NativeMethods.WINDOWPLACEMENT();
+                placement.length = (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.WINDOWPLACEMENT));
                 _lastKnownExplorerWindowRect = explorerWindowRect;
+                LastKnownExplorerWindowPlacement = NativeMethods.GetWindowPlacement(explorerHwnd, ref placement) &&
+                    ExplorerWindowTrackingState.IsRestorablePlacement(placement)
+                    ? placement : (NativeMethods.WINDOWPLACEMENT?)null;
             }
 
             IntPtr myHwnd = GetWindowHandle();
             if (myHwnd == IntPtr.Zero) return;
+
+            // Control Panel hosts deliberately have no cross-process owner. Keep
+            // their bar with the foreground host without activating it or making it topmost.
+            if (NativeMethods.GetWindow(myHwnd, NativeMethods.GW_OWNER) == IntPtr.Zero &&
+                NativeMethods.GetForegroundWindow() == explorerHwnd &&
+                NativeMethods.IsWindowVisible(explorerHwnd) && NativeMethods.IsWindowVisible(myHwnd) &&
+                NativeMethods.GetWindow(myHwnd, NativeMethods.GW_HWNDPREV) != explorerHwnd)
+            {
+                bool aligned = NativeMethods.SetWindowPos(myHwnd, explorerHwnd, 0, 0, 0, 0,
+                    NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+                AppLogger.LogDiagnostic("TabZOrder", string.Format("bar={0} host={1} success={2} previous={3} foreground={4}", myHwnd, explorerHwnd, aligned, NativeMethods.GetWindow(myHwnd, NativeMethods.GW_HWNDPREV), NativeMethods.GetForegroundWindow()));
+            }
 
             double actualHeight = _window.ActualHeight;
             if (actualHeight <= 0)

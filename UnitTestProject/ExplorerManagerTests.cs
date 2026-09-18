@@ -248,6 +248,41 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void ResolveWithReader_Skips_FolderQuery_For_Known_NonRoot_Location()
+        {
+            ShellCurrentPathResolver resolver = new ShellCurrentPathResolver(
+                name => "home", path => false, path => false, path => path, path => false);
+            string result = resolver.ResolveWithFolderPathReader(null, "Home",
+                delegate { Assert.Fail("Known location must not query the folder document."); return null; });
+            Assert.AreEqual("home", result);
+        }
+
+        [TestMethod]
+        public void ResolveWithReader_Still_Resolves_ControlPanel_Child_From_Document()
+        {
+            int reads = 0;
+            ShellCurrentPathResolver resolver = new ShellCurrentPathResolver(
+                name => "root", path => path == "root" || path == "child",
+                path => path == "root", path => path, path => false);
+            string result = resolver.ResolveWithFolderPathReader(null, "Control Panel",
+                delegate { reads++; return "child"; });
+            Assert.AreEqual("child", result);
+            Assert.AreEqual(1, reads);
+        }
+
+        [TestMethod]
+        public void ResolveWithReader_Preserves_Unknown_Location_Fallback()
+        {
+            int reads = 0;
+            ShellCurrentPathResolver resolver = new ShellCurrentPathResolver(
+                name => null, path => false, path => false, path => path, path => false);
+            string result = resolver.ResolveWithFolderPathReader(null, "Folder",
+                delegate { reads++; return @"C:\Work"; });
+            Assert.AreEqual(@"C:\Work", result);
+            Assert.AreEqual(1, reads);
+        }
+
+        [TestMethod]
         public void Resolve_Prefers_SpecialVirtualFolder_From_LocationName()
         {
             ShellCurrentPathResolver resolver = new ShellCurrentPathResolver(

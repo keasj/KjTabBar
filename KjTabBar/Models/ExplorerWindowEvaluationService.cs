@@ -44,8 +44,11 @@ namespace KjTabBar.Models
             Func<string, bool> hasEquivalentControlPanelTab,
             Func<string, bool> hasActiveControlPanelTab)
         {
+            System.Diagnostics.Stopwatch queryTimer = AppLogger.StartDiagnosticTiming();
             string path = _explorerService.GetCurrentPath(input.ExplorerHwnd);
+            AppLogger.LogDiagnosticTiming("Evaluation.CurrentPath", input.ExplorerHwnd, queryTimer);
             string titlePath = getTitleVirtualPath != null ? getTitleVirtualPath(input.ExplorerHwnd) : null;
+            AppLogger.LogDiagnosticTiming("Evaluation.TitlePath", input.ExplorerHwnd, queryTimer);
 
             bool titleIndicatesControlPanel =
                 !string.IsNullOrEmpty(titlePath) &&
@@ -138,6 +141,13 @@ namespace KjTabBar.Models
             string resolvedPath;
             bool allowSpecialPath;
             AbsorptionAction action = ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath);
+            AppLogger.LogDiagnosticTiming("Evaluation.Decision", input.ExplorerHwnd, queryTimer);
+            AppLogger.LogDiagnostic("ReopenDecision", string.Format(
+                "hwnd={0} retry={1} action={2} hasTarget={3} pathEmpty={4} titleEmpty={5} resolvedEmpty={6} controlPanelRoot={7} desktopInteractive={8} placeholder={9}",
+                input.ExplorerHwnd, input.RetryCount, action, input.HasValidTarget,
+                string.IsNullOrEmpty(path), string.IsNullOrEmpty(titlePath), string.IsNullOrEmpty(resolvedPath),
+                _explorerService.IsControlPanelRootPath(resolvedPath), input.IsDesktopInteractiveCandidate,
+                _explorerService.IsTransientShellPlaceholderPath(resolvedPath)));
 
             bool resolvedIsControlPanelPath =
                 _explorerService.IsControlPanelPath(resolvedPath) ||

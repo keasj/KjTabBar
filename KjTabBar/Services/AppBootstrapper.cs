@@ -31,7 +31,7 @@ namespace KjTabBar.Services
     {
         public Mutex Mutex { get; set; }
         public AppServiceBundle Services { get; set; }
-        public DispatcherTimer MonitorTimer { get; set; }
+        public ExplorerMonitorTimer MonitorTimer { get; set; }
         public WinEventHookRegistration ForegroundEventHook { get; set; }
         public WinEventHookRegistration ShowEventHook { get; set; }
         public WinEventHookRegistration MoveSizeEndEventHook { get; set; }
@@ -86,7 +86,7 @@ namespace KjTabBar.Services
                     "Failed to set up foreground hook. Falling back to polling."),
                 ShowEventHook = _runtimeCoordinator.TryRegisterWinEventHook(
                     "show",
-                    NativeMethods.EVENT_OBJECT_SHOW,
+                    NativeMethods.EVENT_OBJECT_CREATE,
                     NativeMethods.EVENT_OBJECT_SHOW,
                     context.ShowEventCallback,
                     "Failed to set up show hook."),

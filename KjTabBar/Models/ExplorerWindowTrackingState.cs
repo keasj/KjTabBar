@@ -7,8 +7,12 @@ namespace KjTabBar.Models
     internal sealed class ExplorerWindowTrackingState
     {
         private static readonly TimeSpan ExplicitIndependentLaunchTimeout = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan InternalHostSwitchLaunchTimeout = TimeSpan.FromSeconds(10);
         private static readonly TimeSpan RecentClosedManagedExplorerRectRetention = TimeSpan.FromSeconds(10);
         private readonly Func<IntPtr, bool> _isWindow;
+        private readonly Func<IntPtr, NativeMethods.WINDOWPLACEMENT?> _getWindowPlacement;
+        private readonly Func<IntPtr, NativeMethods.WINDOWPLACEMENT, bool> _setWindowPlacement;
+        private readonly Dictionary<IntPtr, NativeMethods.RECT> _hiddenNormalPositions = new Dictionary<IntPtr, NativeMethods.RECT>();
         private readonly Action<IntPtr> _showWindow;
         private readonly Action<IntPtr> _closeWindow;
         private readonly List<DateTime> _explicitIndependentLaunchRequests = new List<DateTime>();
@@ -16,6 +20,8 @@ namespace KjTabBar.Models
         private NativeMethods.RECT _recentClosedManagedExplorerRect;
         private DateTime _recentClosedManagedExplorerRectUtc = DateTime.MinValue;
         private bool _hasRecentClosedManagedExplorerRect;
+        private NativeMethods.WINDOWPLACEMENT? _recentClosedPlacement;
+        private readonly Dictionary<IntPtr, NativeMethods.WINDOWPLACEMENT> _pendingRestorePlacements = new Dictionary<IntPtr, NativeMethods.WINDOWPLACEMENT>();
 
         public HashSet<IntPtr> IgnoredWindows { get; private set; }
         public HashSet<IntPtr> InternalHostSwitchLaunchWindows { get; private set; }
@@ -29,6 +35,7 @@ namespace KjTabBar.Models
         public Dictionary<IntPtr, DateTime> HiddenPendingAbsorb { get; private set; }
         public Dictionary<IntPtr, NativeMethods.RECT> HiddenOriginalRects { get; private set; }
         public Dictionary<IntPtr, IntPtr> ParkedExplorerOrigins { get; private set; }
+        internal readonly Dictionary<IntPtr, NativeMethods.RECT> DeferredOriginRestoreRects = new Dictionary<IntPtr, NativeMethods.RECT>();
 
         public ExplorerWindowTrackingState()
             : this(
@@ -46,9 +53,13 @@ namespace KjTabBar.Models
         {
         }
 
-        internal ExplorerWindowTrackingState(Func<IntPtr, bool> isWindow, Action<IntPtr> showWindow, Action<IntPtr> closeWindow)
+        internal ExplorerWindowTrackingState(Func<IntPtr, bool> isWindow, Action<IntPtr> showWindow, Action<IntPtr> closeWindow,
+            Func<IntPtr, NativeMethods.WINDOWPLACEMENT?> getWindowPlacement = null,
+            Func<IntPtr, NativeMethods.WINDOWPLACEMENT, bool> setWindowPlacement = null)
         {
             _isWindow = isWindow ?? NativeMethods.IsWindow;
+            _getWindowPlacement = getWindowPlacement ?? GetWindowPlacementCore;
+            _setWindowPlacement = setWindowPlacement ?? SetWindowPlacementCore;
             _showWindow = showWindow ?? delegate (IntPtr hwnd) { NativeMethods.ShowWindow(hwnd, NativeMethods.SW_SHOW); };
             _closeWindow = closeWindow ?? delegate (IntPtr hwnd) { NativeMethods.PostMessage(hwnd, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero); };
             IgnoredWindows = new HashSet<IntPtr>();
@@ -77,8 +88,55 @@ namespace KjTabBar.Models
 
         public void AddHiddenPendingWindow(IntPtr hwnd, NativeMethods.RECT originalRect, DateTime hiddenUtc)
         {
+            if (!_hiddenNormalPositions.ContainsKey(hwnd))
+            {
+                NativeMethods.WINDOWPLACEMENT? placement = _getWindowPlacement(hwnd);
+                if (placement.HasValue && NativeMethods.IsUsableWindowRestoreRect(placement.Value.rcNormalPosition))
+                    _hiddenNormalPositions[hwnd] = placement.Value.rcNormalPosition;
+            }
+            AppLogger.LogDiagnostic("WindowRecovery", string.Format("Capture hwnd={0} original={1},{2},{3},{4} capturedNormal={5}", hwnd, originalRect.Left, originalRect.Top, originalRect.Right, originalRect.Bottom, _hiddenNormalPositions.ContainsKey(hwnd)));
             HiddenOriginalRects[hwnd] = originalRect;
             HiddenPendingAbsorb[hwnd] = hiddenUtc;
+        }
+
+        // Call only when the host is ready to be shown: SetWindowPlacement can show it.
+        internal void RestoreNormalPositionBeforeShow(IntPtr hwnd)
+        {
+            AppLogger.LogDiagnostic("WindowRecovery", string.Format("Restore hwnd={0} pendingPlacement={1} capturedNormal={2}", hwnd, _pendingRestorePlacements.ContainsKey(hwnd), _hiddenNormalPositions.ContainsKey(hwnd)));
+            AppLogger.LogDiagnosticPlacement("RestoreNormal.Before", hwnd);
+            NativeMethods.WINDOWPLACEMENT savedPlacement;
+            if (_pendingRestorePlacements.TryGetValue(hwnd, out savedPlacement))
+            {
+                savedPlacement.length = (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.WINDOWPLACEMENT));
+                if (!_setWindowPlacement(hwnd, savedPlacement)) return;
+                _pendingRestorePlacements.Remove(hwnd);
+                _hiddenNormalPositions.Remove(hwnd);
+                return;
+            }
+            NativeMethods.RECT originalNormalPosition;
+            if (!_hiddenNormalPositions.TryGetValue(hwnd, out originalNormalPosition)) return;
+            NativeMethods.WINDOWPLACEMENT? current = _getWindowPlacement(hwnd);
+            if (!current.HasValue) return;
+            NativeMethods.WINDOWPLACEMENT placement = current.Value;
+            if (!NativeMethods.IsUsableWindowRestoreRect(placement.rcNormalPosition))
+            {
+                // Repair temporary offscreen bounds without changing the current show state.
+                placement.rcNormalPosition = originalNormalPosition;
+                if (!_setWindowPlacement(hwnd, placement)) return;
+            }
+            _hiddenNormalPositions.Remove(hwnd);
+        }
+
+        private static NativeMethods.WINDOWPLACEMENT? GetWindowPlacementCore(IntPtr hwnd)
+        {
+            NativeMethods.WINDOWPLACEMENT placement = new NativeMethods.WINDOWPLACEMENT();
+            placement.length = (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.WINDOWPLACEMENT));
+            return NativeMethods.GetWindowPlacement(hwnd, ref placement) ? placement : (NativeMethods.WINDOWPLACEMENT?)null;
+        }
+
+        private static bool SetWindowPlacementCore(IntPtr hwnd, NativeMethods.WINDOWPLACEMENT placement)
+        {
+            return NativeMethods.SetWindowPlacement(hwnd, ref placement);
         }
 
         public void AddHiddenPendingWindows(List<IntPtr> explorerWindows)
@@ -107,6 +165,22 @@ namespace KjTabBar.Models
             RemoveClosedWindows(ProcessingExplorerWindows, explorerWindows);
             RemoveClosedWindowKeys(HiddenPendingAbsorb, explorerWindows);
             RemoveClosedWindowKeys(HiddenOriginalRects, explorerWindows);
+            foreach (IntPtr capturedHwnd in _hiddenNormalPositions.Keys)
+            {
+                if (!ContainsWindow(explorerWindows, capturedHwnd))
+                    AppLogger.LogDiagnostic("WindowRecovery", string.Format("DropCapture hwnd={0} alive={1}", capturedHwnd, _isWindow(capturedHwnd)));
+            }
+            RemoveClosedWindowKeys(_hiddenNormalPositions, explorerWindows);
+            // Visible-window enumeration omits the hidden Home host during CP startup.
+            List<IntPtr> pendingPlacementWindows = new List<IntPtr>(_pendingRestorePlacements.Keys);
+            foreach (IntPtr pendingHwnd in pendingPlacementWindows)
+            {
+                if (!_isWindow(pendingHwnd)) _pendingRestorePlacements.Remove(pendingHwnd);
+            }
+            foreach (IntPtr pendingHwnd in new List<IntPtr>(DeferredOriginRestoreRects.Keys))
+            {
+                if (!_isWindow(pendingHwnd)) DeferredOriginRestoreRects.Remove(pendingHwnd);
+            }
             RemoveClosedParkedExplorerOrigins(explorerWindows);
         }
 
@@ -119,7 +193,7 @@ namespace KjTabBar.Models
             ManagedControlPanelLaunchWindows.Remove(hwnd);
         }
 
-        public void RememberRecentClosedManagedExplorerRect(NativeMethods.RECT rect, DateTime closedUtc)
+        public void RememberRecentClosedManagedExplorerRect(NativeMethods.RECT rect, DateTime closedUtc, NativeMethods.WINDOWPLACEMENT? placement = null)
         {
             if (rect.Width <= 0 || rect.Height <= 0)
             {
@@ -129,29 +203,76 @@ namespace KjTabBar.Models
             _recentClosedManagedExplorerRect = rect;
             _recentClosedManagedExplorerRectUtc = closedUtc;
             _hasRecentClosedManagedExplorerRect = true;
+            _recentClosedPlacement = IsRestorablePlacement(placement) ? placement : null;
         }
 
         public bool TryTakeRecentClosedManagedExplorerRect(DateTime utcNow, out NativeMethods.RECT rect)
         {
+            NativeMethods.WINDOWPLACEMENT? placement;
+            return TryTakeRecentClosedManagedExplorerRect(utcNow, out rect, out placement);
+        }
+
+        internal bool TryTakeRecentClosedManagedExplorerRect(DateTime utcNow, out NativeMethods.RECT rect, out NativeMethods.WINDOWPLACEMENT? placement, bool restoringSavedControlPanel = false)
+        {
+            placement = null;
             rect = default(NativeMethods.RECT);
             if (!_hasRecentClosedManagedExplorerRect)
             {
                 return false;
             }
 
-            if ((utcNow - _recentClosedManagedExplorerRectUtc) > RecentClosedManagedExplorerRectRetention)
+            // A saved Control Panel tab must retain its host position beyond a quick reopen.
+            if (!restoringSavedControlPanel && (utcNow - _recentClosedManagedExplorerRectUtc) > RecentClosedManagedExplorerRectRetention)
             {
                 _hasRecentClosedManagedExplorerRect = false;
                 _recentClosedManagedExplorerRectUtc = DateTime.MinValue;
                 _recentClosedManagedExplorerRect = default(NativeMethods.RECT);
+                _recentClosedPlacement = null;
                 return false;
             }
 
             rect = _recentClosedManagedExplorerRect;
+            placement = _recentClosedPlacement;
+            _recentClosedPlacement = null;
             _hasRecentClosedManagedExplorerRect = false;
             _recentClosedManagedExplorerRectUtc = DateTime.MinValue;
             _recentClosedManagedExplorerRect = default(NativeMethods.RECT);
             return rect.Width > 0 && rect.Height > 0;
+        }
+
+        internal static bool IsRestorablePlacement(NativeMethods.WINDOWPLACEMENT? placement)
+        {
+            return placement.HasValue && (placement.Value.showCmd == 1 || placement.Value.showCmd == 3) &&
+                NativeMethods.IsUsableWindowRestoreRect(placement.Value.rcNormalPosition);
+        }
+
+        internal NativeMethods.WINDOWPLACEMENT? GetHostSwitchRestorePlacement(IntPtr hwnd)
+        {
+            NativeMethods.WINDOWPLACEMENT? current = _getWindowPlacement(hwnd);
+            if (!current.HasValue) return null;
+            NativeMethods.WINDOWPLACEMENT placement = current.Value;
+            if (placement.showCmd == 2) // SW_SHOWMINIMIZED
+            {
+                // WPF_RESTORETOMAXIMIZED describes the state before minimization.
+                placement.showCmd = (placement.flags & 2) != 0 ? 3u : 1u;
+                placement.flags &= ~2u;
+            }
+            return IsRestorablePlacement(placement) ? placement : (NativeMethods.WINDOWPLACEMENT?)null;
+        }
+
+        internal void StageRestorePlacement(IntPtr hwnd, NativeMethods.WINDOWPLACEMENT? placement)
+        {
+            if (hwnd != IntPtr.Zero && IsRestorablePlacement(placement))
+                _pendingRestorePlacements[hwnd] = placement.Value;
+        }
+
+        internal void TransferRestorePlacement(IntPtr originalHwnd, IntPtr replacementHwnd)
+        {
+            NativeMethods.WINDOWPLACEMENT placement;
+            if (replacementHwnd == IntPtr.Zero || originalHwnd == replacementHwnd ||
+                !_pendingRestorePlacements.TryGetValue(originalHwnd, out placement)) return;
+            _pendingRestorePlacements.Remove(originalHwnd);
+            _pendingRestorePlacements[replacementHwnd] = placement;
         }
 
         public void IgnoreWindow(IntPtr hwnd)
@@ -221,6 +342,12 @@ namespace KjTabBar.Models
             }
 
             _internalHostSwitchLaunchRequests.RemoveAt(_internalHostSwitchLaunchRequests.Count - 1);
+        }
+
+        public bool HasPendingInternalHostSwitchLaunchRequest()
+        {
+            RemoveExpiredInternalHostSwitchLaunchRequests(DateTime.UtcNow);
+            return _internalHostSwitchLaunchRequests.Count > 0;
         }
 
         public bool TryConsumeInternalHostSwitchLaunchRequest()
@@ -379,8 +506,10 @@ namespace KjTabBar.Models
                 else if (InternalHostSwitchLaunchWindows.Contains(hiddenKeys[h]))
                 {
                     DateTime hiddenTime;
+                    // The ordinary absorption timeout must not reveal a replacement
+                    // host while the longer internal launch is still being prepared.
                     if (HiddenPendingAbsorb.TryGetValue(hiddenKeys[h], out hiddenTime) &&
-                        (nowUtc - hiddenTime) > maxHiddenDuration)
+                        (nowUtc - hiddenTime) > InternalHostSwitchLaunchTimeout)
                     {
                         shouldRestore = true;
                     }
@@ -413,10 +542,12 @@ namespace KjTabBar.Models
             if (NativeMethods.IsWindow(hwnd))
             {
                 NativeMethods.RECT originalRect;
-                if (HiddenOriginalRects.TryGetValue(hwnd, out originalRect))
+                if (DeferredOriginRestoreRects.TryGetValue(hwnd, out originalRect) ||
+                    HiddenOriginalRects.TryGetValue(hwnd, out originalRect))
                 {
                     NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, originalRect.Left, originalRect.Top, 0, 0, NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER);
                     HiddenOriginalRects.Remove(hwnd);
+                    DeferredOriginRestoreRects.Remove(hwnd);
                 }
             }
         }
@@ -428,13 +559,21 @@ namespace KjTabBar.Models
 
         public void RestoreAllHiddenWindows(bool restoreParkedExplorerWindows)
         {
-            IntPtr[] hiddenKeys = new IntPtr[HiddenPendingAbsorb.Count];
-            HiddenPendingAbsorb.Keys.CopyTo(hiddenKeys, 0);
+            HashSet<IntPtr> restoreKeys = new HashSet<IntPtr>(HiddenPendingAbsorb.Keys);
+            restoreKeys.UnionWith(DeferredOriginRestoreRects.Keys);
+            IntPtr[] hiddenKeys = new IntPtr[restoreKeys.Count];
+            restoreKeys.CopyTo(hiddenKeys);
             for (int i = 0; i < hiddenKeys.Length; i++)
             {
                 try
                 {
+                    bool deferredOrigin = DeferredOriginRestoreRects.ContainsKey(hiddenKeys[i]);
                     RestoreHiddenWindow(hiddenKeys[i]);
+                    if (deferredOrigin && restoreParkedExplorerWindows && _isWindow(hiddenKeys[i]))
+                    {
+                        RestoreNormalPositionBeforeShow(hiddenKeys[i]);
+                        _showWindow(hiddenKeys[i]);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -444,6 +583,9 @@ namespace KjTabBar.Models
 
             HiddenPendingAbsorb.Clear();
             HiddenOriginalRects.Clear();
+            _hiddenNormalPositions.Clear();
+            _pendingRestorePlacements.Clear();
+            DeferredOriginRestoreRects.Clear();
             if (restoreParkedExplorerWindows)
             {
                 RestoreAllParkedExplorerWindows();
@@ -513,7 +655,7 @@ namespace KjTabBar.Models
         {
             while (_internalHostSwitchLaunchRequests.Count > 0)
             {
-                if ((nowUtc - _internalHostSwitchLaunchRequests[0]) <= ExplicitIndependentLaunchTimeout)
+                if ((nowUtc - _internalHostSwitchLaunchRequests[0]) <= InternalHostSwitchLaunchTimeout)
                 {
                     break;
                 }

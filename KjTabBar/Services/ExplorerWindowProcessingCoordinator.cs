@@ -14,6 +14,9 @@ namespace KjTabBar.Services
         private readonly ExplorerWindowInteractionService _interactionService;
         private readonly ExplorerWindowOutcomeCoordinator _outcomeCoordinator;
         private readonly Func<Func<ExplorerWindowEvaluationResult>, Task<ExplorerWindowEvaluationResult>> _invokeComAsync;
+        private readonly Func<int, Task> _delayAsync;
+        private readonly Func<IntPtr, bool> _isWindow;
+        internal Func<TabBarViewModel, ExplorerHostSwitchCoordinator> FindHostSwitchCoordinator { get; set; }
 
         public ExplorerWindowProcessingCoordinator(
             ExplorerWindowTrackingState windowTracking,
@@ -40,7 +43,9 @@ namespace KjTabBar.Services
             ExplorerWindowEvaluationService evaluationService,
             ExplorerWindowInteractionService interactionService,
             ExplorerWindowOutcomeCoordinator outcomeCoordinator,
-            Func<Func<ExplorerWindowEvaluationResult>, Task<ExplorerWindowEvaluationResult>> invokeComAsync)
+            Func<Func<ExplorerWindowEvaluationResult>, Task<ExplorerWindowEvaluationResult>> invokeComAsync,
+            Func<int, Task> delayAsync = null,
+            Func<IntPtr, bool> isWindow = null)
         {
             _windowTracking = windowTracking;
             _explorerLaunchTracker = explorerLaunchTracker;
@@ -48,6 +53,46 @@ namespace KjTabBar.Services
             _interactionService = interactionService;
             _outcomeCoordinator = outcomeCoordinator;
             _invokeComAsync = invokeComAsync;
+            _delayAsync = delayAsync ?? (milliseconds => Task.Delay(milliseconds));
+            _isWindow = isWindow ?? NativeMethods.IsWindow;
+        }
+
+        internal async Task ApplyOutcomeAsync(IntPtr hwnd, int retryCount,
+            ExplorerWindowEvaluationResult result, TabBarViewModel validTarget, TabBarViewModel controlPanelTarget)
+        {
+            ExplorerHostSwitchCoordinator hostSwitch = null;
+            bool normalAbsorption = result != null && !result.IsControlPanelPath &&
+                (result.Action == AbsorptionAction.Absorb || result.Action == AbsorptionAction.AbsorbWithFallback);
+            if (normalAbsorption && validTarget != null && FindHostSwitchCoordinator != null)
+            {
+                hostSwitch = FindHostSwitchCoordinator(validTarget);
+            }
+
+            try
+            {
+                if (hostSwitch != null && !await hostSwitch.PrepareForPathAsync(validTarget, result.ResolvedPath))
+                {
+                    _interactionService.RestoreUnabsorbedWindow(hwnd);
+                    return;
+                }
+
+                if (hostSwitch != null && (!_isWindow(hwnd) || !_isWindow(validTarget.ExplorerHwnd)))
+                {
+                    _interactionService.RestoreUnabsorbedWindow(hwnd);
+                    return;
+                }
+
+                _outcomeCoordinator.ApplyOutcome(hwnd, retryCount, result, validTarget, controlPanelTarget);
+            }
+            catch
+            {
+                if (hostSwitch != null) _interactionService.RestoreUnabsorbedWindow(hwnd);
+                throw;
+            }
+            finally
+            {
+                if (hostSwitch != null) hostSwitch.CompletePendingReveal();
+            }
         }
 
         public async Task ProcessAsync(
@@ -58,7 +103,7 @@ namespace KjTabBar.Services
             Func<TabBarViewModel, string, bool> hasEquivalentControlPanelTab,
             Func<TabBarViewModel, bool> hasActiveControlPanelTab,
             Func<IntPtr, bool> isManagedWindow,
-            Func<IntPtr, bool> isIgnoredWindow)
+            Func<IntPtr, bool> isIgnoredWindow, bool allowEarlyRetry = true)
         {
             try
             {
@@ -92,8 +137,10 @@ namespace KjTabBar.Services
 
                 bool isHiddenPending = _windowTracking.HiddenPendingAbsorb.ContainsKey(hwnd);
 
+                System.Diagnostics.Stopwatch evaluationTimer = AppLogger.StartDiagnosticTiming();
                 ExplorerWindowEvaluationResult result = await _invokeComAsync(delegate
                 {
+                    AppLogger.LogDiagnosticTiming("Evaluation.QueueWait", hwnd, evaluationTimer);
                     ExplorerWindowEvaluationInput input = new ExplorerWindowEvaluationInput
                     {
                         ExplorerHwnd = hwnd,
@@ -141,6 +188,7 @@ namespace KjTabBar.Services
                         });
                 });
 
+                AppLogger.LogDiagnosticTiming("Evaluation.Completed", hwnd, evaluationTimer);
                 if (isManagedWindow != null && isManagedWindow(hwnd))
                 {
                     return;
@@ -163,7 +211,26 @@ namespace KjTabBar.Services
                     controlPanelTarget = findControlPanelTarget(result.ResolvedPath);
                 }
 
-                _outcomeCoordinator.ApplyOutcome(hwnd, retryCount, result, validTarget, controlPanelTarget);
+                await ApplyOutcomeAsync(hwnd, retryCount, result, validTarget, controlPanelTarget);
+
+                // A newly shown first host may not be registered with Shell yet.
+                // Keep the HWND in ProcessingExplorerWindows during one bounded early retry.
+                if (allowEarlyRetry && retryCount == 0 && validTarget == null &&
+                    result.Action == AbsorptionAction.WaitAndRetryIncrement &&
+                    string.IsNullOrEmpty(result.ResolvedPath))
+                {
+                    await _delayAsync(100);
+                    if (_isWindow(hwnd) &&
+                        (findValidTarget == null || findValidTarget() == null) &&
+                        (isManagedWindow == null || !isManagedWindow(hwnd)) &&
+                        (isIgnoredWindow == null || !isIgnoredWindow(hwnd)))
+                    {
+                        AppLogger.LogDiagnostic("ReopenDecision", "EarlyRetry hwnd=" + hwnd);
+                        await ProcessAsync(hwnd, null, findControlPanelTarget, findValidTarget,
+                            hasEquivalentControlPanelTab, hasActiveControlPanelTab,
+                            isManagedWindow, isIgnoredWindow, false);
+                    }
+                }
             }
             catch (Exception ex)
             {

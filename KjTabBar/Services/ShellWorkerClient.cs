@@ -12,7 +12,7 @@ namespace KjTabBar.Services
     {
         Ping, CurrentPath, SelectedItems, SelectItems, FolderName, ParentFolderName,
         ResolveShortcut, Navigate, NamespaceTitle, ShellPathAvailable, PathAvailable,
-        DesktopContains, Icon, PathsAvailable, ReleaseCaches, DesktopShortcutMatch
+        DesktopContains, Icon, PathsAvailable, ReleaseCaches, DesktopShortcutMatch, DesktopInvokedShortcut
     }
 
     // Private inherited pipes carry only a fixed set of Shell operations, never executable code.
@@ -73,6 +73,7 @@ namespace KjTabBar.Services
         private readonly object _sync = new object();
         private readonly Func<ProcessStartInfo> _createStartInfo;
         private readonly TimeSpan _timeout;
+        private readonly Func<IntPtr, bool> _isWindow;
         private Process _process;
         private bool _disposed;
 
@@ -81,12 +82,13 @@ namespace KjTabBar.Services
         {
         }
 
-        internal ShellWorkerClient(Func<ProcessStartInfo> createStartInfo, TimeSpan timeout)
+        internal ShellWorkerClient(Func<ProcessStartInfo> createStartInfo, TimeSpan timeout, Func<IntPtr, bool> isWindow = null)
         {
             if (createStartInfo == null) throw new ArgumentNullException("createStartInfo");
             if (timeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException("timeout");
             _createStartInfo = createStartInfo;
             _timeout = timeout;
+            _isWindow = isWindow ?? Helpers.NativeMethods.IsWindow;
         }
 
         private static ProcessStartInfo CreateStartInfo()
@@ -101,10 +103,17 @@ namespace KjTabBar.Services
 
         internal string[] Invoke(ShellOperation operation, params string[] arguments)
         {
+            Stopwatch diagnosticTimer = Helpers.AppLogger.StartDiagnosticTiming();
             if (!Monitor.TryEnter(_sync, _timeout)) throw new TimeoutException("The Shell worker is busy.");
             try
             {
+                Helpers.AppLogger.LogDiagnosticTiming("ShellLock." + operation, IntPtr.Zero, diagnosticTimer);
                 if (_disposed) throw new ObjectDisposedException("ShellWorkerClient");
+                long windowValue;
+                IntPtr targetWindow = operation == ShellOperation.CurrentPath && arguments.Length > 0 &&
+                    long.TryParse(arguments[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out windowValue)
+                    ? new IntPtr(windowValue) : IntPtr.Zero;
+                if (targetWindow != IntPtr.Zero && !_isWindow(targetWindow)) return new string[] { null };
                 EnsureStarted();
                 string[] request = new string[arguments.Length + 1];
                 request[0] = ((int)operation).ToString(CultureInfo.InvariantCulture);
@@ -117,7 +126,27 @@ namespace KjTabBar.Services
                 });
                 try
                 {
-                    if (!((IAsyncResult)response).AsyncWaitHandle.WaitOne(_timeout))
+                    Stopwatch responseTimer = Stopwatch.StartNew();
+                    WaitHandle responseReady = ((IAsyncResult)response).AsyncWaitHandle;
+                    bool completed = false;
+                    do
+                    {
+                        TimeSpan remaining = _timeout - responseTimer.Elapsed;
+                        if (remaining <= TimeSpan.Zero) break;
+                        TimeSpan slice = targetWindow == IntPtr.Zero || remaining.TotalMilliseconds <= 50
+                            ? remaining : TimeSpan.FromMilliseconds(50);
+                        completed = responseReady.WaitOne(slice);
+                        if (completed) break;
+                        if (targetWindow != IntPtr.Zero && !_isWindow(targetWindow))
+                        {
+                            response.ContinueWith(task => { Exception ignored = task.Exception; },
+                                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+                            StopWorker();
+                            Helpers.AppLogger.LogDiagnosticTiming("ShellTargetClosed." + operation, targetWindow, diagnosticTimer);
+                            return new string[] { null };
+                        }
+                    } while (true);
+                    if (!completed)
                     {
                         StopWorker();
                         // Observe pipe failures after terminating a timed-out helper.
@@ -141,6 +170,7 @@ namespace KjTabBar.Services
             finally
             {
                 Monitor.Exit(_sync);
+                Helpers.AppLogger.LogDiagnosticTiming("ShellComplete." + operation, IntPtr.Zero, diagnosticTimer);
             }
         }
 

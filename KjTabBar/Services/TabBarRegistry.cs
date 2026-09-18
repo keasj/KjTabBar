@@ -83,7 +83,7 @@ namespace KjTabBar.Services
 
             for (int i = 0; i < windows.Count; i++)
             {
-                try { windows[i].Close(); } catch (Exception ex) { AppLogger.LogError("TabBarRegistry", "Failed to close a tab bar window during exit.", ex); }
+                try { windows[i].CloseWithDiagnosticTiming(); } catch (Exception ex) { AppLogger.LogError("TabBarRegistry", "Failed to close a tab bar window during exit.", ex); }
             }
         }
 
@@ -145,7 +145,7 @@ namespace KjTabBar.Services
                         }
                     }
 
-                    try { window.Close(); } catch (Exception ex) { AppLogger.LogError("TabBarRegistry", "Failed to close invalid tab bar window during cleanup.", ex); }
+                    try { window.CloseWithDiagnosticTiming(); } catch (Exception ex) { AppLogger.LogError("TabBarRegistry", "Failed to close invalid tab bar window during cleanup.", ex); }
                     _tabBars.Remove(toRemove[i]);
                 }
             }

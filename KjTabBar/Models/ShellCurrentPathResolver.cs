@@ -26,7 +26,22 @@ namespace KjTabBar.Models
 
         public string Resolve(string locationUrl, string locationName, string folderPath)
         {
+            return ResolveCore(locationUrl, _mapLocationNameToKnownShellPath(locationName), folderPath);
+        }
+
+        public string ResolveWithFolderPathReader(string locationUrl, string locationName, Func<string> readFolderPath)
+        {
             string mappedVirtualPath = _mapLocationNameToKnownShellPath(locationName);
+            if (!string.IsNullOrEmpty(mappedVirtualPath) && !_isControlPanelRootPath(mappedVirtualPath))
+            {
+                return mappedVirtualPath;
+            }
+
+            return ResolveCore(locationUrl, mappedVirtualPath, readFolderPath());
+        }
+
+        private string ResolveCore(string locationUrl, string mappedVirtualPath, string folderPath)
+        {
             if (!string.IsNullOrEmpty(mappedVirtualPath) && !_isControlPanelRootPath(mappedVirtualPath))
             {
                 return mappedVirtualPath;

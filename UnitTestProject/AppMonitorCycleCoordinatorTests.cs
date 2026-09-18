@@ -11,6 +11,65 @@ namespace UnitTestProject
     public class AppMonitorCycleCoordinatorTests
     {
         [TestMethod]
+        public void RequestImmediateCycle_DefersAndCoalescesNotifications_ThenAcceptsNextReopen()
+        {
+            AppMonitorCycleCoordinator coordinator = new AppMonitorCycleCoordinator(
+                null, null, null, null, null, null, TimeSpan.FromSeconds(2));
+            List<Action> queued = new List<Action>();
+            int cycles = 0;
+            Action runCycle = delegate
+            {
+                cycles++;
+                coordinator.RequestImmediateCycle(queued.Add, delegate { Assert.Fail("Reentrant cycle"); });
+            };
+
+            coordinator.RequestImmediateCycle(queued.Add, runCycle);
+            coordinator.RequestImmediateCycle(queued.Add, runCycle);
+            Assert.AreEqual(0, cycles, "The show callback must not run the monitor inline.");
+            Assert.AreEqual(1, queued.Count);
+            queued[0]();
+            Assert.AreEqual(1, cycles);
+            Assert.AreEqual(1, queued.Count, "Notifications during the cycle must also coalesce.");
+
+            coordinator.RequestImmediateCycle(queued.Add, runCycle);
+            Assert.AreEqual(2, queued.Count);
+            queued[1]();
+            Assert.AreEqual(2, cycles);
+        }
+
+        [TestMethod]
+        public void RequestImmediateCycle_RecoversAfterQueueOrCycleFailure()
+        {
+            AppMonitorCycleCoordinator coordinator = new AppMonitorCycleCoordinator(
+                null, null, null, null, null, null, TimeSpan.FromSeconds(2));
+            List<Action> queued = new List<Action>();
+            try
+            {
+                coordinator.RequestImmediateCycle(
+                    delegate (Action callback) { throw new InvalidOperationException("queue"); },
+                    delegate { });
+                Assert.Fail("Expected queue failure.");
+            }
+            catch (InvalidOperationException) { }
+
+            coordinator.RequestImmediateCycle(
+                queued.Add, delegate { throw new InvalidOperationException("cycle"); });
+            Assert.AreEqual(1, queued.Count);
+            try
+            {
+                queued[0]();
+                Assert.Fail("Expected cycle failure.");
+            }
+            catch (InvalidOperationException) { }
+
+            int cycles = 0;
+            coordinator.RequestImmediateCycle(queued.Add, delegate { cycles++; });
+            Assert.AreEqual(2, queued.Count);
+            queued[1]();
+            Assert.AreEqual(1, cycles);
+        }
+
+        [TestMethod]
         public void GetMonitorTimerInterval_Uses_Background_Polling_Interval()
         {
             Assert.AreEqual(TimeSpan.FromSeconds(1), AppRuntimeCoordinator.GetMonitorTimerInterval());
