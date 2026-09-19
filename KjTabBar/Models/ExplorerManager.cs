@@ -340,6 +340,14 @@ namespace KjTabBar.Models
             return _shellPathAvailabilityEvaluator.IsTabPathCurrentlyAvailable(path);
         }
 
+        public bool IsExplorerWindowRegistered(IntPtr explorerHwnd)
+        {
+            if (_shellWorker != null)
+                return _shellWorker.Invoke(Services.ShellOperation.WindowRegistered,
+                    explorerHwnd.ToInt64().ToString(System.Globalization.CultureInfo.InvariantCulture))[0] == "1";
+            return _comInterop.IsExplorerWindowRegistered(explorerHwnd);
+        }
+
         public bool Navigate(IntPtr explorerHwnd, string path)
         {
             if (_shellWorker != null)

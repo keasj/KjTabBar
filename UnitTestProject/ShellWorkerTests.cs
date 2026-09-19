@@ -55,6 +55,9 @@ namespace UnitTestProject
             {
                 workerId = int.Parse(client.Invoke(ShellOperation.Ping)[0]);
                 Assert.AreNotEqual(Process.GetCurrentProcess().Id, workerId);
+                Assert.AreEqual("0", client.Invoke(ShellOperation.WindowRegistered, "0")[0]);
+                Assert.AreEqual("0", client.Invoke(ShellOperation.WindowRegistered, "-1")[0]);
+                Assert.AreEqual(workerId, int.Parse(client.Invoke(ShellOperation.Ping)[0]));
                 string path = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
                 Assert.IsFalse(string.IsNullOrEmpty(client.Invoke(ShellOperation.FolderName, path)[0]));
                 Assert.IsTrue(Convert.FromBase64String(client.Invoke(ShellOperation.Icon, path)[0]).Length > 0);

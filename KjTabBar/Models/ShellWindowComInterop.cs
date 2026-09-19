@@ -450,6 +450,52 @@ namespace KjTabBar.Models
             }
         }
 
+        public bool IsExplorerWindowRegistered(IntPtr explorerHwnd)
+        {
+            if (explorerHwnd == IntPtr.Zero) return false;
+
+            // A surviving window can lose its registration when the desktop shell restarts.
+            // Retry with a fresh COM object before treating an absent registration as final.
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                object windows = null;
+                try
+                {
+                    if (!_cacheManager.TryCreateShellWindows(out windows))
+                        throw new InvalidOperationException("Shell window registration could not be queried.");
+                    object countValue = GetComProperty(windows, "Count");
+                    if (countValue == null)
+                        throw new InvalidOperationException("Shell window registration count is unavailable.");
+                    int count = Convert.ToInt32(countValue);
+                    for (int i = 0; i < count; i++)
+                    {
+                        object window = null;
+                        try
+                        {
+                            window = InvokeComMethod(windows, "Item", i);
+                            IntPtr hwnd;
+                            if (window != null && _shellExplorerWindowMatcher.TryGetWindowHwnd(window, out hwnd) &&
+                                _shellExplorerWindowMatcher.MatchesTargetWindow(hwnd, explorerHwnd)) return true;
+                        }
+                        finally
+                        {
+                            ReleaseComObjectSafe(window);
+                        }
+                    }
+                }
+                catch
+                {
+                    if (attempt != 0) throw;
+                }
+                finally
+                {
+                    ReleaseComObjectSafe(windows);
+                }
+                ShellWindowCacheManager.ResetShellApplication();
+            }
+            return false;
+        }
+
         public bool Navigate(IntPtr explorerHwnd, string path)
         {
             Stopwatch stopwatch = Stopwatch.StartNew();

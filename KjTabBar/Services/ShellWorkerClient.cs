@@ -12,7 +12,7 @@ namespace KjTabBar.Services
     {
         Ping, CurrentPath, SelectedItems, SelectItems, FolderName, ParentFolderName,
         ResolveShortcut, Navigate, NamespaceTitle, ShellPathAvailable, PathAvailable,
-        DesktopContains, Icon, PathsAvailable, ReleaseCaches, DesktopShortcutMatch, DesktopInvokedShortcut
+        DesktopContains, Icon, PathsAvailable, ReleaseCaches, DesktopShortcutMatch, DesktopInvokedShortcut, WindowRegistered
     }
 
     // Private inherited pipes carry only a fixed set of Shell operations, never executable code.

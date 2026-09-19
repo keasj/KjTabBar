@@ -11,6 +11,71 @@ namespace UnitTestProject
     public class ExplorerHostSwitchCoordinatorTests
     {
         [TestMethod]
+        public void PrepareForPath_UnregisteredHost_RebindsWithoutLosingTabs()
+        {
+            VerifyRegistrationRecovery(false, true, true);
+        }
+
+        [TestMethod]
+        public void PrepareForPath_RegisteredHost_DoesNotLaunchReplacement()
+        {
+            VerifyRegistrationRecovery(true, true, true);
+        }
+
+        [TestMethod]
+        public void PrepareForPath_RecoveryLaunchFails_PreservesOriginalHostAndTabs()
+        {
+            VerifyRegistrationRecovery(false, false, true);
+        }
+
+        [TestMethod]
+        public void PrepareForPath_ReplacementNotRegistered_DoesNotRebind()
+        {
+            VerifyRegistrationRecovery(false, true, false);
+        }
+
+        [TestMethod]
+        public void PrepareForPath_RegistrationQueryFails_DoesNotReplaceHost()
+        {
+            VerifyRegistrationRecovery(false, true, true, true);
+        }
+
+        private static void VerifyRegistrationRecovery(bool registered, bool launchSucceeds, bool replacementRegistered, bool queryFails = false)
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            explorer.IsExplorerWindowRegisteredFunc = hwnd =>
+            {
+                if (queryFails) throw new InvalidOperationException("Shell query failed.");
+                return hwnd == (IntPtr)100 ? registered : replacementRegistered;
+            };
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+            int launches = 0;
+            int rebinds = 0;
+            ExplorerHostSwitchCoordinator coordinator = new ExplorerHostSwitchCoordinator(
+                explorer, tracking,
+                (vm, hwnd) => { rebinds++; vm.SetExplorerHwnd(hwnd); return true; },
+                delegate { }, delegate { }, delegate { }, hwnd => true,
+                () => launches > 0 && launchSucceeds
+                    ? new System.Collections.Generic.List<IntPtr> { (IntPtr)100, (IntPtr)200 }
+                    : new System.Collections.Generic.List<IntPtr> { (IntPtr)100 },
+                hwnd => @"C:\Work",
+                hwnd => (NativeMethods.RECT?)null,
+                path => { launches++; return launchSucceeds; }, delegate { });
+            TabBarViewModel viewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, @"C:\Work");
+            viewModel.InsertTabWithPath(@"C:\Other", viewModel.Tabs.Count, false);
+            int count = viewModel.Tabs.Count;
+            TabItemViewModel active = viewModel.ActiveTab;
+            bool recovered = !queryFails && !registered && launchSucceeds && replacementRegistered;
+            Assert.AreEqual(registered || recovered, coordinator.PrepareForPath(viewModel, @"C:\Work"));
+            Assert.AreEqual(registered || queryFails ? 0 : 1, launches);
+            Assert.AreEqual(recovered ? 1 : 0, rebinds);
+            Assert.AreEqual(recovered ? (IntPtr)200 : (IntPtr)100, viewModel.ExplorerHwnd);
+            Assert.AreEqual(count, viewModel.Tabs.Count);
+            Assert.AreSame(active, viewModel.ActiveTab);
+            coordinator.CompletePendingReveal();
+        }
+
+        [TestMethod]
         public void FolderLaunchFromControlPanel_RestoresMaximizedParkedHost()
         {
             VerifyFolderLaunchRestoreState(true, 2, 2, 3);

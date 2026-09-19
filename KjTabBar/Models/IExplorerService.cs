@@ -7,6 +7,7 @@ namespace KjTabBar.Models
     public interface IExplorerService
     {
         List<IntPtr> FindExplorerWindows();
+        bool IsExplorerWindowRegistered(IntPtr explorerHwnd);
         string GetCurrentPath(IntPtr explorerHwnd);
         List<string> GetSelectedItems(IntPtr explorerHwnd);
         void SelectItems(IntPtr explorerHwnd, List<string> itemPaths);

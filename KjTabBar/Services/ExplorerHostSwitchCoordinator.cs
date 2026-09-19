@@ -11,6 +11,7 @@ namespace KjTabBar.Services
     {
         internal bool? CurrentHostIsControlPanel { get; private set; }
         private const int NewHostPollingAttempts = 80;
+        private bool _isPreparing;
         private IntPtr _pendingRevealExplorerHwnd;
         private bool _pendingRevealHasOriginalRect;
         private NativeMethods.RECT _pendingRevealOriginalRect;
@@ -117,6 +118,8 @@ namespace KjTabBar.Services
 
         public async Task<bool> PrepareForPathAsync(TabBarViewModel viewModel, string targetPath)
         {
+            if (_isPreparing) return false;
+            _isPreparing = true;
             try
             {
                 return await PrepareForPathCoreAsync(viewModel, targetPath);
@@ -131,6 +134,10 @@ namespace KjTabBar.Services
                 }
                 AppLogger.LogError("ExplorerHostSwitchCoordinator", "Failed to prepare the explorer host.", ex);
                 return false;
+            }
+            finally
+            {
+                _isPreparing = false;
             }
         }
 
@@ -154,6 +161,12 @@ namespace KjTabBar.Services
 
             bool targetIsControlPanelPath = _explorerService.IsControlPanelPath(targetPath);
             IntPtr currentExplorerHwnd = viewModel.ExplorerHwnd;
+            if (!await IsRegisteredAsync(currentExplorerHwnd))
+            {
+                AppLogger.LogError("ExplorerHostSwitchCoordinator",
+                    "Explorer host lost its Shell registration; preparing a replacement. hwnd=" + currentExplorerHwnd, null);
+                return await TrySwitchToFreshExplorerHostAsync(viewModel, targetPath, currentExplorerHwnd);
+            }
             System.Diagnostics.Stopwatch hostTypeTimer = AppLogger.StartDiagnosticTiming();
             bool currentIsControlPanelHost = await IsControlPanelHostAsync(currentExplorerHwnd, viewModel, targetIsControlPanelPath);
             AppLogger.LogDiagnosticTiming("Host.CurrentType", currentExplorerHwnd, hostTypeTimer);
@@ -206,6 +219,11 @@ namespace KjTabBar.Services
                         parkedExplorerHwnd,
                         parkedIsControlPanelHost));
                 return true;
+            }
+
+            if (!await IsRegisteredAsync(parkedExplorerHwnd))
+            {
+                return await TrySwitchToFreshExplorerHostAsync(viewModel, targetPath, currentExplorerHwnd);
             }
 
             try
@@ -527,6 +545,7 @@ namespace KjTabBar.Services
                     continue;
                 }
 
+                if (_explorerService != null && !_explorerService.IsExplorerWindowRegistered(hwnd)) continue;
                 string currentPath = _getCurrentPath != null ? _getCurrentPath(hwnd) : null;
                 if (retry == 0 || retry == NewHostPollingAttempts - 1)
                 {
@@ -623,6 +642,11 @@ namespace KjTabBar.Services
             }
 
             return null;
+        }
+
+        private Task<bool> IsRegisteredAsync(IntPtr explorerHwnd)
+        {
+            return ComThreadService.Instance.InvokeAsync(() => _explorerService.IsExplorerWindowRegistered(explorerHwnd));
         }
 
         private Task<string> GetCurrentPathAsync(IntPtr explorerHwnd)

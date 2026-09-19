@@ -40,6 +40,8 @@ namespace UnitTestProject
         public virtual bool IsTabPathCurrentlyAvailable(string path) => true;
         public bool IsTransientShellPlaceholderPath(string path) => IsTransientShellPlaceholderPathFunc != null ? IsTransientShellPlaceholderPathFunc(path) : false;
         public string MapLocationNameToKnownShellPath(string locationName) => locationName;
+        public Func<IntPtr, bool> IsExplorerWindowRegisteredFunc { get; set; }
+        public bool IsExplorerWindowRegistered(IntPtr hwnd) => IsExplorerWindowRegisteredFunc == null || IsExplorerWindowRegisteredFunc(hwnd);
         public virtual bool Navigate(IntPtr explorerHwnd, string path) => true;
         public string NormalizeKnownPath(string path) => NormalizeKnownPathFunc != null ? NormalizeKnownPathFunc(path) : path;
         public string NormalizeShellNamespacePath(string path) => NormalizeShellNamespacePathFunc != null ? NormalizeShellNamespacePathFunc(path) : path;
