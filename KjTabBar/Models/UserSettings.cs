@@ -144,6 +144,11 @@ namespace KjTabBar.Models
 
         public bool TrySave(out string errorMessage)
         {
+            return TrySaveToPath(GetConfigPath(), out errorMessage);
+        }
+
+        internal bool TrySaveToPath(string path, out string errorMessage)
+        {
             errorMessage = null;
             try
             {
@@ -153,7 +158,6 @@ namespace KjTabBar.Models
                     FontFamily = "Segoe UI";
                 }
 
-                string path = GetConfigPath();
                 string dir = Path.GetDirectoryName(path);
                 if (!Directory.Exists(dir))
                 {
@@ -199,7 +203,15 @@ namespace KjTabBar.Models
                 EventHandler handler = SettingsChanged;
                 if (handler != null)
                 {
-                    handler(this, EventArgs.Empty);
+                    // Disk commit has succeeded. A subscriber failure must not undo it in memory.
+                    foreach (EventHandler subscriber in handler.GetInvocationList())
+                    {
+                        try { subscriber(this, EventArgs.Empty); }
+                        catch (Exception ex)
+                        {
+                            AppLogger.LogError("UserSettings", "Settings were saved, but a change notification failed.", ex);
+                        }
+                    }
                 }
 
                 return true;

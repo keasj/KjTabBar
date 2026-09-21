@@ -9,6 +9,35 @@ namespace UnitTestProject
     public class SettingsViewModelTests
     {
         [TestMethod]
+        public void FullReview_FailedSaveRestoresSharedSettingsAndAllowsRetry()
+        {
+            FailingSettings settings = new FailingSettings();
+            SettingsViewModel vm = new SettingsViewModel(settings);
+            vm.FontFamily = "Segoe UI"; vm.FontSize = 24; vm.IsBold = true; vm.IsItalic = true;
+            string error;
+            Assert.IsFalse(vm.SaveSettings(out error));
+            Assert.AreEqual("Arial", settings.FontFamily);
+            Assert.AreEqual(14.0, settings.FontSize);
+            Assert.IsFalse(settings.IsBold); Assert.IsFalse(settings.IsItalic);
+            Assert.AreEqual(14.0, new SettingsViewModel(settings).FontSize);
+            Assert.AreEqual(24.0, vm.FontSize);
+            settings.Succeeds = true;
+            Assert.IsTrue(vm.SaveSettings(out error));
+            Assert.AreEqual(24.0, settings.FontSize);
+        }
+
+        private sealed class FailingSettings : IUserSettings
+        {
+            internal bool Succeeds;
+            public string FontFamily { get; set; } = "Arial";
+            public double FontSize { get; set; } = 14;
+            public bool IsBold { get; set; }
+            public bool IsItalic { get; set; }
+            public event EventHandler SettingsChanged { add { } remove { } }
+            public void Save() { }
+            public bool TrySave(out string error) { error = Succeeds ? null : "Simulated save failure"; return Succeeds; }
+        }
+        [TestMethod]
         public void Load_SettingsViewModel_Uses_UserSettings()
         {
             MockUserSettings mockSettings = new MockUserSettings

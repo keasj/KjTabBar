@@ -269,14 +269,22 @@ namespace KjTabBar.Services
             TabItemViewModel activeTab, Action showRestoredTabBar = null)
         {
             IntPtr originalHwnd = viewModel.ExplorerHwnd;
+            bool hostReady = false;
+            long restoreVersion = viewModel.SynchronizationVersion;
+            string restorePath = activeTab.Path;
+            Func<bool> isCurrent = () => !viewModel.IsDisposed && viewModel.IsRestoringControlPanelHost &&
+                viewModel.SynchronizationVersion == restoreVersion && viewModel.ActiveTab == activeTab &&
+                viewModel.Tabs.Contains(activeTab) && viewModel.PathEquals(activeTab.Path, restorePath);
             System.Diagnostics.Stopwatch restoreTimer = AppLogger.StartDiagnosticTiming();
             try
             {
-                if (!await coordinator.PrepareForPathAsync(viewModel, activeTab.Path))
+                if (!await coordinator.PrepareForPathAsync(viewModel, restorePath, isCurrent))
                 {
                     return;
                 }
 
+                if (viewModel.IsDisposed || !viewModel.Tabs.Contains(activeTab) || viewModel.ActiveTab != activeTab) return;
+                hostReady = true;
                 AppLogger.LogDiagnosticTiming("Restore.HostReady", originalHwnd, restoreTimer);
                 TabBarWindow.ExecuteTabSelectionWithPendingReveal(
                     delegate
@@ -293,8 +301,22 @@ namespace KjTabBar.Services
             }
             finally
             {
+                if (!hostReady && isCurrent())
+                {
+                    string currentPath = null;
+                    try
+                    {
+                        currentPath = await ComThreadService.Instance.InvokeAsync(
+                            () => _explorerService.GetCurrentPath(viewModel.ExplorerHwnd));
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.LogError("ExplorerWindowInteractionService", "Failed to read the restore source path.", ex);
+                    }
+                    viewModel.CancelPersistedHostRestoration(currentPath);
+                }
                 CompletePersistedHostRestoration(viewModel, originalHwnd);
-                if (showRestoredTabBar != null) showRestoredTabBar();
+                if (!viewModel.IsDisposed && showRestoredTabBar != null) showRestoredTabBar();
             }
         }
 

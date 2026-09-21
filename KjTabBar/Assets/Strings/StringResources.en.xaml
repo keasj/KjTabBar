@@ -35,4 +35,5 @@
 
     <system:String x:Key="TrayMenuExit">Exit</system:String>
     <system:String x:Key="ErrorStandardUserLaunch">KjTabBar could not start as a standard user. Please start it without administrator privileges.</system:String>
+    <system:String x:Key="DetachSourceRetainedMessage">The new window opened, but the original tab was kept because switching folders did not complete.</system:String>
 </ResourceDictionary>

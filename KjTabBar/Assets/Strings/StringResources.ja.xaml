@@ -35,4 +35,5 @@
 
     <system:String x:Key="TrayMenuExit">終了</system:String>
     <system:String x:Key="ErrorStandardUserLaunch">標準ユーザーとして起動できませんでした。管理者として実行せずに KjTabBar を起動してください。</system:String>
+    <system:String x:Key="DetachSourceRetainedMessage">新しいウィンドウは開きましたが、フォルダーの切り替えが完了しなかったため、元のタブを残しました。</system:String>
 </ResourceDictionary>

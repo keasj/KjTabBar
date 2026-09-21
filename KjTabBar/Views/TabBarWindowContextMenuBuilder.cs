@@ -28,9 +28,9 @@ namespace KjTabBar.Views
             ApplyFluentMenuStyle(menu);
 
             MenuItem duplicateItem = new MenuItem() { Header = _window.TryFindResource("MenuDuplicateTab") as string ?? "タブの複製(&D)" };
-            duplicateItem.Click += (s, ev) =>
+            duplicateItem.Click += async (s, ev) =>
             {
-                vm.DuplicateTab(tabVM);
+                await _window.DuplicateTabAsync(vm, tabVM);
             };
             menu.Items.Add(duplicateItem);
 

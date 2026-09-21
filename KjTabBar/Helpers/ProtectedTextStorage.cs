@@ -102,7 +102,7 @@ namespace KjTabBar.Helpers
                 string protectedPayload = persistedText.Substring(ProtectedPrefix.Length).Trim();
                 if (string.IsNullOrEmpty(protectedPayload))
                 {
-                    return new string[0];
+                    throw new InvalidDataException("The encrypted tab state payload is missing.");
                 }
 
                 byte[] protectedBytes = Convert.FromBase64String(protectedPayload);

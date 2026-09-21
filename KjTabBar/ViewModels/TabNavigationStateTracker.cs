@@ -6,7 +6,6 @@ namespace KjTabBar.ViewModels
     internal sealed class TabNavigationStateTracker
     {
         private static readonly TimeSpan ExplorerPathPollInterval = TimeSpan.FromMilliseconds(300);
-        private static readonly TimeSpan CancelledNavigationGracePeriod = TimeSpan.FromSeconds(15);
         private static readonly TimeSpan ExplorerHostSwitchGracePeriod = TimeSpan.FromMilliseconds(750);
 
         private string _navigatingToPath;
@@ -14,13 +13,13 @@ namespace KjTabBar.ViewModels
         private List<string> _pendingSelectedItems;
         private TabItemViewModel _navigationSourceTab;
         private int _navigationSourceTabIndex = -1;
-        private string _cancelledNavigationPath;
-        private DateTime _cancelledNavigationUtc = DateTime.MinValue;
+        private readonly Dictionary<string, DateTime> _cancelledNavigations = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private DateTime _lastExplorerPathPollUtc = DateTime.MinValue;
         private string _cachedExplorerPath;
         private DateTime _lastExplorerHostSwitchUtc = DateTime.MinValue;
 
         public string NavigatingToPath => _navigatingToPath;
+        internal TabItemViewModel NavigationSourceTab => _navigationSourceTab;
         public DateTime NavigateStartTime => _navigateStartTime;
         public List<string> PendingSelectedItems
         {
@@ -28,6 +27,24 @@ namespace KjTabBar.ViewModels
             set => _pendingSelectedItems = value;
         }
 
+        internal Action CapturePendingNavigation()
+        {
+            if (_navigatingToPath == null) return null;
+            string path = _navigatingToPath;
+            DateTime started = _navigateStartTime;
+            TabItemViewModel source = _navigationSourceTab;
+            int index = _navigationSourceTabIndex;
+            List<string> items = _pendingSelectedItems;
+            return delegate
+            {
+                _navigatingToPath = path;
+                _navigateStartTime = started;
+                _navigationSourceTab = source;
+                _navigationSourceTabIndex = index;
+                _pendingSelectedItems = items;
+                InvalidateCache();
+            };
+        }
         public void StartNavigation(string targetPath, TabItemViewModel sourceTab, int sourceIndex)
         {
             _navigatingToPath = targetPath;
@@ -41,12 +58,7 @@ namespace KjTabBar.ViewModels
         {
             if (!string.IsNullOrEmpty(_navigatingToPath) && activeTab != null && activeTab != _navigationSourceTab)
             {
-                _cancelledNavigationPath = _navigatingToPath;
-                _cancelledNavigationUtc = DateTime.UtcNow;
-            }
-            else
-            {
-                ClearCancelled();
+                RememberPendingAsCancelled();
             }
 
             rollbackTab = _navigationSourceTab;
@@ -55,23 +67,25 @@ namespace KjTabBar.ViewModels
             ClearPending();
         }
 
-        public bool IsCancelledNavigationMatch(string currentPath, Func<string, string, bool> pathEquals)
+        internal void RememberPendingAsCancelled()
         {
-            if (string.IsNullOrEmpty(_cancelledNavigationPath))
-            {
-                return false;
-            }
-
-            if (_cancelledNavigationUtc == DateTime.MinValue ||
-                (DateTime.UtcNow - _cancelledNavigationUtc) > CancelledNavigationGracePeriod)
-            {
-                ClearCancelled();
-                return false;
-            }
-
-            return pathEquals(_cancelledNavigationPath, currentPath);
+            if (!string.IsNullOrEmpty(_navigatingToPath)) _cancelledNavigations[_navigatingToPath] = DateTime.UtcNow;
         }
 
+        public bool IsCancelledNavigationMatch(string currentPath, Func<string, string, bool> pathEquals)
+        {
+            foreach (string path in _cancelledNavigations.Keys)
+                if (pathEquals(path, currentPath)) return true;
+            return false;
+        }
+
+        internal void ForgetCancelled(string currentPath, Func<string, string, bool> pathEquals)
+        {
+            List<string> matches = new List<string>();
+            foreach (string path in _cancelledNavigations.Keys)
+                if (pathEquals(path, currentPath)) matches.Add(path);
+            foreach (string path in matches) _cancelledNavigations.Remove(path);
+        }
         public void ClearPending()
         {
             _navigatingToPath = null;
@@ -82,8 +96,7 @@ namespace KjTabBar.ViewModels
 
         public void ClearCancelled()
         {
-            _cancelledNavigationPath = null;
-            _cancelledNavigationUtc = DateTime.MinValue;
+            _cancelledNavigations.Clear();
         }
 
         public bool ShouldPoll(DateTime nowUtc, bool force)
@@ -91,6 +104,12 @@ namespace KjTabBar.ViewModels
             if (force) return true;
             if (_lastExplorerPathPollUtc == DateTime.MinValue) return true;
             return (nowUtc - _lastExplorerPathPollUtc) >= ExplorerPathPollInterval;
+        }
+
+        internal void InvalidateCache()
+        {
+            _lastExplorerPathPollUtc = DateTime.MinValue;
+            _cachedExplorerPath = null;
         }
 
         public void UpdateCache(string path, DateTime nowUtc)
@@ -114,6 +133,8 @@ namespace KjTabBar.ViewModels
 
         public void NotifyExplorerHostChanged()
         {
+            // Requests belong to the old host. Time alone does not prove completion.
+            ClearCancelled();
             _lastExplorerHostSwitchUtc = DateTime.UtcNow;
             _lastExplorerPathPollUtc = DateTime.MinValue;
             _cachedExplorerPath = null;

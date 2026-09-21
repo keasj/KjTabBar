@@ -20,9 +20,10 @@ namespace KjTabBar.Services
 
         public async Task SyncWithExplorerAsync()
         {
-            if (_isSyncing || _viewModel.IsRestoringControlPanelHost) return;
+            if (_isSyncing || _viewModel.IsRestoringControlPanelHost || _viewModel.IsTabOperationPending) return;
             _isSyncing = true;
             bool shouldUpdateTitles = false;
+            long version = _viewModel.SynchronizationVersion;
             try
             {
                 bool forcePathPoll = (_viewModel.NavigationTracker.NavigatingToPath != null || _viewModel.NavigationTracker.PendingSelectedItems != null);
@@ -39,7 +40,7 @@ namespace KjTabBar.Services
 
                     // COM ワーカーでは Explorer のパス取得だけを行い、UI 管理状態には触れない。
                     currentPath = await ComThreadService.Instance.InvokeAsync(() => _explorerService.GetCurrentPath(explorerHwnd));
-                    if (_viewModel.IsRestoringControlPanelHost || _viewModel.ExplorerHwnd != explorerHwnd)
+                    if (!_viewModel.IsSynchronizationCurrent(version) || _viewModel.IsRestoringControlPanelHost || _viewModel.ExplorerHwnd != explorerHwnd)
                     {
                         return;
                     }
@@ -52,9 +53,10 @@ namespace KjTabBar.Services
 
                 IntPtr availabilityHost = _viewModel.ExplorerHwnd;
                 List<string> pathsToCheck = new List<string>();
+                HashSet<string> uniquePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (ViewModels.TabItemViewModel tab in _viewModel.Tabs)
                 {
-                    if (!string.IsNullOrEmpty(tab.Path)) pathsToCheck.Add(tab.Path);
+                    if (!string.IsNullOrEmpty(tab.Path) && uniquePaths.Add(tab.Path)) pathsToCheck.Add(tab.Path);
                 }
                 Dictionary<string, bool> availability = await ComThreadService.Instance.InvokeAsync(delegate
                 {
@@ -67,7 +69,11 @@ namespace KjTabBar.Services
                     }
                     return values;
                 });
-                if (_viewModel.IsRestoringControlPanelHost || _viewModel.ExplorerHwnd != availabilityHost || _viewModel.ActiveTab == null) return;
+                if (!_viewModel.IsSynchronizationCurrent(version) || _viewModel.IsRestoringControlPanelHost || _viewModel.ExplorerHwnd != availabilityHost || _viewModel.ActiveTab == null)
+                {
+                    _viewModel.NavigationTracker.InvalidateCache();
+                    return;
+                }
                 Func<string, bool> isAvailable = path =>
                 {
                     bool value;
@@ -85,6 +91,32 @@ namespace KjTabBar.Services
                     !_viewModel.PathEquals(_viewModel.ActiveTab.Path, currentPath))
                 {
                     return;
+                }
+
+                if (_viewModel.NavigationTracker.NavigatingToPath == null && _viewModel.IsCancelledNavigationMatch(currentPath))
+                {
+                    ViewModels.TabItemViewModel cancelledTab = _viewModel.FindTabByPath(currentPath);
+                    if (cancelledTab == null)
+                    {
+                        // A rolled-back last-tab close may have removed its temporary Home tab.
+                        cancelledTab = new ViewModels.TabItemViewModel(currentPath, _explorerService.GetFolderName(currentPath), _explorerService);
+                        _viewModel.Tabs.Add(cancelledTab);
+                    }
+                    if (cancelledTab != null)
+                    {
+                        if (cancelledTab != _viewModel.ActiveTab)
+                        {
+                            _viewModel.SetActiveTabOnly(cancelledTab);
+                        }
+                        cancelledTab.Path = currentPath;
+                        cancelledTab.BaseTitle = _explorerService.GetFolderName(currentPath);
+                        cancelledTab.Title = cancelledTab.BaseTitle;
+                        shouldUpdateTitles = true;
+                        _viewModel.NavigationTracker.ForgetCancelled(currentPath, _viewModel.PathEquals);
+                        return;
+                    }
+
+                    _viewModel.NavigationTracker.ForgetCancelled(currentPath, _viewModel.PathEquals);
                 }
 
                 if (_explorerService.IsControlPanelRootPath(currentPath) &&
@@ -115,7 +147,7 @@ namespace KjTabBar.Services
                     {
                         if ((DateTime.UtcNow - _viewModel.NavigationTracker.NavigateStartTime).TotalSeconds > 5)
                         {
-                            _viewModel.CancelPendingNavigation();
+                            _viewModel.TimeoutPendingNavigation();
                         }
                         return;
                     }
@@ -174,33 +206,13 @@ namespace KjTabBar.Services
                     {
                         // 5秒以上経過してもナビゲーションが完了しない場合は
                         // ナビゲーション失敗とみなし、状態を元のタブへ戻す
-                        _viewModel.CancelPendingNavigation();
+                        _viewModel.TimeoutPendingNavigation();
                         return;
                     }
                     else
                     {
                         return;
                     }
-                }
-
-                if (_viewModel.IsCancelledNavigationMatch(currentPath))
-                {
-                    ViewModels.TabItemViewModel cancelledTab = _viewModel.FindTabByPath(currentPath);
-                    if (cancelledTab != null)
-                    {
-                        if (cancelledTab != _viewModel.ActiveTab)
-                        {
-                            _viewModel.SetActiveTabOnly(cancelledTab);
-                        }
-                        cancelledTab.Path = currentPath;
-                        cancelledTab.BaseTitle = _explorerService.GetFolderName(currentPath);
-                        cancelledTab.Title = cancelledTab.BaseTitle;
-                        shouldUpdateTitles = true;
-                        _viewModel.ClearCancelledNavigationTracking();
-                        return;
-                    }
-
-                    _viewModel.ClearCancelledNavigationTracking();
                 }
 
                 _viewModel.ActiveTab.Path = currentPath;

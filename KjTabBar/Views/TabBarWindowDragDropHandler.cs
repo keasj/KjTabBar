@@ -29,6 +29,13 @@ namespace KjTabBar.Views
             _contextMenuBuilder = contextMenuBuilder ?? throw new ArgumentNullException(nameof(contextMenuBuilder));
         }
 
+        internal static DragDropEffects GetFileDropEffect(DragDropKeyStates keys, DragDropEffects allowed)
+        {
+            DragDropEffects requested = (keys & DragDropKeyStates.RightMouseButton) != 0
+                ? DragDropEffects.Copy | DragDropEffects.Move
+                : ((keys & DragDropKeyStates.ShiftKey) != 0 ? DragDropEffects.Move : DragDropEffects.Copy);
+            return requested & allowed;
+        }
         public void HandleDragEnter(DragEventArgs e)
         {
             if ((e.AllowedEffects & DragDropEffects.Link) != 0)
@@ -75,14 +82,7 @@ namespace KjTabBar.Views
 
                 if (isOverValidTab)
                 {
-                    if ((e.KeyStates & DragDropKeyStates.ShiftKey) == DragDropKeyStates.ShiftKey)
-                        e.Effects = DragDropEffects.Move;
-                    else if ((e.KeyStates & DragDropKeyStates.ControlKey) == DragDropKeyStates.ControlKey)
-                        e.Effects = DragDropEffects.Copy;
-                    else if ((e.KeyStates & DragDropKeyStates.RightMouseButton) == DragDropKeyStates.RightMouseButton)
-                        e.Effects = DragDropEffects.Copy | DragDropEffects.Move;
-                    else
-                        e.Effects = DragDropEffects.Copy;
+                    e.Effects = GetFileDropEffect(e.KeyStates, e.AllowedEffects);
                 }
                 else
                 {
@@ -171,10 +171,12 @@ namespace KjTabBar.Views
                             _contextMenuBuilder.ApplyFluentMenuStyle(menu);
                             MenuItem copyItem = new MenuItem() { Header = _window.TryFindResource("MenuCopyHere") as string ?? "Copy Here(&C)" };
                             copyItem.Click += (s, ev) => ExecuteFileOperation(paths, targetTab.Path, NativeMethods.FO_COPY, finishOnce);
+                            copyItem.IsEnabled = (e.AllowedEffects & DragDropEffects.Copy) != 0;
                             menu.Items.Add(copyItem);
 
                             MenuItem moveItem = new MenuItem() { Header = _window.TryFindResource("MenuMoveHere") as string ?? "Move Here(&M)" };
                             moveItem.Click += (s, ev) => ExecuteFileOperation(paths, targetTab.Path, NativeMethods.FO_MOVE, finishOnce);
+                            moveItem.IsEnabled = (e.AllowedEffects & DragDropEffects.Move) != 0;
                             menu.Items.Add(moveItem);
 
                             MenuItem shortcutItem = new MenuItem() { Header = _window.TryFindResource("MenuShortcutHere") as string ?? "Create Shortcut Here(&S)" };
@@ -183,6 +185,7 @@ namespace KjTabBar.Views
                                 _explorerService.CreateShortcuts(paths, targetTab.Path, new WindowInteropHelper(_window).Handle);
                                 finishOnce();
                             };
+                            shortcutItem.IsEnabled = (e.AllowedEffects & DragDropEffects.Link) != 0;
                             menu.Items.Add(shortcutItem);
 
                             MenuItem symlinkItem = new MenuItem() { Header = _window.TryFindResource("MenuSymlinkHere") as string ?? "Create Symbolic Link Here(&L)" };
@@ -191,6 +194,7 @@ namespace KjTabBar.Views
                                 _explorerService.CreateSymbolicLinks(paths, targetTab.Path, new WindowInteropHelper(_window).Handle);
                                 finishOnce();
                             };
+                            symlinkItem.IsEnabled = (e.AllowedEffects & DragDropEffects.Link) != 0;
                             menu.Items.Add(symlinkItem);
 
                             menu.Items.Add(new Separator());
@@ -206,32 +210,12 @@ namespace KjTabBar.Views
                         }
                         else
                         {
-                            uint op = NativeMethods.FO_COPY;
-                            if ((e.KeyStates & DragDropKeyStates.ShiftKey) == DragDropKeyStates.ShiftKey)
-                            {
-                                op = NativeMethods.FO_MOVE;
-                            }
-                            else if ((e.KeyStates & DragDropKeyStates.ControlKey) == DragDropKeyStates.ControlKey)
-                            {
-                                op = NativeMethods.FO_COPY;
-                            }
-                            else
-                            {
-                                try
-                                {
-                                    string destRoot = Path.GetPathRoot(targetTab.Path);
-                                    string srcRoot = Path.GetPathRoot(paths[0]);
-                                    if (string.Equals(srcRoot, destRoot, StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        op = NativeMethods.FO_MOVE;
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    AppLogger.LogError("TabBarWindowDragDropHandler", "Failed to determine source/destination drive roots for drag-drop operation.", ex);
-                                }
-                            }
-                            ExecuteFileOperation(paths, targetTab.Path, op, onFinished);
+                            DragDropEffects effect = GetFileDropEffect(e.KeyStates, e.AllowedEffects);
+                            e.Effects = effect;
+                            if (effect == DragDropEffects.Copy || effect == DragDropEffects.Move)
+                                ExecuteFileOperation(paths, targetTab.Path,
+                                    effect == DragDropEffects.Move ? NativeMethods.FO_MOVE : NativeMethods.FO_COPY, onFinished);
+                            else onFinished?.Invoke();
                         }
                     }
                     else
@@ -352,6 +336,13 @@ namespace KjTabBar.Views
             return inserted;
         }
 
+        private void PostFileOperationResult(Action callback)
+        {
+            if (_window.Dispatcher.HasShutdownStarted || _window.Dispatcher.HasShutdownFinished) return;
+            try { _window.Dispatcher.BeginInvoke(callback); }
+            catch (InvalidOperationException) { }
+        }
+
         private void ExecuteFileOperation(string[] sources, string destination, uint wFunc, Action onFinished)
         {
             if (sources == null || sources.Length == 0 || string.IsNullOrEmpty(destination))
@@ -364,6 +355,12 @@ namespace KjTabBar.Views
             string destPath = destination + "\0\0";
             IntPtr ownerHwnd = new WindowInteropHelper(_window).Handle;
 
+            IDisposable operation = KjTabBar.Services.FileOperationTracker.Shared.TryBegin();
+            if (operation == null)
+            {
+                onFinished?.Invoke();
+                return;
+            }
             Thread thread = new Thread(() =>
             {
                 try
@@ -379,7 +376,7 @@ namespace KjTabBar.Views
                     if (result != 0 && !shf.fAnyOperationsAborted)
                     {
                         AppLogger.LogInfo("TabBarWindowDragDropHandler", "SHFileOperation reported failure.");
-                        _window.Dispatcher.BeginInvoke(new Action(() =>
+                        PostFileOperationResult(new Action(() =>
                         {
                             string errorMessage = _window.TryFindResource("FileOperationCompleteErrorMessage") as string ?? "The file operation could not be completed.";
                             string errorTitle = _window.TryFindResource("FileOperationErrorTitle") as string ?? "Operation Error";
@@ -391,7 +388,7 @@ namespace KjTabBar.Views
                         }));
                     }
 
-                    _window.Dispatcher.BeginInvoke(new Action(() =>
+                    PostFileOperationResult(new Action(() =>
                     {
                         onFinished?.Invoke();
                     }));
@@ -399,7 +396,7 @@ namespace KjTabBar.Views
                 catch (Exception ex)
                 {
                     AppLogger.LogError("TabBarWindowDragDropHandler", "ExecuteFileOperation failed.", ex);
-                    _window.Dispatcher.BeginInvoke(new Action(() =>
+                    PostFileOperationResult(new Action(() =>
                     {
                         string errorMessage = _window.TryFindResource("FileOperationStartErrorMessage") as string ?? "Failed to start the file operation.";
                         string errorTitle = _window.TryFindResource("FileOperationErrorTitle") as string ?? "Operation Error";
@@ -411,10 +408,13 @@ namespace KjTabBar.Views
                         onFinished?.Invoke();
                     }));
                 }
+                finally { operation.Dispose(); }
             });
             thread.SetApartmentState(ApartmentState.STA);
-            thread.IsBackground = true;
-            thread.Start();
+            // Keep in-flight native work alive even if shutdown bypasses the normal tray command.
+            thread.IsBackground = false;
+            try { thread.Start(); }
+            catch { operation.Dispose(); throw; }
         }
     }
 }

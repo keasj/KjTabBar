@@ -48,6 +48,12 @@ namespace KjTabBar.ViewModels
             return true;
         }
 
+        internal List<ClosedTabInfo> GetRecordedItems()
+        {
+            List<ClosedTabInfo> items = new List<ClosedTabInfo>();
+            foreach (ClosedTabBatch batch in _history) items.AddRange(batch.Tabs);
+            return items;
+        }
         public List<ClosedTabInfo> PeekLastBatch()
         {
             if (_history.Count == 0) return null;

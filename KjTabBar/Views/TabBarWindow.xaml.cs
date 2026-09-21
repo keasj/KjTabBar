@@ -359,7 +359,7 @@ namespace KjTabBar.Views
 
         // ====== イベントハンドラ ======
 
-        private void AddTab_Click(object sender, RoutedEventArgs e)
+        private async void AddTab_Click(object sender, RoutedEventArgs e)
         {
             TabBarViewModel vm = GetVM();
             if (vm == null) return;
@@ -373,7 +373,18 @@ namespace KjTabBar.Views
             string selectedPath = ShellFolderPicker.BrowseForFolder(title, _explorerService);
             if (!string.IsNullOrEmpty(selectedPath))
             {
-                vm.InsertTabWithPath(selectedPath, vm.Tabs.Count, true);
+                try
+                {
+                    ExplorerHostSwitchCoordinator coordinator = ExplorerHostSwitchCoordinator;
+                    await vm.InsertTabWithPathAsync(selectedPath, vm.Tabs.Count,
+                        coordinator != null ? new Func<string, Task<bool>>(path => coordinator.PrepareForPathAsync(vm, path, vm.IsPreparedTabOperationCurrent)) : null,
+                        coordinator != null ? new Action(coordinator.CompletePendingReveal) : null);
+                    if (PersistTabState != null) PersistTabState(vm);
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.LogError("TabBarWindow", "Failed to add a tab.", ex);
+                }
             }
 
             ReturnFocusToExplorer();
@@ -400,27 +411,12 @@ namespace KjTabBar.Views
             TabBarViewModel vm = GetVM();
             if (vm != null && tab != null)
             {
-                bool hostSwitchPrepared = false;
                 try
                 {
-                    if (ExplorerHostSwitchCoordinator != null &&
-                        !await ExplorerHostSwitchCoordinator.PrepareForPathAsync(vm, tab.Path))
-                    {
-                        ReturnFocusToExplorer();
-                        return;
-                    }
-
-                    hostSwitchPrepared = ExplorerHostSwitchCoordinator != null;
-                    if (hostSwitchPrepared)
-                    {
-                        ExecuteTabSelectionWithPendingReveal(
-                            delegate { vm.SelectTab(tab); },
-                            ExplorerHostSwitchCoordinator.CompletePendingReveal);
-                    }
-                    else
-                    {
-                        vm.SelectTab(tab);
-                    }
+                    ExplorerHostSwitchCoordinator coordinator = ExplorerHostSwitchCoordinator;
+                    await vm.SelectTabAsync(tab,
+                        coordinator != null ? new Func<string, Task<bool>>(path => coordinator.PrepareForPathAsync(vm, path, vm.IsPreparedTabOperationCurrent)) : null,
+                        coordinator != null ? new Action(coordinator.CompletePendingReveal) : null);
 
                     if (PersistTabState != null)
                     {
@@ -436,6 +432,24 @@ namespace KjTabBar.Views
             e.Handled = true;
         }
 
+        internal async Task DuplicateTabAsync(TabBarViewModel vm, TabItemViewModel tab)
+        {
+            if (vm == null || tab == null) return;
+            try
+            {
+                ExplorerHostSwitchCoordinator coordinator = ExplorerHostSwitchCoordinator;
+                await vm.DuplicateTabAsync(tab,
+                    coordinator != null ? new Func<string, Task<bool>>(path => coordinator.PrepareForPathAsync(vm, path, vm.IsPreparedTabOperationCurrent)) : null,
+                    coordinator != null ? new Action(coordinator.CompletePendingReveal) : null);
+                if (PersistTabState != null) PersistTabState(vm);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("TabBarWindow", "Failed to duplicate a tab.", ex);
+            }
+            ReturnFocusToExplorer();
+        }
+
         internal async Task CloseTabsAsync(TabBarViewModel vm, TabItemViewModel tab, int direction = 0)
         {
             if (vm == null || tab == null) return;
@@ -447,7 +461,7 @@ namespace KjTabBar.Views
             {
                 ExplorerHostSwitchCoordinator coordinator = ExplorerHostSwitchCoordinator;
                 await vm.CloseTabsAsync(startIndex, count,
-                    coordinator != null ? new Func<string, Task<bool>>(path => coordinator.PrepareForPathAsync(vm, path)) : null,
+                    coordinator != null ? new Func<string, Task<bool>>(path => coordinator.PrepareForPathAsync(vm, path, vm.IsPreparedTabOperationCurrent)) : null,
                     coordinator != null ? new Action(coordinator.CompletePendingReveal) : null);
                 if (PersistTabState != null) PersistTabState(vm);
             }
@@ -465,7 +479,7 @@ namespace KjTabBar.Views
             {
                 ExplorerHostSwitchCoordinator coordinator = ExplorerHostSwitchCoordinator;
                 await vm.ReopenClosedTabAsync(
-                    coordinator != null ? new Func<string, Task<bool>>(path => coordinator.PrepareForPathAsync(vm, path)) : null,
+                    coordinator != null ? new Func<string, Task<bool>>(path => coordinator.PrepareForPathAsync(vm, path, vm.IsPreparedTabOperationCurrent)) : null,
                     coordinator != null ? new Action<Action>(action => ExecuteTabSelectionWithPendingReveal(action, coordinator.CompletePendingReveal)) : null);
                 if (PersistTabState != null) PersistTabState(vm);
             }
@@ -525,7 +539,7 @@ namespace KjTabBar.Views
             _isDragging = false;
         }
 
-        private void Tab_MouseMove(object sender, MouseEventArgs e)
+        private async void Tab_MouseMove(object sender, MouseEventArgs e)
         {
             if (e.LeftButton == MouseButtonState.Pressed && !_isDragging)
             {
@@ -536,18 +550,25 @@ namespace KjTabBar.Views
                     _isDragging = true;
                     FrameworkElement element = (FrameworkElement)sender;
                     TabItemViewModel tab = (TabItemViewModel)element.DataContext;
-                    if (tab != null)
+                    try
                     {
-                        string draggedPath = tab.Path;
-                        DragDropEffects effect = DragDrop.DoDragDrop(element, tab, DragDropEffects.Move);
-                        OpenDraggedTabInNewWindowIfDroppedOutside(effect, tab, draggedPath);
+                        if (tab != null)
+                        {
+                            string draggedPath = tab.Path;
+                            DragDropEffects effect = DragDrop.DoDragDrop(element, tab, DragDropEffects.Move);
+                            await OpenDraggedTabInNewWindowIfDroppedOutsideAsync(effect, tab, draggedPath);
+                        }
                     }
-                    _isDragging = false;
+                    catch (Exception ex)
+                    {
+                        AppLogger.LogError("TabBarWindow", "Failed to detach a tab.", ex);
+                    }
+                    finally { _isDragging = false; }
                 }
             }
         }
 
-        private void OpenDraggedTabInNewWindowIfDroppedOutside(DragDropEffects effect, TabItemViewModel tab, string draggedPath)
+        private async Task OpenDraggedTabInNewWindowIfDroppedOutsideAsync(DragDropEffects effect, TabItemViewModel tab, string draggedPath)
         {
             TabBarViewModel vm = GetVM();
             if (tab == null || vm == null || _explorerService == null)
@@ -567,14 +588,24 @@ namespace KjTabBar.Views
                 return;
             }
 
-            TabExternalDragOpenDecider.TryOpenInNewWindowAndCloseSourceTab(
+            ExplorerHostSwitchCoordinator coordinator = ExplorerHostSwitchCoordinator;
+            TabDetachResult result = await TabExternalDragOpenDecider.TryOpenInNewWindowAndCloseSourceTabAsync(
                 effect,
                 tab,
                 draggedPath,
                 vm,
                 OpenPathInNewWindow,
                 cursorPoint,
-                windowRect);
+                windowRect,
+                coordinator != null ? new Func<string, Task<bool>>(path => coordinator.PrepareForPathAsync(vm, path, vm.IsPreparedTabOperationCurrent)) : null,
+                coordinator != null ? new Action(coordinator.CompletePendingReveal) : null);
+            if (result == TabDetachResult.ClosePending)
+                result = await TabExternalDragOpenDecider.CompletePendingCloseAsync(vm, tab);
+            if (vm.IsDisposed) return;
+            if (result == TabDetachResult.WindowOpenedSourceRetained)
+                MessageBox.Show(this, TryFindResource("DetachSourceRetainedMessage") as string ?? "The new window opened, but the original tab was kept because switching folders did not complete.",
+                    "KjTabBar", MessageBoxButton.OK, MessageBoxImage.Information);
+            if (result != TabDetachResult.NotOpened && PersistTabState != null) PersistTabState(vm);
         }
 
         internal bool OpenPathInNewWindow(string path)

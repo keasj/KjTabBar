@@ -96,13 +96,31 @@ namespace KjTabBar.ViewModels
         public bool SaveSettings(out string errorMessage)
         {
             errorMessage = null;
-            _settings.FontFamily = _fontFamily;
-            _settings.FontSize = UserSettings.NormalizeFontSize(_fontSize);
-            _settings.IsBold = _isBold;
-            _settings.IsItalic = _isItalic;
-            _fontSize = _settings.FontSize;
-
-            return _settings.TrySave(out errorMessage);
+            string previousFont = _settings.FontFamily;
+            double previousSize = _settings.FontSize;
+            bool previousBold = _settings.IsBold;
+            bool previousItalic = _settings.IsItalic;
+            bool saved = false;
+            try
+            {
+                _settings.FontFamily = _fontFamily;
+                _settings.FontSize = UserSettings.NormalizeFontSize(_fontSize);
+                _settings.IsBold = _isBold;
+                _settings.IsItalic = _isItalic;
+                saved = _settings.TrySave(out errorMessage);
+                if (saved) _fontSize = _settings.FontSize;
+                return saved;
+            }
+            finally
+            {
+                if (!saved)
+                {
+                    _settings.FontFamily = previousFont;
+                    _settings.FontSize = previousSize;
+                    _settings.IsBold = previousBold;
+                    _settings.IsItalic = previousItalic;
+                }
+            }
         }
     }
 }

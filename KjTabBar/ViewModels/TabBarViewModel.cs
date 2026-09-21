@@ -29,10 +29,55 @@ namespace KjTabBar.ViewModels
         private int _metadataUpdateQueued;
         private bool _isReopeningClosedTabs;
         private bool _isClosingTabs;
+        private bool _isPreparingTabOperation;
+        private Func<bool> _canApplyPreparedTabOperation;
+        internal bool IsPreparedTabOperationCurrent() => _canApplyPreparedTabOperation != null && _canApplyPreparedTabOperation();
+        internal bool LastNavigationFailed { get; private set; }
+        internal long NavigationFailureVersion { get; private set; }
+        private Action _pendingCloseRollback;
+        private string[] _pendingClosePaths;
+        private string _pendingCloseActivePath;
+        private int? _pendingCloseActiveIndex;
+        internal string[] PendingClosePaths => _pendingCloseRollback != null ? _pendingClosePaths : null;
+        internal string PendingCloseActivePath => _pendingCloseActivePath;
+        internal int? PendingCloseActiveIndex => _pendingCloseActiveIndex;
+        internal bool IsDisposed => _isDisposed;
+        internal Action PendingHostRollback { get; set; }
+        private long _selectionVersion;
+        internal long SynchronizationVersion { get; private set; }
+        internal bool IsTabOperationPending => _isPreparingTabOperation || _isClosingTabs || _isReopeningClosedTabs;
+
+        internal bool IsSynchronizationCurrent(long version)
+        {
+            return !_isDisposed && !IsTabOperationPending && SynchronizationVersion == version;
+        }
+
+        private void InvalidateSelection()
+        {
+            _selectionVersion++;
+            SynchronizationVersion++;
+        }
 
         private readonly TabBarExplorerSynchronizer _synchronizer;
 
         internal bool IsRestoringControlPanelHost { get; set; }
+        private string _persistedRestoreSourcePath;
+
+        internal void CancelPersistedHostRestoration(string currentPath)
+        {
+            if (_isDisposed || !IsRestoringControlPanelHost) return;
+            string path = string.IsNullOrEmpty(currentPath) ? _persistedRestoreSourcePath : currentPath;
+            if (string.IsNullOrEmpty(path)) return;
+            TabItemViewModel source = FindTabByPath(path);
+            if (source == null)
+            {
+                source = new TabItemViewModel(path, _explorerService.GetFolderName(path), _explorerService);
+                _tabs.Add(source);
+            }
+            ClearPendingNavigationTracking();
+            SetActiveTabOnly(source);
+            _navigationTracker.InvalidateCache();
+        }
 
         public IntPtr ExplorerHwnd
         {
@@ -50,6 +95,7 @@ namespace KjTabBar.ViewModels
             _explorerHwnd = explorerHwnd;
             if (previousExplorerHwnd != explorerHwnd)
             {
+                SynchronizationVersion++;
                 _navigationTracker.NotifyExplorerHostChanged();
             }
             AppLogger.LogDiagnostic(
@@ -96,6 +142,8 @@ namespace KjTabBar.ViewModels
             get { return _activeTab; }
             set
             {
+                InvalidateSelection();
+                _navigationTracker.InvalidateCache();
                 if (_activeTab != null) _activeTab.IsActive = false;
                 _activeTab = value;
                 if (_activeTab != null) _activeTab.IsActive = true;
@@ -320,7 +368,7 @@ namespace KjTabBar.ViewModels
 
         public bool TryInsertTabWithPath(string path, int index, bool allowSpecialPath)
         {
-            if (string.IsNullOrEmpty(path)) return false;
+            if (_isDisposed || string.IsNullOrEmpty(path)) return false;
             path = NormalizeTabPath(path);
             if (!allowSpecialPath && _explorerService.IsControlPanelPath(path)) return false;
 
@@ -407,6 +455,8 @@ namespace KjTabBar.ViewModels
 
         internal void ClearPendingNavigationTracking()
         {
+            _pendingCloseRollback = null;
+            PendingHostRollback = null;
             _navigationTracker.ClearPending();
         }
 
@@ -420,6 +470,45 @@ namespace KjTabBar.ViewModels
             return _navigationTracker.IsCancelledNavigationMatch(currentPath, PathEquals);
         }
 
+        internal void TimeoutPendingNavigation()
+        {
+            if (_navigationTracker.NavigatingToPath == null) return;
+            Action restoreTabs = _pendingCloseRollback;
+            Action restoreHost = PendingHostRollback;
+            _pendingCloseRollback = null;
+            PendingHostRollback = null;
+            if (restoreTabs != null) restoreTabs();
+            CancelPendingNavigation();
+            if (restoreHost != null) restoreHost();
+        }
+
+        private void RegisterCloseRollback(List<TabItemViewModel> before, List<ClosedTabInfo> previousRecords,
+            TabItemViewModel previousActive)
+        {
+            if (_navigationTracker.NavigatingToPath == null || previousActive == null || _tabs.Contains(previousActive)) return;
+            List<TabItemViewModel> removed = before.FindAll(tab => !_tabs.Contains(tab));
+            List<TabItemViewModel> added = new List<TabItemViewModel>();
+            foreach (TabItemViewModel tab in _tabs) if (!before.Contains(tab)) added.Add(tab);
+            List<ClosedTabInfo> records = _closedTabHistory.GetRecordedItems();
+            records.RemoveAll(previousRecords.Contains);
+            if (_pendingCloseRollback == null)
+            {
+                _pendingClosePaths = before.ConvertAll(tab => tab.Path).ToArray();
+                _pendingCloseActivePath = previousActive.Path;
+                _pendingCloseActiveIndex = before.IndexOf(previousActive);
+            }
+            Action previousRollback = _pendingCloseRollback;
+            _pendingCloseRollback = delegate
+            {
+                foreach (TabItemViewModel tab in added) _tabs.Remove(tab);
+                foreach (TabItemViewModel tab in removed)
+                    if (!_tabs.Contains(tab)) _tabs.Insert(Math.Min(before.IndexOf(tab), _tabs.Count), tab);
+                foreach (ClosedTabInfo info in records) _closedTabHistory.RemoveRestoredItem(info);
+                if (previousRollback != null) previousRollback();
+                OnPropertyChanged("HasClosedTabs");
+                UpdateTabTitles();
+            };
+        }
         internal void CancelPendingNavigation()
         {
             TabItemViewModel rollbackTab;
@@ -464,6 +553,7 @@ namespace KjTabBar.ViewModels
                 initialPath = NormalizeTabPath(_tabs[0].Path);
             }
 
+            _persistedRestoreSourcePath = initialPath;
             bool isFirstValidTab = true;
             for (int i = 0; i < paths.Length; i++)
             {
@@ -489,7 +579,9 @@ namespace KjTabBar.ViewModels
                 TabItemViewModel activeTab = null;
                 if (activeIndex.HasValue && activeIndex.Value >= 0 && activeIndex.Value < _tabs.Count)
                 {
-                    activeTab = _tabs[activeIndex.Value];
+                    TabItemViewModel indexedTab = _tabs[activeIndex.Value];
+                    if (string.IsNullOrEmpty(activePath) || PathEquals(indexedTab.Path, activePath))
+                        activeTab = indexedTab;
                 }
 
                 if (activeTab == null && !string.IsNullOrEmpty(activePath))
@@ -548,7 +640,7 @@ namespace KjTabBar.ViewModels
         internal async Task CloseTabsAsync(int startIndex, int count,
             Func<string, Task<bool>> preparePath, Action completePendingReveal)
         {
-            if (_isClosingTabs || startIndex < 0 || count <= 0 || startIndex > _tabs.Count - count) return;
+            if (_isDisposed || IsTabOperationPending || startIndex < 0 || count <= 0 || startIndex > _tabs.Count - count) return;
             _isClosingTabs = true;
             bool preparingHost = false;
             try
@@ -556,26 +648,27 @@ namespace KjTabBar.ViewModels
                 int activeIndex = GetTabIndex(_activeTab);
                 bool changesSelection = _activeTab == null ||
                     (activeIndex >= startIndex && activeIndex < startIndex + count);
+                if (changesSelection && !_explorerService.IsTabPathCurrentlyAvailable(GetCloseSelectionPath(startIndex, count))) return;
                 if (changesSelection && preparePath != null)
                 {
                     // Prepare before removing the active tab: host detection needs its old path.
-                    string targetPath = count == _tabs.Count
-                        ? _explorerService.GetResolvedHomeFolderPath()
-                        : (startIndex + count < _tabs.Count
-                            ? _tabs[startIndex + count].Path : _tabs[startIndex - 1].Path);
+                    string targetPath = GetCloseSelectionPath(startIndex, count);
                     List<TabItemViewModel> originalTabs = new List<TabItemViewModel>(_tabs);
                     TabItemViewModel originalActiveTab = _activeTab;
+                    long selectionVersion = _selectionVersion;
+                    _canApplyPreparedTabOperation = () => !_isDisposed && _selectionVersion == selectionVersion &&
+                        _activeTab == originalActiveTab && _tabs.Count == originalTabs.Count &&
+                        System.Linq.Enumerable.SequenceEqual(_tabs, originalTabs) &&
+                        PathEquals(targetPath, GetCloseSelectionPath(startIndex, count));
                     preparingHost = true;
                     if (!await preparePath(targetPath)) return;
 
                     // An asynchronous host launch must not close tabs changed in the meantime.
-                    if (_activeTab != originalActiveTab || _tabs.Count != originalTabs.Count) return;
-                    for (int i = 0; i < originalTabs.Count; i++)
-                    {
-                        if (_tabs[i] != originalTabs[i]) return;
-                    }
+                    if (!IsPreparedTabOperationCurrent()) return;
                 }
 
+                if (_isDisposed || (changesSelection &&
+                    !_explorerService.IsTabPathCurrentlyAvailable(GetCloseSelectionPath(startIndex, count)))) return;
                 if (count == 1) CloseTab(_tabs[startIndex]);
                 else CloseTabRange(startIndex, count);
             }
@@ -587,14 +680,110 @@ namespace KjTabBar.ViewModels
                 }
                 finally
                 {
+                    _canApplyPreparedTabOperation = null;
                     _isClosingTabs = false;
                 }
             }
         }
 
+        private string GetCloseSelectionPath(int startIndex, int count)
+        {
+            string path = count == _tabs.Count ? null :
+                (startIndex + count < _tabs.Count ? _tabs[startIndex + count].Path : _tabs[startIndex - 1].Path);
+            return string.IsNullOrEmpty(path) ? _explorerService.GetResolvedHomeFolderPath() : path;
+        }
+
+        internal Task SelectTabAsync(TabItemViewModel tab, Func<string, Task<bool>> preparePath, Action completePendingReveal)
+        {
+            string path = tab != null ? tab.Path : null;
+            return RunPreparedTabOperationAsync(path, () => SelectTab(tab),
+                () => tab != null && _tabs.Contains(tab) && PathEquals(tab.Path, path), preparePath, completePendingReveal);
+        }
+
+        internal Task InsertTabWithPathAsync(string path, int index, Func<string, Task<bool>> preparePath, Action completePendingReveal)
+        {
+            return RunPreparedTabOperationAsync(path, () => InsertTabWithPath(path, index, true),
+                () => true, preparePath, completePendingReveal);
+        }
+
+        internal Task DuplicateTabAsync(TabItemViewModel tab, Func<string, Task<bool>> preparePath, Action completePendingReveal)
+        {
+            string path = tab != null ? tab.Path : null;
+            return RunPreparedTabOperationAsync(path, () => DuplicateTab(tab),
+                () => tab != null && _tabs.Contains(tab) && PathEquals(tab.Path, path), preparePath, completePendingReveal);
+        }
+
+        private async Task RunPreparedTabOperationAsync(string path, Action action, Func<bool> isCurrent,
+            Func<string, Task<bool>> preparePath, Action completePendingReveal)
+        {
+            if (_isDisposed || IsTabOperationPending || !isCurrent()) return;
+            path = string.IsNullOrEmpty(path) ? _explorerService.GetResolvedHomeFolderPath() : path;
+            if (!_explorerService.IsTabPathCurrentlyAvailable(path)) return;
+            long selectionVersion = _selectionVersion;
+            _canApplyPreparedTabOperation = () => !_isDisposed && _selectionVersion == selectionVersion && isCurrent();
+            _isPreparingTabOperation = true;
+            bool preparingHost = false;
+            try
+            {
+                if (preparePath != null)
+                {
+                    preparingHost = true;
+                    if (!await preparePath(path)) return;
+                }
+                if (_isDisposed || _selectionVersion != selectionVersion || !isCurrent()) return;
+                action();
+            }
+            finally
+            {
+                try
+                {
+                    if (preparingHost && completePendingReveal != null) completePendingReveal();
+                }
+                finally
+                {
+                    _canApplyPreparedTabOperation = null;
+                    _isPreparingTabOperation = false;
+                }
+            }
+        }
+
+        internal bool CanCloseTab(TabItemViewModel tab)
+        {
+            int index = GetTabIndex(tab);
+            return !_isDisposed && index >= 0 &&
+                ((tab != _activeTab && _activeTab != null) ||
+                 _explorerService.IsTabPathCurrentlyAvailable(GetCloseSelectionPath(index, 1)));
+        }
+
+        private bool PrepareCloseSelection(int startIndex, int count)
+        {
+            int activeIndex = GetTabIndex(_activeTab);
+            if (_activeTab != null && (activeIndex < startIndex || activeIndex >= startIndex + count)) return true;
+            TabItemViewModel target;
+            bool temporary = count == _tabs.Count;
+            if (temporary)
+            {
+                string path = _explorerService.GetResolvedHomeFolderPath();
+                target = new TabItemViewModel(path, _explorerService.GetFolderName(path), _explorerService);
+                _tabs.Add(target);
+            }
+            else target = _tabs[startIndex + count < _tabs.Count ? startIndex + count : startIndex - 1];
+            bool selected = false;
+            try
+            {
+                SelectTab(target);
+                selected = !LastNavigationFailed;
+                return selected;
+            }
+            finally
+            {
+                if (temporary && !selected) _tabs.Remove(target);
+            }
+        }
+
         public void CloseTab(TabItemViewModel tab)
         {
-            if (tab == null) return;
+            if (!CanCloseTab(tab)) return;
             int index = -1;
             for (int i = 0; i < _tabs.Count; i++)
             {
@@ -602,6 +791,11 @@ namespace KjTabBar.ViewModels
             }
             if (index < 0) return;
 
+
+            List<TabItemViewModel> beforeClose = new List<TabItemViewModel>(_tabs);
+            List<ClosedTabInfo> beforeRecords = _closedTabHistory.GetRecordedItems();
+            TabItemViewModel beforeActive = _activeTab;
+            if (!PrepareCloseSelection(index, 1)) return;
             RecordClosedTab(tab.Path, index);
 
             bool wasActiveTab = (tab == _activeTab);
@@ -638,6 +832,7 @@ namespace KjTabBar.ViewModels
                     ActiveTabIndex = _activeTabIndex - 1;
                 }
             }
+            RegisterCloseRollback(beforeClose, beforeRecords, beforeActive);
             UpdateTabTitles();
         }
 
@@ -656,7 +851,7 @@ namespace KjTabBar.ViewModels
 
         internal async Task ReopenClosedTabAsync(Func<string, Task<bool>> preparePath, Action<Action> withPendingReveal)
         {
-            if (_isReopeningClosedTabs) return;
+            if (_isDisposed || IsTabOperationPending) return;
             _isReopeningClosedTabs = true;
             try
             {
@@ -666,14 +861,39 @@ namespace KjTabBar.ViewModels
                 for (int i = batch.Count - 1; i >= 0; i--)
                 {
                     ClosedTabInfo info = batch[i];
-                    if (preparePath != null && !await preparePath(info.Path)) return;
-                    bool restored = false;
-                    Action insert = () => restored = TryInsertTabWithPath(info.Path, info.Position, true);
-                    if (withPendingReveal != null) withPendingReveal(insert);
-                    else insert();
-                    if (!restored) return;
-                    _closedTabHistory.RemoveRestoredItem(info);
-                    OnPropertyChanged("HasClosedTabs");
+                    long selectionVersion = _selectionVersion;
+                    _canApplyPreparedTabOperation = () => !_isDisposed && _selectionVersion == selectionVersion;
+                    bool preparing = false;
+                    bool revealHandled = false;
+                    try
+                    {
+                        if (preparePath != null)
+                        {
+                            preparing = true;
+                            if (!await preparePath(info.Path)) return;
+                        }
+                        if (!IsPreparedTabOperationCurrent()) return;
+                        bool restored = false;
+                        Action insert = () => restored = TryInsertTabWithPath(info.Path, info.Position, true);
+                        if (withPendingReveal != null)
+                        {
+                            revealHandled = true;
+                            withPendingReveal(insert);
+                        }
+                        else insert();
+                        if (!restored) return;
+                        _closedTabHistory.RemoveRestoredItem(info);
+                        OnPropertyChanged("HasClosedTabs");
+                    }
+                    finally
+                    {
+                        try
+                        {
+                            if (preparing && !revealHandled && withPendingReveal != null)
+                                withPendingReveal(delegate { });
+                        }
+                        finally { _canApplyPreparedTabOperation = null; }
+                    }
                 }
             }
             finally
@@ -704,6 +924,12 @@ namespace KjTabBar.ViewModels
         {
             if (count <= 0) return;
             bool removesActiveTab = _activeTabIndex >= startIndex && _activeTabIndex < startIndex + count;
+            if ((removesActiveTab || _activeTab == null) &&
+                !_explorerService.IsTabPathCurrentlyAvailable(GetCloseSelectionPath(startIndex, count))) return;
+            List<TabItemViewModel> beforeClose = new List<TabItemViewModel>(_tabs);
+            List<ClosedTabInfo> beforeRecords = _closedTabHistory.GetRecordedItems();
+            TabItemViewModel beforeActive = _activeTab;
+            if (!PrepareCloseSelection(startIndex, count)) return;
             StartHistoryBatch();
             try
             {
@@ -712,32 +938,26 @@ namespace KjTabBar.ViewModels
                     RecordClosedTab(_tabs[startIndex].Path, startIndex);
                     _tabs.RemoveAt(startIndex);
                 }
-                if (removesActiveTab || _activeTab == null)
-                {
-                    ActiveTab = null;
-                    ActiveTabIndex = -1;
-                    SelectTab(_tabs[Math.Min(startIndex, _tabs.Count - 1)]);
-                }
-                else
-                {
-                    ActiveTabIndex = GetTabIndex(_activeTab);
-                }
+                ActiveTabIndex = GetTabIndex(_activeTab);
                 UpdateTabTitles();
             }
             finally
             {
                 EndHistoryBatch();
+                RegisterCloseRollback(beforeClose, beforeRecords, beforeActive);
             }
         }
 
         public void SelectTab(TabItemViewModel tab)
         {
-            if (tab == null) return;
+            LastNavigationFailed = true;
+            if (_isDisposed || tab == null || GetTabIndex(tab) < 0) return;
+            InvalidateSelection();
 
             IsRestoringControlPanelHost = false;
-            ClearCancelledNavigationTracking();
 
             bool shouldUpdateTitles = false;
+            Action restorePendingNavigation = _navigationTracker.CapturePendingNavigation();
             TabItemViewModel previousActiveTab = _activeTab;
             int previousActiveTabIndex = _activeTabIndex;
 
@@ -756,8 +976,11 @@ namespace KjTabBar.ViewModels
                 return;
             }
 
+            LastNavigationFailed = false;
             if (_navigationTracker.NavigatingToPath != null && _navigationTracker.NavigatingToPath.Equals(path, StringComparison.OrdinalIgnoreCase))
             {
+                // The navigation can be shared by duplicate tabs, but their selection cannot.
+                if (tab != _activeTab) SetActiveTabOnly(tab);
                 if (shouldUpdateTitles)
                 {
                     UpdateTabTitles();
@@ -766,6 +989,16 @@ namespace KjTabBar.ViewModels
             }
 
             string currentPath = GetCurrentPathForSelection();
+            if (_navigationTracker.NavigatingToPath != null && PathEquals(_navigationTracker.NavigatingToPath, currentPath))
+            {
+                ClearPendingNavigationTracking();
+                restorePendingNavigation = null;
+            }
+            // Keep late-arrival evidence until selection or synchronization consumes it.
+            TabItemViewModel confirmedSource = FindTabByPath(currentPath);
+            if (confirmedSource == null && _navigationTracker.NavigationSourceTab != null &&
+                PathEquals(_navigationTracker.NavigationSourceTab.Path, currentPath))
+                confirmedSource = _navigationTracker.NavigationSourceTab;
             AppLogger.LogDiagnostic(
                 "TabBarViewModel",
                 string.Format(
@@ -774,8 +1007,12 @@ namespace KjTabBar.ViewModels
                     currentPath ?? string.Empty,
                     path ?? string.Empty,
                     previousActiveTab != null ? previousActiveTab.Path ?? string.Empty : string.Empty));
+            TabItemViewModel failureSource = restorePendingNavigation == null
+                ? confirmedSource ?? previousActiveTab : previousActiveTab;
             if (PathEquals(currentPath, path))
             {
+                _navigationTracker.ForgetCancelled(currentPath, PathEquals);
+                _navigationTracker.RememberPendingAsCancelled();
                 if (tab != _activeTab)
                 {
                     SetActiveTabOnly(tab);
@@ -797,18 +1034,45 @@ namespace KjTabBar.ViewModels
                 SetActiveTabOnly(tab);
             }
 
-            if (_explorerService.Navigate(_explorerHwnd, path))
+            bool navigationStarted;
+            try
             {
+                navigationStarted = _explorerService.Navigate(_explorerHwnd, path);
+            }
+            catch (Exception ex)
+            {
+                // A timed-out write may still complete. Track it before rolling back so
+                // a late arrival selects its own tab instead of overwriting the source.
+                _navigationTracker.StartNavigation(NormalizeTabPath(path),
+                    failureSource != tab ? failureSource : null,
+                    failureSource != tab ? GetTabIndex(failureSource) : -1);
+                CancelPendingNavigation();
+                if (restorePendingNavigation != null) restorePendingNavigation();
+                LastNavigationFailed = true;
+                NavigationFailureVersion++;
+                AppLogger.LogError("TabBarViewModel", "Explorer navigation failed; selection was restored.", ex);
+                return;
+            }
+
+            if (navigationStarted)
+            {
+                if (_navigationTracker.NavigatingToPath == null)
+                {
+                    _pendingCloseRollback = null;
+                    PendingHostRollback = null;
+                }
+                _navigationTracker.RememberPendingAsCancelled();
                 AppLogger.LogDiagnostic(
                     "TabBarViewModel",
                     string.Format(
                         "SelectTab navigateStarted explorer={0} targetPath={1}",
                         _explorerHwnd,
                         path ?? string.Empty));
+                TabItemViewModel source = confirmedSource ?? previousActiveTab;
                 _navigationTracker.StartNavigation(
                     NormalizeTabPath(path),
-                    (previousActiveTab != null && previousActiveTab != tab) ? previousActiveTab : null,
-                    (previousActiveTab != null && previousActiveTab != tab) ? previousActiveTabIndex : -1
+                    source != tab ? source : null,
+                    source != null && source != tab ? GetTabIndex(source) : -1
                 );
             }
             else
@@ -820,13 +1084,16 @@ namespace KjTabBar.ViewModels
                         _explorerHwnd,
                         path ?? string.Empty));
                 _navigationTracker.ClearPending();
+                if (restorePendingNavigation != null) restorePendingNavigation();
+                LastNavigationFailed = true;
+                NavigationFailureVersion++;
 
-                if (previousActiveTab != null && previousActiveTab != tab)
+                if (failureSource != null && failureSource != tab)
                 {
-                    int previousIndex = GetTabIndex(previousActiveTab);
+                    int previousIndex = GetTabIndex(failureSource);
                     if (previousIndex >= 0)
                     {
-                        SetActiveTabOnly(previousActiveTab);
+                        SetActiveTabOnly(failureSource);
                     }
                     else if (previousActiveTabIndex >= 0 && previousActiveTabIndex < _tabs.Count)
                     {

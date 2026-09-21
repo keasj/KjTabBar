@@ -113,19 +113,23 @@ Example for the English setup on Visual Studio 18:
 
 For final validation, test the executable extracted from each generated MSI. Build-host differences can produce different executable hashes even when the source and version are unchanged. Record the actual MSI PackageCode from SummaryInformation as well as the project settings.
 
-## 5. Prepare Release Asset Names
+## 5. Prepare and Validate Release Packages
 
-Upload assets with the following names:
+Run the packaging script after both setup builds succeed:
 
-- App executable: `KjTabBar-vX.Y.Z.W.exe`
-- Setup launcher: `KjTabBar-vX.Y.Z.W-setup.exe`
-- MSI package: `KjTabBar-vX.Y.Z.W-setup.msi`
+```powershell
+.\tools\Prepare-Release.ps1 -Version '1.3.6.0'
+```
 
-For example, `v1.1.3.0` becomes:
+Output: `artifacts/releases/v1.3.6.0/`, outside the setup build output directories.
 
-- `KjTabBar-v1.1.3.0.exe`
-- `KjTabBar-v1.1.3.0-setup.exe`
-- `KjTabBar-v1.1.3.0-setup.msi`
+- `ja/setup.exe` + `ja/Setup.msi`, and the corresponding `KjTabBar-v1.3.6.0-ja.zip`.
+- `en/setup.exe` + `en/Setup.msi`, and the corresponding `KjTabBar-v1.3.6.0-en.zip`.
+- `KjTabBar.exe`, its configuration file, LICENSE, and SHA256SUMS.txt.
+
+Keep the launcher and MSI together with these exact names. The launcher embeds `Setup.msi`; renaming only the MSI breaks that reference. Distribute the ZIP and extract it before running setup.exe. Do not store archived release assets under Setup/Release or Setup/Release_en because setup builds can replace those directories.
+
+The script validates the launcher reference, MSI ProductVersion, and extracted executable version before assembling packages. It records payload hashes and a complete package hash manifest. Run the tests against the extracted payload before publishing. Extraction is not an installation or upgrade acceptance test.
 
 ## 6. Commit, Tag, and Push
 
@@ -153,23 +157,15 @@ Create the release notes from GitHub automatically:
 
 ## 8. Upload the Release Assets
 
-Upload the built files to the existing release.
-
-Do not rely on `source#name` to change the downloaded filename. In GitHub CLI, that syntax sets the asset label, while the actual downloadable filename stays the original file name.
-
-Create copies with the final release filenames first, then upload those files directly:
+Only after publication is authorized, upload the validated packages from the stable release directory. Example:
 
 ```powershell
-New-Item -ItemType Directory -Force -Path '.\_release' | Out-Null
-Copy-Item 'KjTabBar\bin\Release\net481\KjTabBar.exe' '.\_release\KjTabBar-v1.1.3.0.exe' -Force
-Copy-Item 'Setup\Release\setup.exe' '.\_release\KjTabBar-v1.1.3.0-setup.exe' -Force
-Copy-Item 'Setup\Release\Setup.msi' '.\_release\KjTabBar-v1.1.3.0-setup.msi' -Force
-
-& 'C:\Program Files\GitHub CLI\gh.exe' release upload v1.1.3.0 `
-  '.\_release\KjTabBar-v1.1.3.0.exe' `
-  '.\_release\KjTabBar-v1.1.3.0-setup.exe' `
-  '.\_release\KjTabBar-v1.1.3.0-setup.msi'
+& 'C:\Program Files\GitHub CLI\gh.exe' release upload v1.3.6.0 `
+  '.\artifacts\releases\v1.3.6.0\KjTabBar-v1.3.6.0-ja.zip' `
+  '.\artifacts\releases\v1.3.6.0\KjTabBar-v1.3.6.0-en.zip' `
+  '.\artifacts\releases\v1.3.6.0\SHA256SUMS.txt'
 ```
+
 ## 9. Verify the Built MSI Upgrade Metadata
 
 Before uploading assets, confirm the MSI contains the expected metadata:
@@ -202,9 +198,9 @@ Confirm the release contents:
 
 The asset list should contain:
 
-- `KjTabBar-v1.1.3.0.exe`
-- `KjTabBar-v1.1.3.0-setup.exe`
-- `KjTabBar-v1.1.3.0-setup.msi`
+- `KjTabBar-v1.3.6.0-ja.zip`
+- `KjTabBar-v1.3.6.0-en.zip`
+- `SHA256SUMS.txt`
 
 ## 11. Notes for Codex Sessions
 

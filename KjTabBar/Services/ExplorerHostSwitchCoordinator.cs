@@ -11,7 +11,16 @@ namespace KjTabBar.Services
     {
         internal bool? CurrentHostIsControlPanel { get; private set; }
         private const int NewHostPollingAttempts = 80;
+        internal TimeSpan NewHostWaitTimeout { get; set; } = TimeSpan.FromSeconds(8);
+        private TabBarViewModel _preparedViewModel;
+        private IntPtr _preparedOriginalHwnd;
+        private bool _preparedOriginalIsControlPanel;
+        private string _preparedOriginalPath;
+        private long _preparedFailureVersion;
         private bool _isPreparing;
+        private Func<bool> _isOperationCurrent;
+
+        private bool CanApplyOperation() => _isOperationCurrent == null || _isOperationCurrent();
         private IntPtr _pendingRevealExplorerHwnd;
         private bool _pendingRevealHasOriginalRect;
         private NativeMethods.RECT _pendingRevealOriginalRect;
@@ -116,12 +125,14 @@ namespace KjTabBar.Services
             return PrepareForPathAsync(viewModel, targetPath).GetAwaiter().GetResult();
         }
 
-        public async Task<bool> PrepareForPathAsync(TabBarViewModel viewModel, string targetPath)
+        public async Task<bool> PrepareForPathAsync(TabBarViewModel viewModel, string targetPath, Func<bool> isOperationCurrent = null)
         {
             if (_isPreparing) return false;
             _isPreparing = true;
+            _isOperationCurrent = isOperationCurrent;
             try
             {
+                if (!CanApplyOperation()) return false;
                 return await PrepareForPathCoreAsync(viewModel, targetPath);
             }
             catch (Exception ex)
@@ -137,6 +148,7 @@ namespace KjTabBar.Services
             }
             finally
             {
+                _isOperationCurrent = null;
                 _isPreparing = false;
             }
         }
@@ -161,7 +173,15 @@ namespace KjTabBar.Services
 
             bool targetIsControlPanelPath = _explorerService.IsControlPanelPath(targetPath);
             IntPtr currentExplorerHwnd = viewModel.ExplorerHwnd;
-            if (!await IsRegisteredAsync(currentExplorerHwnd))
+            _preparedViewModel = viewModel;
+            _preparedOriginalHwnd = currentExplorerHwnd;
+            _preparedOriginalPath = viewModel.ActiveTab != null ? viewModel.ActiveTab.Path : null;
+            _preparedOriginalIsControlPanel = CurrentHostIsControlPanel ??
+                (viewModel.ActiveTab != null && _explorerService.IsControlPanelPath(viewModel.ActiveTab.Path));
+            _preparedFailureVersion = viewModel.NavigationFailureVersion;
+            bool currentRegistered = await IsRegisteredAsync(currentExplorerHwnd);
+            if (!CanApplyOperation()) return false;
+            if (!currentRegistered)
             {
                 AppLogger.LogError("ExplorerHostSwitchCoordinator",
                     "Explorer host lost its Shell registration; preparing a replacement. hwnd=" + currentExplorerHwnd, null);
@@ -169,6 +189,8 @@ namespace KjTabBar.Services
             }
             System.Diagnostics.Stopwatch hostTypeTimer = AppLogger.StartDiagnosticTiming();
             bool currentIsControlPanelHost = await IsControlPanelHostAsync(currentExplorerHwnd, viewModel, targetIsControlPanelPath);
+            _preparedOriginalIsControlPanel = currentIsControlPanelHost;
+            if (!CanApplyOperation()) return false;
             AppLogger.LogDiagnosticTiming("Host.CurrentType", currentExplorerHwnd, hostTypeTimer);
             IntPtr parkedExplorerHwnd;
             AppLogger.LogDiagnostic(
@@ -221,7 +243,9 @@ namespace KjTabBar.Services
                 return true;
             }
 
-            if (!await IsRegisteredAsync(parkedExplorerHwnd))
+            bool parkedRegistered = await IsRegisteredAsync(parkedExplorerHwnd);
+            if (!CanApplyOperation()) return false;
+            if (!parkedRegistered)
             {
                 return await TrySwitchToFreshExplorerHostAsync(viewModel, targetPath, currentExplorerHwnd);
             }
@@ -288,6 +312,7 @@ namespace KjTabBar.Services
             string currentPath = await GetCurrentPathAsync(explorerHwnd);
             if (!string.IsNullOrEmpty(currentPath))
             {
+                _preparedOriginalPath = currentPath;
                 return _explorerService.IsControlPanelPath(currentPath);
             }
 
@@ -302,6 +327,7 @@ namespace KjTabBar.Services
             }
 
             HashSet<IntPtr> previousExplorerWindows = new HashSet<IntPtr>(_findExplorerWindows());
+            HashSet<IntPtr> previousInternalWindows = new HashSet<IntPtr>(_windowTracking.InternalHostSwitchLaunchWindows);
             NativeMethods.WINDOWPLACEMENT? currentPlacement = _windowTracking.GetHostSwitchRestorePlacement(currentExplorerHwnd);
             NativeMethods.RECT deferredRect;
             NativeMethods.RECT? currentExplorerRect = _windowTracking.DeferredOriginRestoreRects.TryGetValue(currentExplorerHwnd, out deferredRect)
@@ -329,10 +355,20 @@ namespace KjTabBar.Services
             }
 
             AppLogger.LogDiagnosticTiming("Host.LaunchReturned", currentExplorerHwnd, launchTimer);
-            IntPtr newExplorerHwnd = await WaitForNewExplorerWindowAsync(previousExplorerWindows, currentExplorerHwnd, launchPath);
+            IntPtr newExplorerHwnd;
+            try
+            {
+                newExplorerHwnd = await WaitForNewExplorerWindowAsync(previousExplorerWindows, currentExplorerHwnd, launchPath);
+            }
+            catch
+            {
+                RestoreUnclaimedLaunchWindows(previousExplorerWindows, previousInternalWindows);
+                throw;
+            }
             AppLogger.LogDiagnosticTiming("Host.WindowMatched", currentExplorerHwnd, launchTimer);
             if (newExplorerHwnd == IntPtr.Zero)
             {
+                RestoreUnclaimedLaunchWindows(previousExplorerWindows, previousInternalWindows);
                 _windowTracking.CancelInternalHostSwitchLaunchRequest();
                 AppLogger.LogDiagnostic("ExplorerHostSwitchCoordinator", "TrySwitchToFreshExplorerHost noNewExplorerWindowFound");
                 return false;
@@ -357,6 +393,11 @@ namespace KjTabBar.Services
                     NativeMethods.IsUsableWindowRestoreRect(currentExplorerRect.Value)
                     ? currentExplorerRect
                     : (hadHiddenOriginalRect ? (NativeMethods.RECT?)hiddenOriginalRect : null);
+                if (!CanApplyOperation())
+                {
+                    RestorePreparedExplorerWindow(newExplorerHwnd, hadHiddenPending, hadHiddenOriginalRect, hiddenOriginalRect);
+                    return false;
+                }
                 AlignHostBeforeRebind(newExplorerHwnd, preparedRect);
 
                 AppLogger.LogDiagnostic("ExplorerHostSwitchCoordinator", string.Format(
@@ -402,6 +443,17 @@ namespace KjTabBar.Services
             }
         }
 
+        private void RestoreUnclaimedLaunchWindows(HashSet<IntPtr> previousWindows, HashSet<IntPtr> previousInternalWindows)
+        {
+            foreach (IntPtr hwnd in new List<IntPtr>(_windowTracking.InternalHostSwitchLaunchWindows))
+            {
+                if (previousWindows.Contains(hwnd) || previousInternalWindows.Contains(hwnd)) continue;
+                _windowTracking.RestoreHiddenWindow(hwnd);
+                _windowTracking.IgnoreWindow(hwnd);
+                if ((_isWindow == null || _isWindow(hwnd)) && _showExplorerWindow != null) _showExplorerWindow(hwnd);
+            }
+        }
+
         private async Task<IntPtr> WaitForNewExplorerWindowAsync(HashSet<IntPtr> previousExplorerWindows, IntPtr currentExplorerHwnd, string targetPath)
         {
             if (_findExplorerWindows == null)
@@ -409,8 +461,10 @@ namespace KjTabBar.Services
                 return IntPtr.Zero;
             }
 
+            System.Diagnostics.Stopwatch waitTimer = System.Diagnostics.Stopwatch.StartNew();
             for (int retry = 0; retry < NewHostPollingAttempts; retry++)
             {
+                if (!CanApplyOperation() || waitTimer.Elapsed >= NewHostWaitTimeout) return IntPtr.Zero;
                 if (_isWindow != null && !_isWindow(currentExplorerHwnd)) return IntPtr.Zero;
                 System.Diagnostics.Stopwatch pollTimer = AppLogger.StartDiagnosticTiming();
                 IntPtr matchedExplorerHwnd = await Services.ComThreadService.Instance.InvokeAsync(() =>
@@ -424,9 +478,11 @@ namespace KjTabBar.Services
                     return matchedExplorerHwnd;
                 }
 
+                if (!CanApplyOperation() || waitTimer.Elapsed >= NewHostWaitTimeout) return IntPtr.Zero;
                 if (_delayAsync != null)
                 {
-                    await _delayAsync(100);
+                    int remaining = (int)Math.Ceiling((NewHostWaitTimeout - waitTimer.Elapsed).TotalMilliseconds);
+                    if (remaining > 0) await _delayAsync(Math.Min(100, remaining));
                 }
             }
 
@@ -463,8 +519,77 @@ namespace KjTabBar.Services
             }
         }
 
+        private void RestoreHostAfterFailedNavigation()
+        {
+            TabBarViewModel viewModel = _preparedViewModel;
+            _preparedViewModel = null;
+            if (viewModel == null || viewModel.ExplorerHwnd == _preparedOriginalHwnd ||
+                viewModel.ExplorerHwnd != _pendingRevealExplorerHwnd) return;
+            IntPtr original = _preparedOriginalHwnd;
+            IntPtr expectedHost = viewModel.ExplorerHwnd;
+            bool originalIsControlPanel = _preparedOriginalIsControlPanel;
+            string originalPath = _preparedOriginalPath;
+            bool hasRect = _pendingRevealHasOriginalRect;
+            NativeMethods.RECT rect = _pendingRevealOriginalRect;
+            if (viewModel.NavigationFailureVersion == _preparedFailureVersion)
+            {
+                if (viewModel.NavigationTracker.NavigatingToPath != null)
+                {
+                    viewModel.PendingHostRollback = delegate
+                    {
+                        RestoreHost(viewModel, expectedHost, original, originalIsControlPanel, originalPath, hasRect, rect);
+                        CompletePendingReveal();
+                    };
+                }
+                return;
+            }
+            RestoreHost(viewModel, expectedHost, original, originalIsControlPanel, originalPath, hasRect, rect);
+        }
+
+        private void RestoreHost(TabBarViewModel viewModel, IntPtr expectedHost, IntPtr original,
+            bool originalIsControlPanel, string originalPath, bool hasRect, NativeMethods.RECT rect)
+        {
+            if (viewModel.ExplorerHwnd != expectedHost) return;
+            // Do not let the new host's root overwrite the restored source tab.
+            viewModel.IsRestoringControlPanelHost = true;
+            try
+            {
+                if (original == IntPtr.Zero || (_isWindow != null && !_isWindow(original)))
+                    throw new InvalidOperationException("The original explorer host is no longer available.");
+                IntPtr failedHost = viewModel.ExplorerHwnd;
+                AlignHostBeforeRebind(original,
+                    hasRect ? (NativeMethods.RECT?)rect : null);
+                if (!RebindWithHostType(viewModel, original, originalIsControlPanel))
+                    throw new InvalidOperationException("The original explorer host could not be restored.");
+                _windowTracking.TransferRestorePlacement(failedHost, original);
+                _windowTracking.ClearParkedExplorerOrigin(failedHost);
+                _windowTracking.RememberParkedExplorerOrigin(original, failedHost);
+                NativeMethods.ShowWindow(failedHost, NativeMethods.SW_HIDE);
+                _pendingRevealExplorerHwnd = original;
+                _pendingRevealHasOriginalRect = hasRect;
+                _pendingRevealOriginalRect = rect;
+                if (!string.IsNullOrEmpty(originalPath) &&
+                    (viewModel.ActiveTab == null || !viewModel.PathEquals(viewModel.ActiveTab.Path, originalPath)))
+                {
+                    TabItemViewModel source = viewModel.FindTabByPath(originalPath);
+                    if (source == null)
+                    {
+                        source = new TabItemViewModel(originalPath, _explorerService.GetFolderName(originalPath), _explorerService);
+                        viewModel.Tabs.Add(source);
+                    }
+                    viewModel.SetActiveTabOnly(source);
+                }
+                viewModel.ClearCancelledNavigationTracking();
+                viewModel.IsRestoringControlPanelHost = false;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("ExplorerHostSwitchCoordinator", "Failed to roll back the explorer host; tab synchronization is suspended.", ex);
+            }
+        }
         public void CompletePendingReveal()
         {
+            RestoreHostAfterFailedNavigation();
             if (_pendingRevealExplorerHwnd == IntPtr.Zero)
             {
                 return;

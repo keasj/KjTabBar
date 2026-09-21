@@ -44,6 +44,16 @@ namespace KjTabBar
             TaskScheduler.UnobservedTaskException += TaskScheduler_UnobservedTaskException;
         }
 
+        private bool _shutdownRequested;
+
+        private async void RequestShutdownAfterFileOperations()
+        {
+            if (_shutdownRequested) return;
+            _shutdownRequested = true;
+            await FileOperationTracker.Shared.StopAndWaitAsync();
+            Shutdown();
+        }
+
         private void Application_Exit(object sender, ExitEventArgs e)
         {
             if (_isShellWorker) return;
@@ -163,7 +173,7 @@ namespace KjTabBar
                 MaxHiddenDuration = MaxHiddenDuration,
                 TrayIconService = _trayIconService,
                 TryFindResource = TryFindResource,
-                Shutdown = Shutdown,
+                Shutdown = RequestShutdownAfterFileOperations,
                 ForegroundEventCallback = ForegroundEventCallback,
                 ShowEventCallback = ShowEventCallback,
                 MoveSizeEndEventCallback = MoveSizeEndEventCallback,

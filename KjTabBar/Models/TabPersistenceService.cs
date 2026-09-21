@@ -134,6 +134,7 @@ namespace KjTabBar.Models
 
         private static List<string> BuildPersistablePathList(TabBarViewModel viewModel)
         {
+            if (viewModel.PendingClosePaths != null) return new List<string>(viewModel.PendingClosePaths);
             List<string> paths = new List<string>();
             for (int i = 0; i < viewModel.Tabs.Count; i++)
             {
@@ -147,6 +148,7 @@ namespace KjTabBar.Models
 
         private static string GetPersistableActiveTabPath(TabBarViewModel viewModel)
         {
+            if (viewModel != null && viewModel.PendingClosePaths != null) return viewModel.PendingCloseActivePath;
             if (viewModel == null || viewModel.ActiveTab == null)
             {
                 return null;
@@ -157,6 +159,7 @@ namespace KjTabBar.Models
 
         private static int? GetPersistableActiveTabIndex(TabBarViewModel viewModel)
         {
+            if (viewModel != null && viewModel.PendingClosePaths != null) return viewModel.PendingCloseActiveIndex;
             if (viewModel == null || viewModel.ActiveTab == null)
             {
                 return null;

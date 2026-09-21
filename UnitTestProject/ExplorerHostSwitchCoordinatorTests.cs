@@ -11,6 +11,104 @@ namespace UnitTestProject
     public class ExplorerHostSwitchCoordinatorTests
     {
         [TestMethod]
+        public void Overlap_RestoredActiveTabThrowPreservesSavedPath() { VerifyFailedHostNavigation(false, true, false, false, false, true); }
+        [TestMethod]
+        public void Overlap_RestoredActiveTabRejectionPreservesSavedPath() { VerifyFailedHostNavigation(false, false, false, false, false, true); }
+        [TestMethod]
+        public void Overlap_RestoredActiveTabTimeoutPreservesSavedPath() { VerifyFailedHostNavigation(false, false, false, false, true, true); }
+        [TestMethod]
+        public void FullReview_HostTimeoutRestoresOriginal() { VerifyFailedHostNavigation(false, false, false, false, true); }
+        [TestMethod]
+        public void FullReview_CloseAndHostTimeoutRestoresTabsAndHost() { VerifyFailedHostNavigation(false, false, true, false, true); }
+        [TestMethod]
+        public void FullReview_ParkedHostTimeoutRestoresOriginal() { VerifyFailedHostNavigation(true, false, false, false, true); }
+        [TestMethod]
+        public void Recheck2_CloseAfterHostSwitchFailurePreservesHistory() { VerifyFailedHostNavigation(false, true, true); }
+        [TestMethod]
+        public void Recheck2_FailedRollbackPreservesPathsUntilRetry() { VerifyFailedHostNavigation(false, true, false, true); }
+        [TestMethod]
+        public void Recheck2_FreshHostNavigationThrows() { VerifyFailedHostNavigation(false, true); }
+        [TestMethod]
+        public void Recheck2_FreshHostNavigationRejected() { VerifyFailedHostNavigation(false, false); }
+        [TestMethod]
+        public void Recheck2_ParkedHostNavigationThrows() { VerifyFailedHostNavigation(true, true); }
+        [TestMethod]
+        public void Recheck2_ParkedHostNavigationRejected() { VerifyFailedHostNavigation(true, false); }
+
+        private void VerifyFailedHostNavigation(bool parked, bool throws, bool close = false, bool rejectRollback = false, bool timeout = false, bool restoredSelection = false)
+        {
+            FailedHostNavigationExplorer explorer = new FailedHostNavigationExplorer { Throws = throws, AllowNavigate = timeout };
+            explorer.IsControlPanelPathFunc = path => path == explorer.AllControlPanelPath || path == explorer.PowerOptionsPath;
+            explorer.IsControlPanelRootPathFunc = path => path == explorer.AllControlPanelPath;
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+            if (parked) tracking.RememberParkedExplorerOrigin((IntPtr)100, (IntPtr)200);
+            bool launched = parked;
+            IntPtr shown = IntPtr.Zero;
+            ExplorerHostSwitchCoordinator coordinator = new ExplorerHostSwitchCoordinator(
+                explorer, tracking, (vm, hwnd) => { if (rejectRollback && hwnd == (IntPtr)100) return false; vm.SetExplorerHwnd(hwnd); return true; },
+                hwnd => shown = hwnd, delegate { }, delegate { }, hwnd => true,
+                () => launched ? new System.Collections.Generic.List<IntPtr> { (IntPtr)100, (IntPtr)200 }
+                    : new System.Collections.Generic.List<IntPtr> { (IntPtr)100 },
+                explorer.GetCurrentPath, hwnd => (NativeMethods.RECT?)null,
+                path => { launched = true; return true; }, delegate { });
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, @"C:\A"))
+            {
+                TabItemViewModel original = vm.ActiveTab;
+                TabItemViewModel target = new TabItemViewModel(explorer.PowerOptionsPath, "Power", explorer);
+                vm.Tabs.Add(target);
+                if (restoredSelection) vm.SetActiveTabOnly(target);
+                Func<string, System.Threading.Tasks.Task<bool>> prepare = path => coordinator.PrepareForPathAsync(vm, path, vm.IsPreparedTabOperationCurrent);
+                if (close) vm.CloseTabsAsync(0, 1, prepare, coordinator.CompletePendingReveal).GetAwaiter().GetResult();
+                else vm.SelectTabAsync(target, prepare, coordinator.CompletePendingReveal).GetAwaiter().GetResult();
+                if (timeout)
+                {
+                    Assert.AreEqual((IntPtr)200, vm.ExplorerHwnd);
+                    typeof(TabNavigationStateTracker).GetField("_navigateStartTime", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                        .SetValue(vm.NavigationTracker, DateTime.UtcNow.AddSeconds(-6));
+                    vm.NavigationTracker.InvalidateCache();
+                    vm.SyncWithExplorerAsync().GetAwaiter().GetResult();
+                }
+                Assert.AreEqual(2, vm.Tabs.Count);
+                Assert.IsFalse(vm.HasClosedTabs);
+                if (rejectRollback)
+                {
+                    Assert.AreEqual((IntPtr)200, vm.ExplorerHwnd);
+                    Assert.IsTrue(vm.IsRestoringControlPanelHost);
+                    vm.SyncWithExplorerAsync().GetAwaiter().GetResult();
+                    Assert.AreEqual(@"C:\A", original.Path);
+                    explorer.AllowNavigate = true;
+                    vm.SelectTab(target);
+                    Assert.IsFalse(vm.IsRestoringControlPanelHost);
+                    Assert.AreSame(target, vm.ActiveTab);
+                    return;
+                }
+                Assert.AreEqual((IntPtr)100, vm.ExplorerHwnd);
+                Assert.AreEqual((IntPtr)100, shown);
+                Assert.AreSame(original, vm.ActiveTab);
+                IntPtr parkedHwnd;
+                Assert.IsTrue(tracking.TryGetParkedExplorerOrigin((IntPtr)100, out parkedHwnd));
+                Assert.AreEqual((IntPtr)200, parkedHwnd);
+                System.Threading.Thread.Sleep(800);
+                vm.SyncWithExplorerAsync().GetAwaiter().GetResult();
+                Assert.AreEqual(@"C:\A", original.Path);
+                Assert.AreEqual(explorer.PowerOptionsPath, target.Path);
+                Assert.IsFalse(vm.IsTabOperationPending);
+            }
+        }
+
+        private sealed class FailedHostNavigationExplorer : MockExplorerService
+        {
+            internal bool Throws;
+            internal bool AllowNavigate;
+            public override string GetCurrentPath(IntPtr hwnd) { return hwnd == (IntPtr)100 ? @"C:\A" : AllControlPanelPath; }
+            public override bool Navigate(IntPtr hwnd, string path)
+            {
+                if (AllowNavigate) return true;
+                if (Throws) throw new TimeoutException("Simulated navigation timeout");
+                return false;
+            }
+        }
+        [TestMethod]
         public void PrepareForPath_UnregisteredHost_RebindsWithoutLosingTabs()
         {
             VerifyRegistrationRecovery(false, true, true);
@@ -38,6 +136,111 @@ namespace UnitTestProject
         public void PrepareForPath_RegistrationQueryFails_DoesNotReplaceHost()
         {
             VerifyRegistrationRecovery(false, true, true, true);
+        }
+
+        [TestMethod]
+        public void Review_PreparationCanceledBeforeRebind_PreservesOriginalHost()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            explorer.IsExplorerWindowRegisteredFunc = hwnd => hwnd != (IntPtr)100;
+            bool current = true;
+            int launches = 0;
+            int rebinds = 0;
+            ExplorerHostSwitchCoordinator coordinator = new ExplorerHostSwitchCoordinator(
+                explorer, new ExplorerWindowTrackingState(),
+                (vm, hwnd) => { rebinds++; vm.SetExplorerHwnd(hwnd); return true; },
+                delegate { }, delegate { }, delegate { }, hwnd => true,
+                () => launches > 0
+                    ? new System.Collections.Generic.List<IntPtr> { (IntPtr)100, (IntPtr)200 }
+                    : new System.Collections.Generic.List<IntPtr> { (IntPtr)100 },
+                hwnd => { current = false; return @"C:\Work"; },
+                hwnd => (NativeMethods.RECT?)null,
+                path => { launches++; return true; }, delegate { });
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, @"C:\Work"))
+            {
+                Assert.IsFalse(coordinator.PrepareForPathAsync(vm, @"C:\Work", () => current).GetAwaiter().GetResult());
+                Assert.AreEqual(1, launches);
+                Assert.AreEqual(0, rebinds);
+                Assert.AreEqual((IntPtr)100, vm.ExplorerHwnd);
+                coordinator.CompletePendingReveal();
+            }
+        }
+
+        [TestMethod]
+        public void Recheck_CanceledLaunch_StopsPollingImmediately()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            explorer.IsExplorerWindowRegisteredFunc = hwnd => hwnd != (IntPtr)100;
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+            bool current = true;
+            int enumerations = 0, delay = 0;
+            ExplorerHostSwitchCoordinator coordinator = new ExplorerHostSwitchCoordinator(
+                explorer, tracking, (vm, hwnd) => { Assert.Fail("Must not rebind"); return false; },
+                delegate { }, delegate { }, delegate { }, hwnd => true,
+                () => { enumerations++; return new System.Collections.Generic.List<IntPtr> { (IntPtr)100 }; },
+                hwnd => @"C:\Other", hwnd => (NativeMethods.RECT?)null,
+                path => { current = false; return true; }, milliseconds => delay += milliseconds);
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, @"C:\Work"))
+            {
+                Assert.IsFalse(coordinator.PrepareForPathAsync(vm, @"C:\Work", () => current).GetAwaiter().GetResult());
+                Assert.AreEqual(1, enumerations);
+                Assert.AreEqual(0, delay);
+                Assert.IsFalse(tracking.HasPendingInternalHostSwitchLaunchRequest());
+            }
+        }
+
+        [TestMethod]
+        public void Recheck_CanceledLaunch_ReleasesOnlyItsOwnHiddenWindow()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            explorer.IsExplorerWindowRegisteredFunc = hwnd => false;
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+            tracking.MarkInternalHostSwitchLaunchWindow((IntPtr)300);
+            tracking.HiddenPendingAbsorb[(IntPtr)300] = DateTime.UtcNow;
+            bool current = true;
+            IntPtr revealed = IntPtr.Zero;
+            ExplorerHostSwitchCoordinator coordinator = new ExplorerHostSwitchCoordinator(
+                explorer, tracking, (vm, hwnd) => false, hwnd => revealed = hwnd,
+                delegate { }, delegate { }, hwnd => true,
+                () => new System.Collections.Generic.List<IntPtr> { (IntPtr)100 },
+                hwnd => null, hwnd => (NativeMethods.RECT?)null,
+                path =>
+                {
+                    tracking.TryConsumeInternalHostSwitchLaunchRequest();
+                    tracking.MarkInternalHostSwitchLaunchWindow((IntPtr)200);
+                    tracking.HiddenPendingAbsorb[(IntPtr)200] = DateTime.UtcNow;
+                    current = false;
+                    return true;
+                }, delegate { });
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, @"C:\Work"))
+            {
+                Assert.IsFalse(coordinator.PrepareForPathAsync(vm, @"C:\Work", () => current).GetAwaiter().GetResult());
+                Assert.AreEqual((IntPtr)200, revealed);
+                Assert.IsFalse(tracking.HiddenPendingAbsorb.ContainsKey((IntPtr)200));
+                Assert.IsFalse(tracking.InternalHostSwitchLaunchWindows.Contains((IntPtr)200));
+                Assert.IsTrue(tracking.HiddenPendingAbsorb.ContainsKey((IntPtr)300));
+                Assert.IsTrue(tracking.InternalHostSwitchLaunchWindows.Contains((IntPtr)300));
+            }
+        }
+
+        [TestMethod]
+        public void Recheck_HostPolling_StopsOnElapsedTimeBeforeAttemptLimit()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            explorer.IsExplorerWindowRegisteredFunc = hwnd => false;
+            int enumerations = 0;
+            ExplorerHostSwitchCoordinator coordinator = new ExplorerHostSwitchCoordinator(
+                explorer, new ExplorerWindowTrackingState(), (vm, hwnd) => false,
+                delegate { }, delegate { }, delegate { }, hwnd => true,
+                () => { enumerations++; return new System.Collections.Generic.List<IntPtr> { (IntPtr)100 }; },
+                hwnd => null, hwnd => (NativeMethods.RECT?)null, path => true,
+                milliseconds => System.Threading.Thread.Sleep(30));
+            coordinator.NewHostWaitTimeout = TimeSpan.FromMilliseconds(20);
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, @"C:\Work"))
+            {
+                Assert.IsFalse(coordinator.PrepareForPathAsync(vm, @"C:\Work").GetAwaiter().GetResult());
+                Assert.IsTrue(enumerations <= 2);
+            }
         }
 
         private static void VerifyRegistrationRecovery(bool registered, bool launchSucceeds, bool replacementRegistered, bool queryFails = false)
