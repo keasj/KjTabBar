@@ -8,7 +8,7 @@ using KjTabBar.Helpers;
 
 namespace KjTabBar.Models
 {
-    public class ExplorerManager : IExplorerService, IDisposable
+    public class ExplorerManager : IExplorerService, IDisposable, Services.IAsyncExplorerService
     {
         public string AllControlPanelPath { get; } = "::{21EC2020-3AEA-1069-A2DD-08002B30309D}";
         public string HomeFolderPath { get; } = "::{679F85CB-0220-4080-B29B-5540CC05AAB6}";
@@ -218,6 +218,21 @@ namespace KjTabBar.Models
                 source.ToInt64().ToString(System.Globalization.CultureInfo.InvariantCulture),
                 child.ToString(System.Globalization.CultureInfo.InvariantCulture))[0];
             return Services.DesktopRepeatedLaunchService.ResolveInvokedShortcut(source, child, this);
+        }
+
+        System.Threading.Tasks.Task<string> Services.IAsyncExplorerService.GetCurrentPathAsync(IntPtr hwnd)
+        {
+            return Services.ComThreadService.Instance.InvokeAsync(() => GetCurrentPath(hwnd));
+        }
+
+        System.Threading.Tasks.Task<bool> Services.IAsyncExplorerService.NavigateAsync(IntPtr hwnd, string path)
+        {
+            return Services.ComThreadService.Instance.InvokeAsync(() => Navigate(hwnd, path));
+        }
+
+        System.Threading.Tasks.Task Services.IAsyncExplorerService.SelectItemsAsync(IntPtr hwnd, List<string> items)
+        {
+            return Services.ComThreadService.Instance.InvokeAsync(() => SelectItems(hwnd, items));
         }
 
         public string GetCurrentPath(IntPtr explorerHwnd)

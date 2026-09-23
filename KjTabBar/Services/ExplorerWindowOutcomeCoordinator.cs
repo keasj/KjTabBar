@@ -47,6 +47,25 @@ namespace KjTabBar.Services
             _registerTabBar = registerTabBar;
         }
 
+        internal virtual async System.Threading.Tasks.Task ApplyOutcomeAsync(IntPtr hwnd, int retryCount,
+            ExplorerWindowEvaluationResult result, TabBarViewModel validTarget, TabBarViewModel controlPanelTarget, bool operationReserved = false)
+        {
+            if (result != null && (result.Action == AbsorptionAction.Absorb || result.Action == AbsorptionAction.AbsorbWithFallback))
+            {
+                _windowTracking.ClearAbsorptionState(hwnd);
+                TabBarViewModel target = result.Action == AbsorptionAction.Absorb && result.IsControlPanelPath && controlPanelTarget != null
+                    ? controlPanelTarget : validTarget;
+                try
+                {
+                    await _interactionService.AbsorbExplorerWindowAsync(hwnd, target, result.ResolvedPath,
+                        result.AllowSpecialPath, result.IsControlPanelPath, _ignoreExplorerWindow, result.WasManagedControlPanelLaunchSource, operationReserved);
+                }
+                catch (Exception ex) { _logError("App", "AbsorbExplorerWindow failed.", ex); }
+                return;
+            }
+            ApplyOutcome(hwnd, retryCount, result, validTarget, controlPanelTarget);
+        }
+
         public virtual void ApplyOutcome(
             IntPtr hwnd,
             int retryCount,

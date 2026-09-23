@@ -688,10 +688,30 @@ namespace KjTabBar.Views
 
             if (settings.FontSize != newSize)
             {
-                settings.FontSize = newSize;
-                settings.Save();
+                string error;
+                if (!TryChangeFontSize(settings, newSize, out error))
+                {
+                    MessageBox.Show(this,
+                        (TryFindResource("SaveSettingsErrorMessage") as string ?? "Failed to save settings.") +
+                        (string.IsNullOrEmpty(error) ? string.Empty : "\n\n" + error),
+                        TryFindResource("SaveSettingsErrorTitle") as string ?? "Save Error",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
             }
             ReturnFocusToExplorer();
+        }
+
+        internal static bool TryChangeFontSize(IUserSettings settings, double size, out string error)
+        {
+            double previous = settings.FontSize;
+            bool saved = false;
+            try
+            {
+                settings.FontSize = UserSettings.NormalizeFontSize(size);
+                saved = settings.TrySave(out error);
+                return saved;
+            }
+            finally { if (!saved) settings.FontSize = previous; }
         }
 
         // ====== テーマ ======

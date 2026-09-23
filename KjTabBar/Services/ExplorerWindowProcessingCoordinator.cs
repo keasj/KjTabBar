@@ -68,9 +68,17 @@ namespace KjTabBar.Services
                 hostSwitch = FindHostSwitchCoordinator(validTarget);
             }
 
+            bool reserved = false;
             try
             {
-                if (hostSwitch != null && !await hostSwitch.PrepareForPathAsync(validTarget, result.ResolvedPath))
+                if (normalAbsorption && validTarget != null)
+                {
+                    reserved = validTarget.TryBeginExternalTabOperation();
+                    if (!reserved) { _interactionService.RestoreUnabsorbedWindow(hwnd); return; }
+                }
+                long version = validTarget != null ? validTarget.SynchronizationVersion : 0;
+                if (hostSwitch != null && !await hostSwitch.PrepareForPathAsync(validTarget, result.ResolvedPath,
+                    () => validTarget.IsExternalOperationCurrent(version)))
                 {
                     _interactionService.RestoreUnabsorbedWindow(hwnd);
                     return;
@@ -82,7 +90,7 @@ namespace KjTabBar.Services
                     return;
                 }
 
-                _outcomeCoordinator.ApplyOutcome(hwnd, retryCount, result, validTarget, controlPanelTarget);
+                await _outcomeCoordinator.ApplyOutcomeAsync(hwnd, retryCount, result, validTarget, controlPanelTarget, reserved);
             }
             catch
             {
@@ -91,7 +99,8 @@ namespace KjTabBar.Services
             }
             finally
             {
-                if (hostSwitch != null) hostSwitch.CompletePendingReveal();
+                try { if (reserved && hostSwitch != null) hostSwitch.CompletePendingReveal(); }
+                finally { if (reserved) validTarget.EndExternalTabOperation(); }
             }
         }
 

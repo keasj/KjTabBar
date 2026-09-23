@@ -306,6 +306,7 @@ namespace UnitTestProject
         {
             MockExplorerService explorer = new MockExplorerService();
             explorer.IsControlPanelPathFunc = path => path == explorer.PowerOptionsPath;
+            explorer.GetCurrentPathFunc = hwnd => hwnd == (IntPtr)100 ? explorer.PowerOptionsPath : @"C:\Work";
             NativeMethods.RECT normal = new NativeMethods.RECT { Left = 200, Top = 150, Right = 1200, Bottom = 850 };
             NativeMethods.WINDOWPLACEMENT source = new NativeMethods.WINDOWPLACEMENT
                 { showCmd = showCommand, flags = flags, rcNormalPosition = normal };

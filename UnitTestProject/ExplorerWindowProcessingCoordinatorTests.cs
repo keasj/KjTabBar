@@ -297,10 +297,10 @@ namespace UnitTestProject
                 _capture = capture;
             }
 
-            public override void ApplyOutcome(IntPtr hwnd, int retryCount, ExplorerWindowEvaluationResult result, TabBarViewModel validTarget, TabBarViewModel controlPanelTarget)
+            internal override async Task ApplyOutcomeAsync(IntPtr hwnd, int retryCount, ExplorerWindowEvaluationResult result, TabBarViewModel validTarget, TabBarViewModel controlPanelTarget, bool operationReserved = false)
             {
                 _capture(validTarget);
-                _inner.ApplyOutcome(hwnd, retryCount, result, validTarget, controlPanelTarget);
+                await _inner.ApplyOutcomeAsync(hwnd, retryCount, result, validTarget, controlPanelTarget, operationReserved);
             }
         }
     }

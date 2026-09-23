@@ -42,7 +42,8 @@ namespace UnitTestProject
         public string MapLocationNameToKnownShellPath(string locationName) => locationName;
         public Func<IntPtr, bool> IsExplorerWindowRegisteredFunc { get; set; }
         public bool IsExplorerWindowRegistered(IntPtr hwnd) => IsExplorerWindowRegisteredFunc == null || IsExplorerWindowRegisteredFunc(hwnd);
-        public virtual bool Navigate(IntPtr explorerHwnd, string path) => true;
+        public Func<IntPtr, string, bool> NavigateFunc { get; set; }
+        public virtual bool Navigate(IntPtr explorerHwnd, string path) => NavigateFunc == null || NavigateFunc(explorerHwnd, path);
         public string NormalizeKnownPath(string path) => NormalizeKnownPathFunc != null ? NormalizeKnownPathFunc(path) : path;
         public string NormalizeShellNamespacePath(string path) => NormalizeShellNamespacePathFunc != null ? NormalizeShellNamespacePathFunc(path) : path;
         public bool OpenInNewWindow(string path)

@@ -31,11 +31,28 @@ namespace KjTabBar.Models
             try
             {
                 string file = GetTabsFilePathInstance();
-                if (File.Exists(file))
+                string snapshot = GetSnapshotFilePathInstance();
+                if (File.Exists(snapshot) || File.Exists(file))
                 {
-                    bool isProtectedFile = ProtectedTextStorage.IsProtectedFile(file);
-                    string[] paths = ProtectedTextStorage.LoadLines(file);
-                    PersistedActiveTabSelection activeTabSelection = LoadActiveTabSelectionSafe();
+                    bool hasSnapshot = File.Exists(snapshot);
+                    bool isProtectedFile = hasSnapshot || ProtectedTextStorage.IsProtectedFile(file);
+                    string[] paths;
+                    PersistedActiveTabSelection activeTabSelection;
+                    if (hasSnapshot)
+                    {
+                        string[] state = ProtectedTextStorage.LoadLines(snapshot);
+                        int activeIndex;
+                        if (state.Length < 3 || state[0] != "kjtb-tabs-v1" || !int.TryParse(state[1], out activeIndex))
+                            throw new InvalidDataException("Invalid tab snapshot.");
+                        paths = new string[state.Length - 3];
+                        Array.Copy(state, 3, paths, 0, paths.Length);
+                        activeTabSelection = new PersistedActiveTabSelection(activeIndex >= 0 ? (int?)activeIndex : null, state[2]);
+                    }
+                    else
+                    {
+                        paths = ProtectedTextStorage.LoadLines(file);
+                        activeTabSelection = LoadActiveTabSelectionSafe();
+                    }
                     _tabsLoadFailed = false;
                     viewModel.RestoreTabs(paths, activeTabSelection.Path, activeTabSelection.Index, deferControlPanelNavigation, deferNavigation);
                     _lastSavedTabs = BuildPersistedStateString(paths, activeTabSelection.Path, activeTabSelection.Index);
@@ -61,6 +78,8 @@ namespace KjTabBar.Models
             try
             {
                 if (viewModel == null || viewModel.Tabs.Count == 0) return;
+                // Awaiting Shell acceptance is not a committed selection.
+                if (viewModel.IsTabOperationPending && viewModel.PendingClosePaths == null) return;
                 if (_tabsLoadFailed)
                 {
                     AppLogger.LogInfo("TabPersistenceService", "Skipped saving tabs.txt because the previous load failed.");
@@ -96,6 +115,11 @@ namespace KjTabBar.Models
                 {
                     Directory.CreateDirectory(dir);
                 }
+                // This single atomic replacement is the authoritative commit. The two
+                // legacy files remain mirrors for compatibility with older versions.
+                List<string> snapshot = new List<string> { "kjtb-tabs-v1", (activeTabIndex ?? -1).ToString(), activeTabPath ?? string.Empty };
+                snapshot.AddRange(paths);
+                ProtectedTextStorage.SaveLines(GetSnapshotFilePathInstance(), snapshot);
                 ProtectedTextStorage.SaveLines(file, paths);
                 SaveActiveTabSelection(activeTabIndex, activeTabPath);
                 _lastSavedTabs = currentTabsString;
@@ -194,6 +218,12 @@ namespace KjTabBar.Models
             }
 
             return GetTabsFilePath();
+        }
+
+        internal string GetSnapshotFilePathInstance()
+        {
+            string file = GetTabsFilePathInstance();
+            return Path.Combine(Path.GetDirectoryName(file), Path.GetFileNameWithoutExtension(file) + ".snapshot" + Path.GetExtension(file));
         }
 
         private string GetActiveTabFilePathInstance()

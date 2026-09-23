@@ -67,6 +67,11 @@ namespace KjTabBar.ViewModels
             ClearPending();
         }
 
+        internal void RememberCancelled(string path)
+        {
+            if (!string.IsNullOrEmpty(path)) _cancelledNavigations[path] = DateTime.UtcNow;
+        }
+
         internal void RememberPendingAsCancelled()
         {
             if (!string.IsNullOrEmpty(_navigatingToPath)) _cancelledNavigations[_navigatingToPath] = DateTime.UtcNow;

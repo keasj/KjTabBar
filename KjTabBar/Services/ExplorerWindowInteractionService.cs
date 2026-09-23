@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Windows;
+using System.Threading.Tasks;
 using KjTabBar.Helpers;
 using KjTabBar.Models;
 using KjTabBar.ViewModels;
@@ -286,13 +287,8 @@ namespace KjTabBar.Services
                 if (viewModel.IsDisposed || !viewModel.Tabs.Contains(activeTab) || viewModel.ActiveTab != activeTab) return;
                 hostReady = true;
                 AppLogger.LogDiagnosticTiming("Restore.HostReady", originalHwnd, restoreTimer);
-                TabBarWindow.ExecuteTabSelectionWithPendingReveal(
-                    delegate
-                    {
-                        viewModel.SelectTab(activeTab);
-                        AppLogger.LogDiagnosticTiming("Restore.TabSelected", originalHwnd, restoreTimer);
-                    },
-                    coordinator.CompletePendingReveal);
+                try { await viewModel.SelectTabCoreAsync(activeTab); }
+                finally { coordinator.CompletePendingReveal(); }
                 AppLogger.LogDiagnosticTiming("Restore.Revealed", originalHwnd, restoreTimer);
             }
             catch (Exception ex)
@@ -466,14 +462,60 @@ namespace KjTabBar.Services
             return _explorerService.MapLocationNameToKnownShellPath(title);
         }
 
-        public bool AbsorbExplorerWindow(
-            IntPtr newExplorerHwnd,
-            TabBarViewModel targetViewModel,
-            string path,
-            bool allowSpecialPath,
-            bool isControlPanelPath,
-            Action<IntPtr> ignoreExplorerWindow,
+        internal TimeSpan AbsorptionTimeout { get; set; } = TimeSpan.FromSeconds(5);
+        private readonly HashSet<IntPtr> _pendingAbsorptions = new HashSet<IntPtr>();
+
+        public bool AbsorbExplorerWindow(IntPtr newExplorerHwnd, TabBarViewModel targetViewModel,
+            string path, bool allowSpecialPath, bool isControlPanelPath, Action<IntPtr> ignoreExplorerWindow,
             bool wasManagedControlPanelLaunchSource = false)
+        {
+            Task<bool> operation = AbsorbExplorerWindowAsync(newExplorerHwnd, targetViewModel, path,
+                allowSpecialPath, isControlPanelPath, ignoreExplorerWindow, wasManagedControlPanelLaunchSource);
+            if (operation.IsCompleted) return operation.GetAwaiter().GetResult();
+            ObserveAbsorption(operation);
+            return false;
+        }
+
+        private async void ObserveAbsorption(Task<bool> operation)
+        {
+            try { await operation; }
+            catch (Exception ex) { AppLogger.LogError("ExplorerWindowInteractionService", "Absorption failed.", ex); }
+        }
+
+        internal async Task<bool> AbsorbExplorerWindowAsync(IntPtr newExplorerHwnd, TabBarViewModel targetViewModel,
+            string path, bool allowSpecialPath, bool isControlPanelPath, Action<IntPtr> ignoreExplorerWindow,
+            bool wasManagedControlPanelLaunchSource = false, bool operationReserved = false)
+        {
+            if (!_pendingAbsorptions.Add(newExplorerHwnd)) return false;
+            bool completed = false;
+            bool reservedHere = false;
+            try
+            {
+                if (targetViewModel == null || targetViewModel.IsDisposed) return false;
+                if (!operationReserved)
+                {
+                    reservedHere = targetViewModel.TryBeginExternalTabOperation();
+                    if (!reservedHere) return false;
+                }
+                completed = await AbsorbExplorerWindowCoreAsync(newExplorerHwnd, targetViewModel, path,
+                    allowSpecialPath, isControlPanelPath, ignoreExplorerWindow, wasManagedControlPanelLaunchSource);
+                return completed;
+            }
+            finally
+            {
+                _pendingAbsorptions.Remove(newExplorerHwnd);
+                if (reservedHere) targetViewModel.EndExternalTabOperation();
+                if (!completed)
+                {
+                    RestoreUnabsorbedWindow(newExplorerHwnd);
+                    if (ignoreExplorerWindow != null) ignoreExplorerWindow(newExplorerHwnd);
+                }
+            }
+        }
+
+        private async Task<bool> AbsorbExplorerWindowCoreAsync(IntPtr newExplorerHwnd, TabBarViewModel targetViewModel,
+            string path, bool allowSpecialPath, bool isControlPanelPath, Action<IntPtr> ignoreExplorerWindow,
+            bool wasManagedControlPanelLaunchSource)
         {
             string normalizedPath = _explorerService.NormalizeKnownPath(path);
             string targetPath = string.IsNullOrEmpty(normalizedPath) ? path : normalizedPath;
@@ -490,20 +532,40 @@ namespace KjTabBar.Services
                 return false;
             }
 
-            if (effectiveAllowSpecialPath &&
-                effectiveControlPanelPath &&
-                TryRebindControlPanelTab(newExplorerHwnd, targetViewModel, targetPath, wasManagedControlPanelLaunchSource))
+            if (effectiveAllowSpecialPath && effectiveControlPanelPath)
+                return TryRebindControlPanelTab(newExplorerHwnd, targetViewModel, targetPath, wasManagedControlPanelLaunchSource);
+
+            long version = targetViewModel.SynchronizationVersion;
+            IntPtr host = targetViewModel.ExplorerHwnd;
+            List<string> selectedItems = _explorerService is ExplorerManager
+                ? await ComThreadService.Instance.InvokeAsync(() => _explorerService.GetSelectedItems(newExplorerHwnd))
+                : _explorerService.GetSelectedItems(newExplorerHwnd);
+            if (!targetViewModel.IsExternalOperationCurrent(version) || targetViewModel.ExplorerHwnd != host) return false;
+            if (!await targetViewModel.InsertTabCoreAsync(targetPath, targetViewModel.Tabs.Count, effectiveAllowSpecialPath)) return false;
+            TabItemViewModel inserted = targetViewModel.ActiveTab;
+            version = targetViewModel.SynchronizationVersion;
+            System.Diagnostics.Stopwatch elapsed = System.Diagnostics.Stopwatch.StartNew();
+            do
             {
-                return true;
-            }
-
-            List<string> selectedItems = _explorerService.GetSelectedItems(newExplorerHwnd);
-            int insertIndex = targetViewModel.Tabs.Count;
-            targetViewModel.InsertTabWithPathAndSelect(targetPath, insertIndex, selectedItems, effectiveAllowSpecialPath);
-
-            FinalizeAbsorbedWindow(newExplorerHwnd, targetViewModel.ExplorerHwnd);
-
-            return true;
+                if (!targetViewModel.IsExternalOperationCurrent(version) || targetViewModel.ExplorerHwnd != host ||
+                    targetViewModel.ActiveTab != inserted || !targetViewModel.Tabs.Contains(inserted)) return false;
+                if (_explorerService is ExplorerManager && (!NativeMethods.IsWindow(host) || !NativeMethods.IsWindow(newExplorerHwnd))) return false;
+                string current = await _explorerService.ReadPathAsync(host);
+                if (!targetViewModel.IsExternalOperationCurrent(version) || targetViewModel.ExplorerHwnd != host) return false;
+                if (targetViewModel.PathEquals(current, targetPath))
+                {
+                    if (selectedItems != null && selectedItems.Count > 0)
+                        await _explorerService.RestoreItemsAsync(host, selectedItems);
+                    if (!targetViewModel.IsExternalOperationCurrent(version) || targetViewModel.ExplorerHwnd != host) return false;
+                    targetViewModel.ClearPendingNavigationTracking();
+                    FinalizeAbsorbedWindow(newExplorerHwnd, host);
+                    return true;
+                }
+                if (elapsed.Elapsed >= AbsorptionTimeout) break;
+                await Task.Delay(100);
+            } while (true);
+            targetViewModel.TimeoutPendingNavigation();
+            return false;
         }
 
         internal void RestoreUnabsorbedWindow(IntPtr hwnd)

@@ -1,6 +1,8 @@
 ﻿using System;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
+using KjTabBar.Services;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -18,6 +20,18 @@ namespace KjTabBar.Views
         private readonly IExplorerService _explorerService;
         private readonly TabBarWindowContextMenuBuilder _contextMenuBuilder;
         private bool _wasRightDrag = false;
+        private IDataObject _dragData;
+        private string[] _dragPaths;
+
+        private string[] GetDragPaths(IDataObject data)
+        {
+            if (!ReferenceEquals(_dragData, data))
+            {
+                _dragData = data;
+                _dragPaths = GetPathsFromDataObject(data);
+            }
+            return _dragPaths;
+        }
 
         public TabBarWindowDragDropHandler(
             TabBarWindow window,
@@ -29,15 +43,31 @@ namespace KjTabBar.Views
             _contextMenuBuilder = contextMenuBuilder ?? throw new ArgumentNullException(nameof(contextMenuBuilder));
         }
 
-        internal static DragDropEffects GetFileDropEffect(DragDropKeyStates keys, DragDropEffects allowed)
+        internal static DragDropEffects GetFileDropEffect(DragDropKeyStates keys, DragDropEffects allowed,
+            string[] sources = null, string destination = null)
         {
-            DragDropEffects requested = (keys & DragDropKeyStates.RightMouseButton) != 0
-                ? DragDropEffects.Copy | DragDropEffects.Move
-                : ((keys & DragDropKeyStates.ShiftKey) != 0 ? DragDropEffects.Move : DragDropEffects.Copy);
+            if ((keys & DragDropKeyStates.RightMouseButton) != 0) return allowed & (DragDropEffects.Copy | DragDropEffects.Move | DragDropEffects.Link);
+            bool control = (keys & DragDropKeyStates.ControlKey) != 0;
+            bool shift = (keys & DragDropKeyStates.ShiftKey) != 0;
+            DragDropEffects requested = control && shift ? DragDropEffects.Link : shift ? DragDropEffects.Move : DragDropEffects.Copy;
+            if (!control && !shift && sources != null && sources.Length > 0 && !string.IsNullOrEmpty(destination))
+            {
+                try
+                {
+                    string root = System.IO.Path.GetPathRoot(destination);
+                    bool sameDrive = !string.IsNullOrEmpty(root);
+                    foreach (string source in sources)
+                        sameDrive &= string.Equals(root, System.IO.Path.GetPathRoot(source), StringComparison.OrdinalIgnoreCase);
+                    if (sameDrive) requested = DragDropEffects.Move;
+                }
+                catch (ArgumentException) { }
+            }
             return requested & allowed;
         }
+
         public void HandleDragEnter(DragEventArgs e)
         {
+            if (!ReferenceEquals(_dragData, e.Data)) { _dragData = null; _dragPaths = null; }
             if ((e.AllowedEffects & DragDropEffects.Link) != 0)
             {
                 e.Effects = DragDropEffects.Link;
@@ -68,21 +98,21 @@ namespace KjTabBar.Views
             {
                 Point position = e.GetPosition(tabItemsControl);
                 DependencyObject hit = VisualTreeHelper.HitTest(tabItemsControl, position)?.VisualHit;
-                bool isOverValidTab = false;
+                string destination = null;
                 while (hit != null && hit != tabItemsControl)
                 {
                     Border b = hit as Border;
                     if (b != null && b.DataContext is TabItemViewModel tabVM && !string.IsNullOrEmpty(tabVM.Path))
                     {
-                        isOverValidTab = true;
+                        destination = tabVM.Path;
                         break;
                     }
                     hit = VisualTreeHelper.GetParent(hit);
                 }
 
-                if (isOverValidTab)
+                if (destination != null)
                 {
-                    e.Effects = GetFileDropEffect(e.KeyStates, e.AllowedEffects);
+                    e.Effects = GetFileDropEffect(e.KeyStates, e.AllowedEffects, GetDragPaths(e.Data), destination);
                 }
                 else
                 {
@@ -104,131 +134,139 @@ namespace KjTabBar.Views
             e.Handled = true;
         }
 
-        public void HandleDrop(ItemsControl tabItemsControl, DragEventArgs e, TabBarViewModel vm, Action onFinished)
+        public async void HandleDrop(ItemsControl tabItemsControl, DragEventArgs e, TabBarViewModel vm, Action onFinished)
         {
             e.Handled = true;
-
-            int dropIndex = GetDropIndex(tabItemsControl, e);
-            if (vm == null) return;
-
-            Point position = e.GetPosition(tabItemsControl);
-            Border targetTabBd = null;
-            DependencyObject hit = VisualTreeHelper.HitTest(tabItemsControl, position)?.VisualHit;
-            while (hit != null && hit != tabItemsControl)
+            try
             {
-                Border b = hit as Border;
-                if (b != null && b.DataContext is TabItemViewModel)
-                {
-                    targetTabBd = b;
-                    break;
-                }
-                hit = VisualTreeHelper.GetParent(hit);
-            }
-            TabItemViewModel targetTab = targetTabBd?.DataContext as TabItemViewModel;
+                int dropIndex = GetDropIndex(tabItemsControl, e);
+                if (vm == null) return;
 
-            if (e.Data.GetDataPresent(typeof(TabItemViewModel)))
-            {
-                TabItemViewModel draggedTab = e.Data.GetData(typeof(TabItemViewModel)) as TabItemViewModel;
-                if (draggedTab != null)
+                Point position = e.GetPosition(tabItemsControl);
+                Border targetTabBd = null;
+                DependencyObject hit = VisualTreeHelper.HitTest(tabItemsControl, position)?.VisualHit;
+                while (hit != null && hit != tabItemsControl)
                 {
-                    int oldIndex = -1;
-                    for (int i = 0; i < vm.Tabs.Count; i++)
+                    Border b = hit as Border;
+                    if (b != null && b.DataContext is TabItemViewModel)
                     {
-                        if (vm.Tabs[i] == draggedTab) { oldIndex = i; break; }
+                        targetTabBd = b;
+                        break;
                     }
-                    if (oldIndex >= 0 && oldIndex != dropIndex)
+                    hit = VisualTreeHelper.GetParent(hit);
+                }
+                TabItemViewModel targetTab = targetTabBd?.DataContext as TabItemViewModel;
+
+                if (e.Data.GetDataPresent(typeof(TabItemViewModel)))
+                {
+                    TabItemViewModel draggedTab = e.Data.GetData(typeof(TabItemViewModel)) as TabItemViewModel;
+                    if (draggedTab != null)
                     {
-                        if (oldIndex < dropIndex)
+                        int oldIndex = -1;
+                        for (int i = 0; i < vm.Tabs.Count; i++)
                         {
-                            dropIndex--;
+                            if (vm.Tabs[i] == draggedTab) { oldIndex = i; break; }
                         }
-                        vm.MoveTab(oldIndex, dropIndex);
-                    }
-                }
-                onFinished?.Invoke();
-            }
-            else
-            {
-                string[] paths = GetPathsFromDataObject(e.Data);
-                if (paths != null && paths.Length > 0)
-                {
-                    if (targetTab != null && !string.IsNullOrEmpty(targetTab.Path))
-                    {
-                        bool isRightDrag = _wasRightDrag;
-                        _wasRightDrag = false;
-                        if (isRightDrag)
+                        if (oldIndex >= 0 && oldIndex != dropIndex)
                         {
-                            int finishState = 0;
-                            Action finishOnce = delegate
+                            if (oldIndex < dropIndex)
                             {
-                                if (Interlocked.Exchange(ref finishState, 1) == 0)
+                                dropIndex--;
+                            }
+                            vm.MoveTab(oldIndex, dropIndex);
+                        }
+                    }
+                    onFinished?.Invoke();
+                }
+                else
+                {
+                    string[] paths = GetDragPaths(e.Data);
+                    if (paths != null && paths.Length > 0)
+                    {
+                        if (targetTab != null && !string.IsNullOrEmpty(targetTab.Path))
+                        {
+                            string destination = targetTab.Path;
+                            bool isRightDrag = _wasRightDrag;
+                            _wasRightDrag = false;
+                            if (isRightDrag)
+                            {
+                                int finishState = 0;
+                                Action finishOnce = delegate
                                 {
-                                    onFinished?.Invoke();
-                                }
-                            };
+                                    if (Interlocked.Exchange(ref finishState, 1) == 0)
+                                    {
+                                        onFinished?.Invoke();
+                                    }
+                                };
 
-                            ContextMenu menu = new ContextMenu();
-                            _contextMenuBuilder.ApplyFluentMenuStyle(menu);
-                            MenuItem copyItem = new MenuItem() { Header = _window.TryFindResource("MenuCopyHere") as string ?? "Copy Here(&C)" };
-                            copyItem.Click += (s, ev) => ExecuteFileOperation(paths, targetTab.Path, NativeMethods.FO_COPY, finishOnce);
-                            copyItem.IsEnabled = (e.AllowedEffects & DragDropEffects.Copy) != 0;
-                            menu.Items.Add(copyItem);
+                                ContextMenu menu = new ContextMenu();
+                                _contextMenuBuilder.ApplyFluentMenuStyle(menu);
+                                MenuItem copyItem = new MenuItem() { Header = _window.TryFindResource("MenuCopyHere") as string ?? "Copy Here(&C)" };
+                                copyItem.Click += (s, ev) => ExecuteFileOperation(paths, destination, NativeMethods.FO_COPY, finishOnce);
+                                copyItem.IsEnabled = (e.AllowedEffects & DragDropEffects.Copy) != 0;
+                                menu.Items.Add(copyItem);
 
-                            MenuItem moveItem = new MenuItem() { Header = _window.TryFindResource("MenuMoveHere") as string ?? "Move Here(&M)" };
-                            moveItem.Click += (s, ev) => ExecuteFileOperation(paths, targetTab.Path, NativeMethods.FO_MOVE, finishOnce);
-                            moveItem.IsEnabled = (e.AllowedEffects & DragDropEffects.Move) != 0;
-                            menu.Items.Add(moveItem);
+                                MenuItem moveItem = new MenuItem() { Header = _window.TryFindResource("MenuMoveHere") as string ?? "Move Here(&M)" };
+                                moveItem.Click += (s, ev) => ExecuteFileOperation(paths, destination, NativeMethods.FO_MOVE, finishOnce);
+                                moveItem.IsEnabled = (e.AllowedEffects & DragDropEffects.Move) != 0;
+                                menu.Items.Add(moveItem);
 
-                            MenuItem shortcutItem = new MenuItem() { Header = _window.TryFindResource("MenuShortcutHere") as string ?? "Create Shortcut Here(&S)" };
-                            shortcutItem.Click += (s, ev) =>
+                                MenuItem shortcutItem = new MenuItem() { Header = _window.TryFindResource("MenuShortcutHere") as string ?? "Create Shortcut Here(&S)" };
+                                shortcutItem.Click += (s, ev) =>
+                                {
+                                    ExecuteLinkOperation(paths, destination, false, finishOnce);
+                                };
+                                shortcutItem.IsEnabled = (e.AllowedEffects & DragDropEffects.Link) != 0;
+                                menu.Items.Add(shortcutItem);
+
+                                MenuItem symlinkItem = new MenuItem() { Header = _window.TryFindResource("MenuSymlinkHere") as string ?? "Create Symbolic Link Here(&L)" };
+                                symlinkItem.Click += (s, ev) =>
+                                {
+                                    ExecuteLinkOperation(paths, destination, true, finishOnce);
+                                };
+                                symlinkItem.IsEnabled = (e.AllowedEffects & DragDropEffects.Link) != 0;
+                                menu.Items.Add(symlinkItem);
+
+                                menu.Items.Add(new Separator());
+
+                                MenuItem cancelItem = new MenuItem() { Header = _window.TryFindResource("SettingsButtonCancel") as string ?? "Cancel" };
+                                cancelItem.Click += (s, ev) => finishOnce();
+                                menu.Items.Add(cancelItem);
+
+                                menu.Closed += (s, ev) => finishOnce();
+
+                                menu.PlacementTarget = targetTabBd;
+                                menu.IsOpen = true;
+                            }
+                            else
                             {
-                                _explorerService.CreateShortcuts(paths, targetTab.Path, new WindowInteropHelper(_window).Handle);
-                                finishOnce();
-                            };
-                            shortcutItem.IsEnabled = (e.AllowedEffects & DragDropEffects.Link) != 0;
-                            menu.Items.Add(shortcutItem);
-
-                            MenuItem symlinkItem = new MenuItem() { Header = _window.TryFindResource("MenuSymlinkHere") as string ?? "Create Symbolic Link Here(&L)" };
-                            symlinkItem.Click += (s, ev) =>
-                            {
-                                _explorerService.CreateSymbolicLinks(paths, targetTab.Path, new WindowInteropHelper(_window).Handle);
-                                finishOnce();
-                            };
-                            symlinkItem.IsEnabled = (e.AllowedEffects & DragDropEffects.Link) != 0;
-                            menu.Items.Add(symlinkItem);
-
-                            menu.Items.Add(new Separator());
-
-                            MenuItem cancelItem = new MenuItem() { Header = _window.TryFindResource("SettingsButtonCancel") as string ?? "Cancel" };
-                            cancelItem.Click += (s, ev) => finishOnce();
-                            menu.Items.Add(cancelItem);
-
-                            menu.Closed += (s, ev) => finishOnce();
-
-                            menu.PlacementTarget = targetTabBd;
-                            menu.IsOpen = true;
+                                DragDropEffects effect = GetFileDropEffect(e.KeyStates, e.AllowedEffects, paths, destination);
+                                e.Effects = effect;
+                                if (effect == DragDropEffects.Copy || effect == DragDropEffects.Move)
+                                    ExecuteFileOperation(paths, destination,
+                                        effect == DragDropEffects.Move ? NativeMethods.FO_MOVE : NativeMethods.FO_COPY, onFinished);
+                                else if (effect == DragDropEffects.Link) ExecuteLinkOperation(paths, destination, false, onFinished);
+                                else onFinished?.Invoke();
+                            }
                         }
                         else
                         {
-                            DragDropEffects effect = GetFileDropEffect(e.KeyStates, e.AllowedEffects);
-                            e.Effects = effect;
-                            if (effect == DragDropEffects.Copy || effect == DragDropEffects.Move)
-                                ExecuteFileOperation(paths, targetTab.Path,
-                                    effect == DragDropEffects.Move ? NativeMethods.FO_MOVE : NativeMethods.FO_COPY, onFinished);
-                            else onFinished?.Invoke();
+                            await TryInsertAsTabsAsync(vm, dropIndex, paths);
+                            onFinished?.Invoke();
                         }
                     }
                     else
                     {
-                        TryInsertAsTabs(vm, dropIndex, paths);
                         onFinished?.Invoke();
                     }
                 }
-                else
-                {
-                    onFinished?.Invoke();
-                }
             }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("TabBarWindowDragDropHandler", "Drop failed.", ex);
+                onFinished?.Invoke();
+            }
+            finally { _dragData = null; _dragPaths = null; }
         }
 
         private int GetDropIndex(ItemsControl tabItemsControl, DragEventArgs e)
@@ -291,16 +329,12 @@ namespace KjTabBar.Views
                 {
                     AppLogger.LogError("TabBarWindowDragDropHandler", "Failed to parse Shell IDList Array from data object.", ex);
                 }
-                finally
-                {
-                    if (ms != null) ms.Dispose();
-                }
             }
 
             return null;
         }
 
-        private bool IsShellNamespacePath(string path)
+        private static bool IsShellNamespacePath(string path)
         {
             if (string.IsNullOrEmpty(path)) return false;
 
@@ -312,28 +346,62 @@ namespace KjTabBar.Views
             return false;
         }
 
-        private bool TryInsertAsTabs(TabBarViewModel vm, int dropIndex, string[] paths)
+        internal Task<bool> TryInsertAsTabsAsync(TabBarViewModel vm, int dropIndex, string[] paths)
         {
-            if (vm == null || paths == null || paths.Length == 0) return false;
+            ExplorerHostSwitchCoordinator coordinator = _window.ExplorerHostSwitchCoordinator;
+            return InsertDroppedPathsAsync(vm, dropIndex, paths, _explorerService,
+                coordinator != null ? new Func<string, Task<bool>>(p => coordinator.PrepareForPathAsync(vm, p, vm.IsPreparedTabOperationCurrent)) : null,
+                coordinator != null ? new Action(coordinator.CompletePendingReveal) : null);
+        }
 
+        internal static async Task<bool> InsertDroppedPathsAsync(TabBarViewModel vm, int dropIndex, string[] paths,
+            IExplorerService explorer, Func<string, Task<bool>> prepare, Action reveal)
+        {
+            if (vm == null || vm.IsDisposed || vm.IsTabOperationPending || paths == null || paths.Length == 0) return false;
             bool inserted = false;
-            for (int i = 0; i < paths.Length; i++)
+            foreach (string source in paths)
             {
-                string targetPath = _explorerService.ResolveShortcutTarget(paths[i]);
-                if (string.IsNullOrEmpty(targetPath)) continue;
-
-                bool isDirectoryPath = Directory.Exists(targetPath);
+                long version = vm.SynchronizationVersion;
+                string targetPath = await ComThreadService.Instance.InvokeAsync(() => explorer.ResolveShortcutTarget(source));
                 bool isShellPath = IsShellNamespacePath(targetPath);
-                if (!isDirectoryPath && !isShellPath) continue;
-
-                if (vm.TryInsertTabWithPath(targetPath, dropIndex, isShellPath))
-                {
-                    dropIndex++;
-                    inserted = true;
-                }
+                bool isDirectoryPath = !isShellPath && await Task.Run(() => Directory.Exists(targetPath));
+                if (!vm.IsSynchronizationCurrent(version)) return inserted;
+                if (string.IsNullOrEmpty(targetPath) || (!isDirectoryPath && !isShellPath)) continue;
+                int before = vm.Tabs.Count;
+                await vm.InsertTabWithPathAsync(targetPath, dropIndex, prepare, reveal);
+                if (vm.IsDisposed || vm.LastNavigationFailed || vm.Tabs.Count == before) return inserted;
+                dropIndex++;
+                inserted = true;
             }
-
             return inserted;
+        }
+
+        private void ExecuteLinkOperation(string[] sources, string destination, bool symbolic, Action onFinished)
+        {
+            IntPtr owner = new WindowInteropHelper(_window).Handle;
+            IDisposable lease = FileOperationTracker.Shared.TryBegin();
+            if (lease == null) { onFinished?.Invoke(); return; }
+            Thread worker = new Thread(delegate ()
+            {
+                try
+                {
+                    if (symbolic) _explorerService.CreateSymbolicLinks(sources, destination, owner);
+                    else _explorerService.CreateShortcuts(sources, destination, owner);
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.LogError("TabBarWindowDragDropHandler", "Link creation failed.", ex);
+                }
+                finally
+                {
+                    lease.Dispose();
+                    PostFileOperationResult(() => onFinished?.Invoke());
+                }
+            });
+            worker.SetApartmentState(ApartmentState.STA);
+            worker.IsBackground = false;
+            try { worker.Start(); }
+            catch { lease.Dispose(); throw; }
         }
 
         private void PostFileOperationResult(Action callback)

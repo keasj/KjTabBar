@@ -3,6 +3,8 @@ using KjTabBar.Helpers;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Interop;
@@ -15,6 +17,11 @@ namespace KjTabBar.ViewModels
         private static readonly object IconCacheSync = new object();
         private static readonly Dictionary<string, ImageSource> IconCache = new Dictionary<string, ImageSource>(StringComparer.OrdinalIgnoreCase);
         private static readonly Queue<string> IconCacheOrder = new Queue<string>();
+        private static readonly Dictionary<string, Task<ImageSource>> PendingIcons = new Dictionary<string, Task<ImageSource>>(StringComparer.OrdinalIgnoreCase);
+        private static readonly SemaphoreSlim IconLoadGate = new SemaphoreSlim(1, 1);
+        private static readonly ImageSource DefaultIcon = CreateDefaultIcon();
+        private int _iconGeneration;
+        private bool _iconUpdatesStopped;
         private string _title;
         private Models.IExplorerService _explorerService;
         private string _path;
@@ -107,10 +114,26 @@ namespace KjTabBar.ViewModels
             }
         }
 
+        private static ImageSource CreateDefaultIcon()
+        {
+            Geometry shape = Geometry.Parse("M 1,4 L 6,4 8,6 15,6 15,14 1,14 Z");
+            DrawingImage image = new DrawingImage(new GeometryDrawing(Brushes.Goldenrod, null, shape));
+            image.Freeze();
+            return image;
+        }
+
+        internal void StopIconUpdates()
+        {
+            _iconUpdatesStopped = true;
+            _iconGeneration++;
+        }
+
         private async void UpdateIconSource()
         {
             string path = _path;
-            Stopwatch stopwatch = Stopwatch.StartNew();
+            int generation = ++_iconGeneration;
+            if (_iconUpdatesStopped) return;
+            IconSource = DefaultIcon;
             try
             {
                 ExplorerManager manager = _explorerService as ExplorerManager;
@@ -118,34 +141,74 @@ namespace KjTabBar.ViewModels
                 if (manager != null && manager.UsesShellWorker)
                 {
                     if (!TryGetCachedIcon(path ?? string.Empty, out icon))
-                    {
-                        icon = await Services.ComThreadService.Instance.InvokeAsync(delegate
-                        {
-                            byte[] bytes = manager.GetIconBytes(path);
-                            if (bytes.Length == 0) return null;
-                            using (System.IO.MemoryStream stream = new System.IO.MemoryStream(bytes, false))
-                            {
-                                BitmapFrame frame = BitmapFrame.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
-                                frame.Freeze();
-                                return (ImageSource)frame;
-                            }
-                        });
-                        if (icon != null) AddCachedIcon(path, icon);
-                    }
+                        icon = await GetSharedIconAsync(path, manager);
                 }
-                else
-                {
-                    icon = LoadIcon(path, _explorerService);
-                }
-                if (string.Equals(_path, path, StringComparison.OrdinalIgnoreCase)) IconSource = icon;
+                else icon = LoadIcon(path, _explorerService);
+                if (!_iconUpdatesStopped && generation == _iconGeneration && icon != null) IconSource = icon;
             }
             catch (Exception ex)
             {
                 AppLogger.LogErrorThrottled("TabItemViewModel", "IconLookup", "Failed to load a tab icon.", ex, TimeSpan.FromMinutes(1));
             }
+        }
+
+        private static Task<ImageSource> GetSharedIconAsync(string path, ExplorerManager manager)
+        {
+            string key = path ?? string.Empty;
+            lock (IconCacheSync)
+            {
+                Task<ImageSource> existing;
+                if (PendingIcons.TryGetValue(key, out existing)) return existing;
+                TaskCompletionSource<ImageSource> completion = new TaskCompletionSource<ImageSource>(TaskCreationOptions.RunContinuationsAsynchronously);
+                PendingIcons.Add(key, completion.Task);
+                LoadSharedIconAsync(key, manager, completion);
+                return completion.Task;
+            }
+        }
+
+        private static async void LoadSharedIconAsync(string path, ExplorerManager manager, TaskCompletionSource<ImageSource> completion)
+        {
+            ImageSource icon = null;
+            await IconLoadGate.WaitAsync();
+            try
+            {
+                if (!TryGetCachedIcon(path, out icon))
+                {
+                    for (int attempt = 0; attempt < 3; attempt++)
+                    {
+                        try
+                        {
+                            icon = await Services.ComThreadService.Instance.InvokeAsync(delegate
+                            {
+                                byte[] bytes = manager.GetIconBytes(path);
+                                if (bytes.Length == 0) return null;
+                                using (System.IO.MemoryStream stream = new System.IO.MemoryStream(bytes, false))
+                                {
+                                    BitmapFrame frame = BitmapFrame.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+                                    frame.Freeze();
+                                    return (ImageSource)frame;
+                                }
+                            });
+                            if (icon != null) AddCachedIcon(path, icon);
+                            break;
+                        }
+                        catch (Exception ex)
+                        {
+                            if (attempt == 2 || ex is ObjectDisposedException)
+                            {
+                                AppLogger.LogErrorThrottled("TabItemViewModel", "IconLookup", "Failed to load a tab icon.", ex, TimeSpan.FromMinutes(1));
+                                break;
+                            }
+                            await Task.Delay(200 * (attempt + 1));
+                        }
+                    }
+                }
+            }
             finally
             {
-                AppLogger.LogSlowOperation("TabItemViewModel", "TabItemViewModel.UpdateIconSource", "UpdateIconSource", stopwatch.Elapsed, TimeSpan.FromMilliseconds(100), TimeSpan.FromMinutes(1));
+                IconLoadGate.Release();
+                lock (IconCacheSync) PendingIcons.Remove(path);
+                completion.TrySetResult(icon);
             }
         }
 

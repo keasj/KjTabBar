@@ -473,18 +473,21 @@ namespace KjTabBar
                             string path = _explorerService.GetCurrentPath(hwnd);
                             if (!string.IsNullOrEmpty(path))
                             {
-                                Dispatcher.BeginInvoke(new Action(() =>
+                                Dispatcher.BeginInvoke(new Action(async () =>
                                 {
-                                    bool isControlPanel = _explorerService.IsControlPanelPath(path);
-                                    _bootstrapResult.Services.ExplorerWindowInteractionService.AbsorbExplorerWindow(
-                                        hwnd,
-                                        activeTabBarVM,
-                                        path,
-                                        allowSpecialPath: true,
-                                        isControlPanelPath: isControlPanel,
-                                        wasManagedControlPanelLaunchSource: false,
-                                        ignoreExplorerWindow: null
-                                    );
+                                    try
+                                    {
+                                        bool isControlPanel = _explorerService.IsControlPanelPath(path);
+                                        await _bootstrapResult.Services.ExplorerWindowProcessingCoordinator.ApplyOutcomeAsync(hwnd, 0,
+                                            new ExplorerWindowEvaluationResult
+                                            {
+                                                Action = AbsorptionAction.Absorb,
+                                                ResolvedPath = path,
+                                                AllowSpecialPath = true,
+                                                IsControlPanelPath = isControlPanel
+                                            }, activeTabBarVM, null);
+                                    }
+                                    catch (Exception ex) { AppLogger.LogError("App", "Manual absorption failed.", ex); }
                                 }));
                             }
                         });

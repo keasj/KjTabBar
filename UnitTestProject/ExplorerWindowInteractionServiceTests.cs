@@ -508,6 +508,9 @@ namespace UnitTestProject
         public void AbsorbExplorerWindow_InsertsTabAndMarksAbsorbed()
         {
             MockExplorerService explorerService = new MockExplorerService();
+            string current = @"C:\MockPath";
+            explorerService.GetCurrentPathFunc = h => current;
+            explorerService.NavigateFunc = (h, path) => { current = path; return true; };
             ExplorerWindowTrackingState trackingState = new ExplorerWindowTrackingState();
             IntPtr foregroundHwnd = IntPtr.Zero;
             IntPtr closedHwnd = IntPtr.Zero;
@@ -869,9 +872,9 @@ namespace UnitTestProject
 
             bool absorbed = service.AbsorbExplorerWindow((IntPtr)201, targetViewModel, explorerService.PowerOptionsPath, true, true, delegate (IntPtr hwnd) { });
 
-            Assert.IsTrue(absorbed);
-            Assert.AreEqual(2, targetViewModel.Tabs.Count);
-            Assert.AreEqual(explorerService.PowerOptionsPath, targetViewModel.ActiveTab.Path);
+            Assert.IsFalse(absorbed);
+            Assert.AreEqual(1, targetViewModel.Tabs.Count);
+            Assert.AreEqual(@"C:\MockPath", targetViewModel.ActiveTab.Path);
         }
 
         [TestMethod]

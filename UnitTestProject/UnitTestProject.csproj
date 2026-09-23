@@ -71,6 +71,7 @@
     <Compile Include="UnitTest1.cs" />
     <Compile Include="Release130RegressionTests.cs" />
     <Compile Include="Release136RegressionTests.cs" />
+    <Compile Include="Release137RegressionTests.cs" />
     <Compile Include="ShellWorkerTests.cs" />
     <Compile Include="ExplorerWindowDecisionLogicTests.cs" />
     <Compile Include="MockUserSettings.cs" />

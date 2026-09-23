@@ -118,13 +118,13 @@ For final validation, test the executable extracted from each generated MSI. Bui
 Run the packaging script after both setup builds succeed:
 
 ```powershell
-.\tools\Prepare-Release.ps1 -Version '1.3.6.0'
+.\tools\Prepare-Release.ps1 -Version '1.3.7.0'
 ```
 
-Output: `artifacts/releases/v1.3.6.0/`, outside the setup build output directories.
+Output: `artifacts/releases/v1.3.7.0/`, outside the setup build output directories.
 
-- `ja/setup.exe` + `ja/Setup.msi`, and the corresponding `KjTabBar-v1.3.6.0-ja.zip`.
-- `en/setup.exe` + `en/Setup.msi`, and the corresponding `KjTabBar-v1.3.6.0-en.zip`.
+- `ja/setup.exe` + `ja/Setup.msi`, and the corresponding `KjTabBar-v1.3.7.0-ja.zip`.
+- `en/setup.exe` + `en/Setup.msi`, and the corresponding `KjTabBar-v1.3.7.0-en.zip`.
 - `KjTabBar.exe`, its configuration file, LICENSE, and SHA256SUMS.txt.
 
 Keep the launcher and MSI together with these exact names. The launcher embeds `Setup.msi`; renaming only the MSI breaks that reference. Distribute the ZIP and extract it before running setup.exe. Do not store archived release assets under Setup/Release or Setup/Release_en because setup builds can replace those directories.
@@ -160,10 +160,10 @@ Create the release notes from GitHub automatically:
 Only after publication is authorized, upload the validated packages from the stable release directory. Example:
 
 ```powershell
-& 'C:\Program Files\GitHub CLI\gh.exe' release upload v1.3.6.0 `
-  '.\artifacts\releases\v1.3.6.0\KjTabBar-v1.3.6.0-ja.zip' `
-  '.\artifacts\releases\v1.3.6.0\KjTabBar-v1.3.6.0-en.zip' `
-  '.\artifacts\releases\v1.3.6.0\SHA256SUMS.txt'
+& 'C:\Program Files\GitHub CLI\gh.exe' release upload v1.3.7.0 `
+  '.\artifacts\releases\v1.3.7.0\KjTabBar-v1.3.7.0-ja.zip' `
+  '.\artifacts\releases\v1.3.7.0\KjTabBar-v1.3.7.0-en.zip' `
+  '.\artifacts\releases\v1.3.7.0\SHA256SUMS.txt'
 ```
 
 ## 9. Verify the Built MSI Upgrade Metadata
@@ -198,8 +198,8 @@ Confirm the release contents:
 
 The asset list should contain:
 
-- `KjTabBar-v1.3.6.0-ja.zip`
-- `KjTabBar-v1.3.6.0-en.zip`
+- `KjTabBar-v1.3.7.0-ja.zip`
+- `KjTabBar-v1.3.7.0-en.zip`
 - `SHA256SUMS.txt`
 
 ## 11. Notes for Codex Sessions

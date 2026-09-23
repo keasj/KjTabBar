@@ -135,7 +135,8 @@ namespace KjTabBar.Services
                         shouldUpdateTitles = true;
                     }
                     if (_viewModel.NavigationTracker.PendingSelectedItems != null)
-                        _explorerService.SelectItems(_viewModel.ExplorerHwnd, _viewModel.NavigationTracker.PendingSelectedItems);
+                        await _explorerService.RestoreItemsAsync(_viewModel.ExplorerHwnd, _viewModel.NavigationTracker.PendingSelectedItems);
+                    if (!_viewModel.IsSynchronizationCurrent(version)) return;
                     _viewModel.ClearPendingNavigationTracking();
                     return;
                 }
@@ -163,7 +164,8 @@ namespace KjTabBar.Services
                 {
                     if (_viewModel.NavigationTracker.PendingSelectedItems != null)
                     {
-                        _explorerService.SelectItems(_viewModel.ExplorerHwnd, _viewModel.NavigationTracker.PendingSelectedItems);
+                        await _explorerService.RestoreItemsAsync(_viewModel.ExplorerHwnd, _viewModel.NavigationTracker.PendingSelectedItems);
+                        if (!_viewModel.IsSynchronizationCurrent(version)) return;
                     }
                     _viewModel.ClearPendingNavigationTracking();
                     return;
@@ -192,7 +194,8 @@ namespace KjTabBar.Services
                     _viewModel.ActiveTab.Title = _viewModel.ActiveTab.BaseTitle;
                     if (_viewModel.NavigationTracker.PendingSelectedItems != null)
                     {
-                        _explorerService.SelectItems(_viewModel.ExplorerHwnd, _viewModel.NavigationTracker.PendingSelectedItems);
+                        await _explorerService.RestoreItemsAsync(_viewModel.ExplorerHwnd, _viewModel.NavigationTracker.PendingSelectedItems);
+                        if (!_viewModel.IsSynchronizationCurrent(version)) return;
                     }
                     _viewModel.ClearPendingNavigationTracking();
                     shouldUpdateTitles = true;

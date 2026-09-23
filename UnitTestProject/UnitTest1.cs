@@ -138,6 +138,7 @@ namespace UnitTestProject
             }
             finally
             {
+                File.Delete(Path.Combine(Path.GetDirectoryName(tempFile), Path.GetFileNameWithoutExtension(tempFile) + ".snapshot" + Path.GetExtension(tempFile)));
                 if (File.Exists(tempFile))
                 {
                     File.Delete(tempFile);
