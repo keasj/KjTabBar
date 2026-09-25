@@ -27,7 +27,7 @@ namespace UnitTestProject
         }
 
         [TestMethod]
-        public void PcInvocationFromDifferentFolder_RestoresMaximizedWithoutDuplicateTab()
+        public void PcInvocationFromDifferentFolder_RestoresMaximizedAndAddsDestination()
         {
             VerifyPcRestore(false, false, 1);
         }
@@ -71,7 +71,7 @@ namespace UnitTestProject
                 completion.SetResult(pc);
                 pending.GetAwaiter().GetResult();
                 Assert.AreEqual(expectedRestores, restores);
-                Assert.AreEqual(count + (alreadyOnPc && !cancel ? 1 : 0), target.Tabs.Count);
+                Assert.AreEqual(count + (!alreadyOnPc && !cancel ? 1 : 0), target.Tabs.Count);
             }
         }
 
@@ -85,7 +85,7 @@ namespace UnitTestProject
         }
 
         [TestMethod]
-        public void ReusedMinimizedMaximizedHost_RestoresCapturedStateBeforeAddingTab()
+        public void ReusedMinimizedMaximizedHost_RestoresCapturedStateWithoutAddingTab()
         {
             VerifyCapturedRestoreState(true, false, 1);
         }
@@ -126,12 +126,12 @@ namespace UnitTestProject
                 pending.GetAwaiter().GetResult();
                 service.OnForegroundAsync((IntPtr)100).GetAwaiter().GetResult();
                 Assert.AreEqual(expectedRestores, restores);
-                Assert.AreEqual(count + (cancel ? 0 : 1), target.Tabs.Count);
+                Assert.AreEqual(count, target.Tabs.Count);
             }
         }
 
         [TestMethod]
-        public void ExplicitDesktopInvocation_ReusedVisibleHost_AddsExactlyOneTab()
+        public void ExplicitDesktopInvocation_ReusedVisibleHost_KeepsActiveTab()
         {
             TabBarViewModel target = CreateTarget();
             int count = target.Tabs.Count;
@@ -140,11 +140,59 @@ namespace UnitTestProject
                 service.CaptureInvocation((IntPtr)10, -4, 20);
                 service.OnForegroundAsync((IntPtr)100).GetAwaiter().GetResult();
                 service.OnForegroundAsync((IntPtr)100).GetAwaiter().GetResult();
-                Assert.AreEqual(count + 1, target.Tabs.Count);
+                Assert.AreEqual(count, target.Tabs.Count);
                 Assert.AreEqual(Assets, target.ActiveTab.Path);
             }
         }
 
+        [TestMethod]
+        public void ReusedHost_SelectsExistingSpecialTabAndPreservesOriginalFolder()
+        {
+            string[] paths = new string[] { "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}",
+                "::{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}", "::{645FF040-5081-101B-9F08-00AA002F954E}",
+                "::{26EE0668-A00A-44D7-9371-BEB064C98683}" };
+            foreach (string path in paths)
+            {
+                using (TabBarViewModel target = CreateTarget())
+                {
+                    TabItemViewModel original = target.ActiveTab;
+                    target.InsertTabWithPath(path, 1, true);
+                    TabItemViewModel destination = target.ActiveTab;
+                    target.SelectTab(original);
+                    TaskCompletionSource<string> resolved = new TaskCompletionSource<string>();
+                    using (DesktopRepeatedLaunchService service = CreateService(target, (s, c, h) => resolved.Task))
+                    {
+                        service.CaptureInvocation((IntPtr)10, -4, 20);
+                        Task operation = service.OnForegroundAsync((IntPtr)100);
+                        original.Path = path; // Shell synchronization arrived before invocation resolution.
+                        resolved.SetResult(path);
+                        operation.GetAwaiter().GetResult();
+                        Assert.AreEqual(2, target.Tabs.Count, path);
+                        Assert.AreSame(destination, target.ActiveTab, path);
+                        Assert.AreEqual(Assets, original.Path, path);
+                    }
+                }
+            }
+        }
+
+        [TestMethod]
+        public void ReusedSpecialHost_KeepsActiveDuplicate()
+        {
+            string path = "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}";
+            using (TabBarViewModel target = CreateTarget())
+            {
+                target.InsertTabWithPath(path, 1, true);
+                target.DuplicateTab(target.ActiveTab);
+                TabItemViewModel active = target.ActiveTab;
+                using (DesktopRepeatedLaunchService service = CreateService(target, (s, c, h) => Task.FromResult(path)))
+                {
+                    service.CaptureInvocation((IntPtr)10, -4, 20);
+                    service.OnForegroundAsync((IntPtr)100).GetAwaiter().GetResult();
+                    Assert.AreEqual(3, target.Tabs.Count);
+                    Assert.AreSame(active, target.ActiveTab);
+                }
+            }
+        }
         [TestMethod]
         public void ForegroundWithoutInvocation_DoesNotDuplicate()
         {
@@ -160,7 +208,7 @@ namespace UnitTestProject
         }
 
         [TestMethod]
-        public void DifferentShortcutTarget_DoesNotDuplicateCurrentTab()
+        public void DifferentShortcutTarget_AddsDestinationWithoutOverwritingCurrentTab()
         {
             TabBarViewModel target = CreateTarget();
             int count = target.Tabs.Count;
@@ -168,7 +216,9 @@ namespace UnitTestProject
             {
                 service.CaptureInvocation((IntPtr)10, -4, 20);
                 service.OnForegroundAsync((IntPtr)100).GetAwaiter().GetResult();
-                Assert.AreEqual(count, target.Tabs.Count);
+                Assert.AreEqual(count + 1, target.Tabs.Count);
+                Assert.AreEqual(Assets, target.Tabs[0].Path);
+                Assert.AreEqual(@"C:\Other", target.ActiveTab.Path);
             }
         }
 

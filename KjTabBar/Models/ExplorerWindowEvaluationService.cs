@@ -23,6 +23,7 @@ namespace KjTabBar.Models
         public bool AllowSpecialPath { get; set; }
         public bool IsControlPanelPath { get; set; }
         public bool UseResolvedPathOnCreate { get; set; }
+        public bool ReuseExistingTab { get; set; }
         public bool WasManagedControlPanelLaunchSource { get; set; }
     }
 
@@ -194,6 +195,13 @@ namespace KjTabBar.Models
                 UseResolvedPathOnCreate =
                     action == AbsorptionAction.CreateNewTabBar &&
                     shouldUseResolvedPathOnCreate,
+                // Hidden-pending preserves evidence for delayed desktop Control Panel launches.
+                ReuseExistingTab = !input.WasManagedControlPanelLaunchSource &&
+                    (action == AbsorptionAction.Absorb ||
+                     (action == AbsorptionAction.CreateNewTabBar && shouldUseResolvedPathOnCreate)) &&
+                    (input.IsDesktopCandidate || input.IsControlPanelTabLaunchCandidate ||
+                     (action == AbsorptionAction.Absorb && resolvedIsControlPanelPath && input.IsHiddenPending &&
+                      _desktopPathClassifier.IsDesktopShortcutTargetPath(resolvedPath))),
                 WasManagedControlPanelLaunchSource = input.WasManagedControlPanelLaunchSource
             };
         }

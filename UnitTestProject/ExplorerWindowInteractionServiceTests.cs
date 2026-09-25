@@ -12,6 +12,104 @@ namespace UnitTestProject
     public class ExplorerWindowInteractionServiceTests
     {
         [TestMethod]
+        public void DesktopLaunch_ReusesActiveOrLeftmostMatch_AndDragStillAdds()
+        {
+            string[] paths = new string[]
+            {
+                @"C:\Work",
+                "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}",
+                "::{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}",
+                "::{645FF040-5081-101B-9F08-00AA002F954E}",
+                "AllControlPanelPath", "PowerOptionsPath", "ProgramsAndFeaturesPath"
+            };
+            foreach (string path in paths)
+            {
+                MockExplorerService explorer = new MockExplorerService();
+                explorer.IsControlPanelPathFunc = p => p == explorer.AllControlPanelPath ||
+                    p == explorer.PowerOptionsPath || p == explorer.ProgramsAndFeaturesPath;
+                string current = @"C:\Other";
+                explorer.GetCurrentPathFunc = h => current;
+                explorer.NavigateFunc = (h, p) => { current = p; return true; };
+                ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+                int foreground = 0;
+                ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                    explorer, tracking, TestTabPersistenceFactory.Create(), h => "",
+                    delegate { }, h => foreground++, delegate { }, () => null, delegate { });
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, current))
+                {
+                    vm.InsertTabWithPath(path, vm.Tabs.Count, true);
+                    TabItemViewModel first = vm.ActiveTab;
+                    vm.DuplicateTab(first);
+                    TabItemViewModel second = vm.ActiveTab;
+                    Assert.AreEqual(3, vm.Tabs.Count, "Explicit duplication must create a tab.");
+                    bool controlPanel = explorer.IsControlPanelPath(path);
+                    Assert.IsTrue(service.AbsorbExplorerWindow((IntPtr)200, vm, path, true, controlPanel, null, reuseExistingTab: true), path);
+                    Assert.AreSame(second, vm.ActiveTab, "Prefer the active duplicate: " + path);
+                    Assert.AreEqual(3, vm.Tabs.Count);
+                    vm.SelectTab(vm.Tabs[0]);
+                    Assert.IsTrue(service.AbsorbExplorerWindow((IntPtr)300, vm, path, true, controlPanel, null, reuseExistingTab: true), path);
+                    Assert.AreSame(first, vm.ActiveTab, "Otherwise select the leftmost match: " + path);
+                    Assert.AreEqual(3, vm.Tabs.Count);
+                    Assert.IsTrue(service.AbsorbExplorerWindow((IntPtr)400, vm, path, true, controlPanel, null), path);
+                    Assert.AreEqual(4, vm.Tabs.Count, "Dragging must add a duplicate: " + path);
+                    Assert.AreEqual(3, foreground);
+                }
+            }
+        }
+
+        [TestMethod]
+        public void DesktopControlPanel_DifferentItemIsNotReplaced_AndFailedRebindKeepsTabs()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            explorer.IsControlPanelPathFunc = p => p == explorer.AllControlPanelPath || p == explorer.PowerOptionsPath;
+            bool canRebind = true;
+            ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                explorer, new ExplorerWindowTrackingState(), TestTabPersistenceFactory.Create(),
+                (vm, hwnd) => { if (!canRebind) return false; vm.SetExplorerHwnd(hwnd); return true; });
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.AllControlPanelPath))
+            {
+                TabItemViewModel root = vm.ActiveTab;
+                Assert.IsTrue(service.AbsorbExplorerWindow((IntPtr)200, vm, explorer.PowerOptionsPath, true, true, null, reuseExistingTab: true));
+                Assert.AreEqual(2, vm.Tabs.Count);
+                Assert.AreEqual(explorer.AllControlPanelPath, root.Path);
+                TabItemViewModel power = vm.ActiveTab;
+                canRebind = false;
+                Assert.IsFalse(service.AbsorbExplorerWindow((IntPtr)300, vm, explorer.AllControlPanelPath, true, true, null, reuseExistingTab: true));
+                Assert.AreEqual(2, vm.Tabs.Count);
+                Assert.AreSame(power, vm.ActiveTab);
+                Assert.AreEqual(explorer.AllControlPanelPath, root.Path);
+            }
+        }
+
+        [TestMethod]
+        public void DesktopLaunch_RestoredTabsReuseMatchingFolderOrSpecialItem()
+        {
+            string[] paths = new string[] { @"C:\Work", "::{679F85CB-0220-4080-B29B-5540CC05AAB6}", "AllControlPanelPath",
+                "PowerOptionsPath", "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}",
+                "::{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}", "::{645FF040-5081-101B-9F08-00AA002F954E}" };
+            foreach (string path in paths)
+            {
+                string file = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".tabs.txt");
+                try
+                {
+                    ProtectedTextStorage.SaveLines(file, new string[] { @"C:\Other", path, path });
+                    MockExplorerService explorer = new MockExplorerService();
+                    explorer.IsControlPanelPathFunc = p => p == explorer.AllControlPanelPath || p == explorer.PowerOptionsPath;
+                    explorer.GetCurrentPathFunc = h => path;
+                    explorer.HomeFolderPath = "::{679F85CB-0220-4080-B29B-5540CC05AAB6}";
+                    ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                        explorer, new ExplorerWindowTrackingState(), new TabPersistenceService(file));
+                    using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, path))
+                    {
+                        service.InitializeTabsForNewWindow(vm, path, true, true);
+                        Assert.AreEqual(3, vm.Tabs.Count, path);
+                        Assert.AreSame(vm.Tabs[1], vm.ActiveTab, path);
+                    }
+                }
+                finally { if (File.Exists(file)) File.Delete(file); }
+            }
+        }
+        [TestMethod]
         public void SuccessiveControlPanelShortcuts_KeepOriginalFolderHost()
         {
             PowerOptionsExplorerService explorer = new PowerOptionsExplorerService();

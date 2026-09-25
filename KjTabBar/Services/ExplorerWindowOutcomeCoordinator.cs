@@ -58,7 +58,7 @@ namespace KjTabBar.Services
                 try
                 {
                     await _interactionService.AbsorbExplorerWindowAsync(hwnd, target, result.ResolvedPath,
-                        result.AllowSpecialPath, result.IsControlPanelPath, _ignoreExplorerWindow, result.WasManagedControlPanelLaunchSource, operationReserved);
+                        result.AllowSpecialPath, result.IsControlPanelPath, _ignoreExplorerWindow, result.WasManagedControlPanelLaunchSource, operationReserved, result.ReuseExistingTab);
                 }
                 catch (Exception ex) { _logError("App", "AbsorbExplorerWindow failed.", ex); }
                 return;
@@ -115,7 +115,7 @@ namespace KjTabBar.Services
                                 targetToUse != null ? targetToUse.ExplorerHwnd.ToString() : string.Empty,
                                 targetToUse != null && targetToUse.ActiveTab != null ? targetToUse.ActiveTab.Path ?? string.Empty : string.Empty));
                     }
-                    TryAbsorbExplorerWindow(hwnd, targetToUse, result.ResolvedPath, result.AllowSpecialPath, result.IsControlPanelPath, result.WasManagedControlPanelLaunchSource);
+                    TryAbsorbExplorerWindow(hwnd, targetToUse, result.ResolvedPath, result.AllowSpecialPath, result.IsControlPanelPath, result.WasManagedControlPanelLaunchSource, result.ReuseExistingTab);
                     break;
 
                 case AbsorptionAction.CreateNewTabBar:
@@ -143,7 +143,7 @@ namespace KjTabBar.Services
                                 hwnd,
                                 controlPanelTarget != null ? controlPanelTarget.ExplorerHwnd.ToString() : string.Empty));
                     }
-                    TryCreateNewTabBar(hwnd, result.ResolvedPath, result.UseResolvedPathOnCreate);
+                    TryCreateNewTabBar(hwnd, result.ResolvedPath, result.UseResolvedPathOnCreate, result.ReuseExistingTab);
                     break;
 
                 case AbsorptionAction.Ignore:
@@ -153,11 +153,11 @@ namespace KjTabBar.Services
             }
         }
 
-        private void TryAbsorbExplorerWindow(IntPtr hwnd, TabBarViewModel targetViewModel, string path, bool allowSpecialPath, bool isControlPanelPath, bool wasManagedControlPanelLaunchSource)
+        private void TryAbsorbExplorerWindow(IntPtr hwnd, TabBarViewModel targetViewModel, string path, bool allowSpecialPath, bool isControlPanelPath, bool wasManagedControlPanelLaunchSource, bool reuseExistingTab)
         {
             try
             {
-                _interactionService.AbsorbExplorerWindow(hwnd, targetViewModel, path, allowSpecialPath, isControlPanelPath, _ignoreExplorerWindow, wasManagedControlPanelLaunchSource);
+                _interactionService.AbsorbExplorerWindow(hwnd, targetViewModel, path, allowSpecialPath, isControlPanelPath, _ignoreExplorerWindow, wasManagedControlPanelLaunchSource, reuseExistingTab);
             }
             catch (Exception ex)
             {
@@ -166,11 +166,11 @@ namespace KjTabBar.Services
             }
         }
 
-        private void TryCreateNewTabBar(IntPtr hwnd, string initialPath, bool useInitialPathOnly)
+        private void TryCreateNewTabBar(IntPtr hwnd, string initialPath, bool useInitialPathOnly, bool reuseExistingTab)
         {
             try
             {
-                _interactionService.CreateNewTabBar(hwnd, _getUserSettings(), _registerTabBar, initialPath, useInitialPathOnly);
+                _interactionService.CreateNewTabBar(hwnd, _getUserSettings(), _registerTabBar, initialPath, useInitialPathOnly, reuseExistingTab);
             }
             catch (Exception ex)
             {

@@ -11,11 +11,10 @@ using KjTabBar.ViewModels;
 namespace KjTabBar.Services
 {
     // A visible Explorer can be reused without CREATE or SHOW. Only a desktop
-    // item's explicit invocation followed by reuse of that same host adds a tab.
+    // item's explicit invocation followed by reuse of that same host restores its state.
     internal sealed class DesktopRepeatedLaunchService : IDisposable
     {
         private const uint ObjectInvoked = 0x8013;
-        private const string ThisPcPath = "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}";
         private readonly Func<TabBarViewModel> _findTarget;
         private readonly Func<IntPtr, bool> _isDesktopItemView;
         private readonly Func<IntPtr, bool> _isVisible;
@@ -35,7 +34,7 @@ namespace KjTabBar.Services
         {
             internal TabBarViewModel Target;
             internal TabItemViewModel ActiveTab;
-            internal string OriginalPath;
+            internal string OriginalPath, OriginalTitle;
             internal IntPtr Host, Source;
             internal int Child, TabCount, Generation;
             internal DateTime Started;
@@ -87,11 +86,12 @@ namespace KjTabBar.Services
             if (_disposed || objectId != -4 || child <= 0 || !_isDesktopItemView(source)) return;
             CancelForNewWindow();
             TabBarViewModel target = _findTarget();
-            if (target == null || target.ActiveTab == null || target.IsRestoringControlPanelHost ||
-                !_isVisible(target.ExplorerHwnd) || !Path.IsPathRooted(target.ActiveTab.Path ?? string.Empty)) return;
+            if (target == null || target.IsDisposed || target.IsTabOperationPending || target.ActiveTab == null || target.IsRestoringControlPanelHost ||
+                !_isVisible(target.ExplorerHwnd) || string.IsNullOrEmpty(target.ActiveTab.Path)) return;
             _pending = new Request
             {
-                Target = target, ActiveTab = target.ActiveTab, OriginalPath = target.ActiveTab.Path, Host = target.ExplorerHwnd,
+                Target = target, ActiveTab = target.ActiveTab, OriginalPath = target.ActiveTab.Path,
+                OriginalTitle = target.ActiveTab.BaseTitle, Host = target.ExplorerHwnd,
                 Source = source, Child = child, TabCount = target.Tabs.Count,
                 Generation = _generation, Started = _utcNow(),
                 RestoreMaximized = _shouldRestoreMaximized(target.ExplorerHwnd)
@@ -115,12 +115,19 @@ namespace KjTabBar.Services
                 string path = await _resolve(request.Source, request.Child, request.Host).ConfigureAwait(false);
                 await _applyOnUi(delegate
                 {
-                    if (!IsCurrent(request) || _getForeground() != request.Host ||
-                        (!SamePath(path, request.OriginalPath) && !SamePath(path, ThisPcPath))) return;
-                    if (request.RestoreMaximized) _restoreMaximized(request.Host);
-                    if (!SamePath(path, request.OriginalPath)) return;
-                    request.Target.InsertTabWithPathAndSelect(path, request.Target.Tabs.Count, null, false);
-                    AppLogger.LogDiagnostic("DesktopRepeat", "Added tab for reused host=" + request.Host);
+                    if (!IsCurrent(request) || _getForeground() != request.Host || string.IsNullOrEmpty(path)) return;
+                    TabBarViewModel target = request.Target;
+                    if (!target.DesktopLaunchPathEquals(request.ActiveTab.Path, request.OriginalPath) &&
+                        !target.DesktopLaunchPathEquals(request.ActiveTab.Path, path)) return;
+                    if (!target.TryBeginExternalTabOperation()) return;
+                    try
+                    {
+                        // Resolution verified that this host displays the invoked destination.
+                        target.AdoptDesktopLaunchPath(path, request.ActiveTab, request.OriginalPath, request.OriginalTitle);
+                        if (request.RestoreMaximized) _restoreMaximized(request.Host);
+                        AppLogger.LogDiagnostic("DesktopRepeat", "Selected desktop destination for reused host=" + request.Host);
+                    }
+                    finally { target.EndExternalTabOperation(); }
                 }).ConfigureAwait(false);
             }
             catch (Exception ex) { AppLogger.LogError("DesktopRepeat", "Repeated launch resolution failed.", ex); }
@@ -141,7 +148,7 @@ namespace KjTabBar.Services
 
         private bool IsCurrent(Request request)
         {
-            return !_disposed && request.Generation == _generation &&
+            return !_disposed && !request.Target.IsDisposed && request.Generation == _generation &&
                 _utcNow() - request.Started <= TimeSpan.FromSeconds(2) &&
                 ReferenceEquals(_findTarget(), request.Target) && request.Target.ExplorerHwnd == request.Host &&
                 ReferenceEquals(request.Target.ActiveTab, request.ActiveTab) &&
@@ -154,7 +161,10 @@ namespace KjTabBar.Services
             {
                 string path = _explorer.ResolveDesktopInvokedShortcut(source, child);
                 if (string.IsNullOrEmpty(path)) return null;
-                return SamePath(path, _explorer.GetCurrentPath(host)) ? path : null;
+                string current = _explorer.GetCurrentPath(host);
+                bool matches = SamePath(_explorer.NormalizeKnownPath(path), _explorer.NormalizeKnownPath(current)) ||
+                    (_explorer.IsControlPanelRootPath(path) && _explorer.IsControlPanelRootPath(current));
+                return matches ? path : null;
             });
         }
 
@@ -204,14 +214,15 @@ namespace KjTabBar.Services
                 Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
                 Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory)
             });
-            if (shortcut == null) return ResolveDesktopPcItem(name);
+            if (shortcut == null) return ResolveDesktopFolderItem(name);
             string path = explorer.ResolveShortcutTarget(shortcut);
-            return !string.IsNullOrEmpty(path) && Path.IsPathRooted(path) && Directory.Exists(path) ? path : null;
+            return !string.IsNullOrEmpty(path) &&
+                (!string.IsNullOrEmpty(explorer.NormalizeShellNamespacePath(path)) ||
+                 (Path.IsPathRooted(path) && Directory.Exists(path))) ? path : null;
         }
 
-        // PC is a virtual desktop item, not a .lnk. Resolve its actual shell identity
-        // instead of assuming the displayed (and potentially renamed) label is "PC".
-        internal static string ResolveDesktopPcItem(string name)
+        // Resolve ordinary and virtual folders by shell identity, including renamed desktop items.
+        internal static string ResolveDesktopFolderItem(string name)
         {
             if (string.IsNullOrEmpty(name)) return null;
             object shell;
@@ -236,7 +247,8 @@ namespace KjTabBar.Services
                         if (matched) return null;
                         matched = true;
                         string path = ShellWindowComInterop.GetComProperty(item, "Path") as string;
-                        if (SamePath(path, ThisPcPath)) found = ThisPcPath;
+                        if (ShellWindowComInterop.GetComProperty(item, "IsFolder") is bool isFolder && isFolder)
+                            found = path;
                     }
                     finally { ShellWindowComInterop.ReleaseComObjectSafe(item); }
                 }

@@ -16,7 +16,7 @@ Instead of hooking into or modifying Explorer itself, it places an independent t
   - Drag a tab out of the tab bar and drop it outside the Explorer window to move that tab into a new window and close the source tab
   - Move or copy files and folders onto tabs by dropping items from outside
   - Drag an independent Explorer window onto the dedicated merge zone at the right edge of the tab bar to absorb it as a new tab
-  - Control Panel items such as Power Options are absorbed as separate tabs even when an equivalent tab already exists
+  - When absorbed by dragging, Control Panel items such as Power Options are added as separate tabs even when an equivalent tab already exists
   - Show a context menu on right-drag drop such as "Copy here", "Move here", and "Create symbolic link here"
   - Symbolic links are created with the current standard-user privileges; if privileges are insufficient, the app shows guidance instead of retrying as administrator.
 - **Seamless tracking and UI integration**
@@ -31,11 +31,22 @@ Instead of hooking into or modifying Explorer itself, it places an independent t
 - OS: Windows 10 / Windows 11
 - Runtime: .NET Framework 4.8.1
 
+## Tab selection for desktop launches
+
+Only when a folder, special item, or shortcut to one is opened from the desktop, select an existing tab for the same location in the destination tab bar and bring its window to the foreground; add a new tab if no match exists. This applies to ordinary folders and all special folders, including Control Panel and its sub-items, This PC, Network, and Recycle Bin.
+
+- If multiple tabs match, prefer the active matching tab; otherwise select the leftmost match. Keep existing duplicate tabs.
+- Match special folders by identifier or normalized path, not display name. Distinguish Control Panel itself from each of its sub-items.
+- Duplicate Tab, adding tabs by dragging, absorbing windows by dragging, and the + button still create new tabs even for matching locations. Dragging from the desktop is also excluded from reuse.
+- Do not apply reuse to launches from other sources or internal window creation during tab operations.
+
+This behavior is implemented in the source. Launch-origin detection, display, and window switching still require validation through actual desktop interactions.
+
 ## Usage
 
 1. Launch the application (`KjTabBar.exe`). It will stay resident in the system tray.
 2. Open Windows Explorer. A tab bar will automatically appear at the top of the window.
-3. When you open a new Explorer window from the desktop or certain shortcuts, it is automatically absorbed and integrated into the existing tab bar as a new tab.
+3. Opening a folder, special item, or shortcut to one from the desktop selects an existing tab for the same location. If no tab matches, a new tab is added.
 4. **Tab operations**
    - Use the `+` button on the right to open a folder-picker dialog and add a new tab.
    - Each tab shows a per-path icon, including shell-specific icons for special folders and Control Panel sub-items.

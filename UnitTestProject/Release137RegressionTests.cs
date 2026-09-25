@@ -42,6 +42,100 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public async Task Outcome_DesktopFlagReusesButDragOutcomeAdds()
+        {
+            foreach (bool asynchronous in new[] { false, true })
+            {
+                AsyncExplorer explorer = new AsyncExplorer();
+                ExplorerWindowInteractionService interaction = Interaction(explorer, delegate { }, delegate { });
+                ExplorerWindowOutcomeCoordinator outcome = new ExplorerWindowOutcomeCoordinator(
+                    new ExplorerWindowTrackingState(), interaction, delegate { }, () => new MockUserSettings(), delegate { });
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.Current))
+                {
+                    TabItemViewModel original = vm.ActiveTab;
+                    ExplorerWindowEvaluationResult result = new ExplorerWindowEvaluationResult
+                    {
+                        Action = AbsorptionAction.Absorb, ResolvedPath = explorer.Current, ReuseExistingTab = true
+                    };
+                    if (asynchronous) await outcome.ApplyOutcomeAsync((IntPtr)200, 0, result, vm, null);
+                    else outcome.ApplyOutcome((IntPtr)200, 0, result, vm, null);
+                    Assert.AreEqual(1, vm.Tabs.Count);
+                    Assert.AreSame(original, vm.ActiveTab);
+                    result.ReuseExistingTab = false;
+                    if (asynchronous) await outcome.ApplyOutcomeAsync((IntPtr)300, 0, result, vm, null);
+                    else outcome.ApplyOutcome((IntPtr)300, 0, result, vm, null);
+                    Assert.AreEqual(2, vm.Tabs.Count);
+                    Assert.AreNotSame(original, vm.ActiveTab);
+                }
+            }
+        }
+        [TestMethod]
+        public async Task DesktopReuse_NavigationFailurePreservesExistingTabAndSource()
+        {
+            AsyncExplorer explorer = new AsyncExplorer();
+            int closed = 0, shown = 0;
+            ExplorerWindowInteractionService service = Interaction(explorer, h => closed++, h => shown++);
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.Current))
+            {
+                vm.InsertTabWithPath(@"C:\B", 1);
+                TabItemViewModel match = vm.ActiveTab;
+                vm.SelectTab(vm.Tabs[0]);
+                explorer.Move = p => Task.FromResult(false);
+                Assert.IsFalse(await service.AbsorbExplorerWindowAsync((IntPtr)200, vm, @"C:\B", false, false, null, reuseExistingTab: true));
+                Assert.AreEqual(2, vm.Tabs.Count);
+                Assert.AreSame(match, vm.Tabs[1]);
+                Assert.AreSame(vm.Tabs[0], vm.ActiveTab);
+                Assert.AreEqual(0, closed);
+                Assert.AreEqual(1, shown);
+            }
+        }
+
+        [TestMethod]
+        public async Task DesktopReuse_WaitsForArrivalBeforeClosingSource()
+        {
+            TaskCompletionSource<string> arrival = new TaskCompletionSource<string>();
+            AsyncExplorer explorer = new AsyncExplorer();
+            int closed = 0;
+            ExplorerWindowInteractionService service = Interaction(explorer, h => closed++, delegate { });
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.Current))
+            {
+                vm.InsertTabWithPath(@"C:\B", 1);
+                TabItemViewModel match = vm.ActiveTab;
+                vm.SelectTab(vm.Tabs[0]);
+                explorer.Move = p => { explorer.Read = h => arrival.Task; return Task.FromResult(true); };
+                Task<bool> operation = service.AbsorbExplorerWindowAsync((IntPtr)200, vm, @"C:\B", false, false, null, reuseExistingTab: true);
+                Assert.IsFalse(operation.IsCompleted);
+                Assert.AreEqual(0, closed);
+                Assert.AreEqual(2, vm.Tabs.Count);
+                arrival.SetResult(@"C:\B");
+                Assert.IsTrue(await operation);
+                Assert.AreSame(match, vm.ActiveTab);
+                Assert.AreEqual(1, closed);
+            }
+        }
+
+        [TestMethod]
+        public async Task DropAndDuplicate_KeepCreatingTabsForExistingLocations()
+        {
+            string[] paths = new string[] { Path.GetTempPath(), "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}",
+                "::{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}", "::{645FF040-5081-101B-9F08-00AA002F954E}",
+                "::{26EE0668-A00A-44D7-9371-BEB064C98683}" };
+            foreach (string path in paths)
+            {
+                AsyncExplorer explorer = new AsyncExplorer { Current = path };
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, path))
+                {
+                    TabItemViewModel original = vm.ActiveTab;
+                    Assert.IsTrue(await TabBarWindowDragDropHandler.InsertDroppedPathsAsync(vm, 1, new[] { path }, explorer, p => Task.FromResult(true), delegate { }));
+                    Assert.AreEqual(2, vm.Tabs.Count, path);
+                    Assert.AreNotSame(original, vm.ActiveTab);
+                    await vm.DuplicateTabAsync(original, p => Task.FromResult(true), delegate { });
+                    Assert.AreEqual(3, vm.Tabs.Count, path);
+                    Assert.AreNotSame(original, vm.ActiveTab);
+                }
+            }
+        }
+        [TestMethod]
         public async Task Absorption_RejectedNavigation_KeepsSourceWindow()
         {
             AsyncExplorer explorer = new AsyncExplorer { Move = p => Task.FromResult(false) };

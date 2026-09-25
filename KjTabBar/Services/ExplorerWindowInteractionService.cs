@@ -155,14 +155,14 @@ namespace KjTabBar.Services
             IUserSettings userSettings,
             Action<IntPtr, TabBarWindow> registerTabBar,
             string initialPath,
-            bool useInitialPathOnly)
+            bool useInitialPathOnly, bool reuseExistingTab = false)
         {
             try
             {
                 System.Diagnostics.Stopwatch createTimer = AppLogger.StartDiagnosticTiming();
                 TabBarViewModel viewModel = new TabBarViewModel(hwnd, userSettings, _explorerService, initialPath);
                 AppLogger.LogDiagnosticTiming("Create.ViewModel", hwnd, createTimer);
-                InitializeTabsForNewWindow(viewModel, initialPath, useInitialPathOnly);
+                InitializeTabsForNewWindow(viewModel, initialPath, useInitialPathOnly, reuseExistingTab);
                 AppLogger.LogDiagnosticTiming("Create.SavedTabsLoaded", hwnd, createTimer);
                 if (createTimer != null) AppLogger.LogDiagnostic("RestoreDecision", string.Format(
                     "hwnd={0} restoringControlPanel={1} activeControlPanel={2} initialHomeLiteral={3} initialOnly={4}",
@@ -333,7 +333,7 @@ namespace KjTabBar.Services
             }
         }
 
-        internal void InitializeTabsForNewWindow(TabBarViewModel viewModel, string initialPath, bool useInitialPathOnly)
+        internal void InitializeTabsForNewWindow(TabBarViewModel viewModel, string initialPath, bool useInitialPathOnly, bool reuseExistingTab = false)
         {
             if (viewModel == null)
             {
@@ -341,7 +341,7 @@ namespace KjTabBar.Services
             }
 
             // An explicit launch target must not race a saved-tab navigation.
-            bool preserveInitialPath = !string.IsNullOrEmpty(initialPath) && !IsHomeInitialPath(initialPath);
+            bool preserveInitialPath = !string.IsNullOrEmpty(initialPath) && (reuseExistingTab || !IsHomeInitialPath(initialPath));
             bool loadedSavedTabs = _tabPersistence.LoadTabsTo(viewModel,
                 deferControlPanelNavigation: true, deferNavigation: preserveInitialPath);
 
@@ -357,10 +357,10 @@ namespace KjTabBar.Services
 
             bool allowSpecialPath = _explorerService.IsControlPanelPath(initialPath);
 
-            TabItemViewModel targetTab = viewModel.FindTabByPath(initialPath);
+            TabItemViewModel targetTab = reuseExistingTab ? viewModel.FindDesktopLaunchTab(initialPath) : viewModel.FindTabByPath(initialPath);
             if (targetTab != null)
             {
-                if (loadedSavedTabs && useInitialPathOnly)
+                if (loadedSavedTabs && useInitialPathOnly && !reuseExistingTab)
                 {
                     viewModel.InsertTabWithPath(initialPath, viewModel.Tabs.Count, allowSpecialPath);
                 }
@@ -467,10 +467,10 @@ namespace KjTabBar.Services
 
         public bool AbsorbExplorerWindow(IntPtr newExplorerHwnd, TabBarViewModel targetViewModel,
             string path, bool allowSpecialPath, bool isControlPanelPath, Action<IntPtr> ignoreExplorerWindow,
-            bool wasManagedControlPanelLaunchSource = false)
+            bool wasManagedControlPanelLaunchSource = false, bool reuseExistingTab = false)
         {
             Task<bool> operation = AbsorbExplorerWindowAsync(newExplorerHwnd, targetViewModel, path,
-                allowSpecialPath, isControlPanelPath, ignoreExplorerWindow, wasManagedControlPanelLaunchSource);
+                allowSpecialPath, isControlPanelPath, ignoreExplorerWindow, wasManagedControlPanelLaunchSource, reuseExistingTab: reuseExistingTab);
             if (operation.IsCompleted) return operation.GetAwaiter().GetResult();
             ObserveAbsorption(operation);
             return false;
@@ -484,7 +484,7 @@ namespace KjTabBar.Services
 
         internal async Task<bool> AbsorbExplorerWindowAsync(IntPtr newExplorerHwnd, TabBarViewModel targetViewModel,
             string path, bool allowSpecialPath, bool isControlPanelPath, Action<IntPtr> ignoreExplorerWindow,
-            bool wasManagedControlPanelLaunchSource = false, bool operationReserved = false)
+            bool wasManagedControlPanelLaunchSource = false, bool operationReserved = false, bool reuseExistingTab = false)
         {
             if (!_pendingAbsorptions.Add(newExplorerHwnd)) return false;
             bool completed = false;
@@ -498,7 +498,7 @@ namespace KjTabBar.Services
                     if (!reservedHere) return false;
                 }
                 completed = await AbsorbExplorerWindowCoreAsync(newExplorerHwnd, targetViewModel, path,
-                    allowSpecialPath, isControlPanelPath, ignoreExplorerWindow, wasManagedControlPanelLaunchSource);
+                    allowSpecialPath, isControlPanelPath, ignoreExplorerWindow, wasManagedControlPanelLaunchSource, reuseExistingTab: reuseExistingTab);
                 return completed;
             }
             finally
@@ -515,7 +515,7 @@ namespace KjTabBar.Services
 
         private async Task<bool> AbsorbExplorerWindowCoreAsync(IntPtr newExplorerHwnd, TabBarViewModel targetViewModel,
             string path, bool allowSpecialPath, bool isControlPanelPath, Action<IntPtr> ignoreExplorerWindow,
-            bool wasManagedControlPanelLaunchSource)
+            bool wasManagedControlPanelLaunchSource, bool reuseExistingTab)
         {
             string normalizedPath = _explorerService.NormalizeKnownPath(path);
             string targetPath = string.IsNullOrEmpty(normalizedPath) ? path : normalizedPath;
@@ -533,7 +533,7 @@ namespace KjTabBar.Services
             }
 
             if (effectiveAllowSpecialPath && effectiveControlPanelPath)
-                return TryRebindControlPanelTab(newExplorerHwnd, targetViewModel, targetPath, wasManagedControlPanelLaunchSource);
+                return TryRebindControlPanelTab(newExplorerHwnd, targetViewModel, targetPath, wasManagedControlPanelLaunchSource, reuseExistingTab);
 
             long version = targetViewModel.SynchronizationVersion;
             IntPtr host = targetViewModel.ExplorerHwnd;
@@ -541,8 +541,17 @@ namespace KjTabBar.Services
                 ? await ComThreadService.Instance.InvokeAsync(() => _explorerService.GetSelectedItems(newExplorerHwnd))
                 : _explorerService.GetSelectedItems(newExplorerHwnd);
             if (!targetViewModel.IsExternalOperationCurrent(version) || targetViewModel.ExplorerHwnd != host) return false;
-            if (!await targetViewModel.InsertTabCoreAsync(targetPath, targetViewModel.Tabs.Count, effectiveAllowSpecialPath)) return false;
-            TabItemViewModel inserted = targetViewModel.ActiveTab;
+            TabItemViewModel inserted = reuseExistingTab ? targetViewModel.FindDesktopLaunchTab(targetPath) : null;
+            if (inserted != null)
+            {
+                await targetViewModel.SelectTabCoreAsync(inserted);
+                if (targetViewModel.LastNavigationFailed || targetViewModel.ActiveTab != inserted) return false;
+            }
+            else
+            {
+                if (!await targetViewModel.InsertTabCoreAsync(targetPath, targetViewModel.Tabs.Count, effectiveAllowSpecialPath)) return false;
+                inserted = targetViewModel.ActiveTab;
+            }
             version = targetViewModel.SynchronizationVersion;
             System.Diagnostics.Stopwatch elapsed = System.Diagnostics.Stopwatch.StartNew();
             do
@@ -594,15 +603,15 @@ namespace KjTabBar.Services
             return true;
         }
 
-        private bool TryRebindControlPanelTab(IntPtr newExplorerHwnd, TabBarViewModel targetViewModel, string path, bool wasManagedControlPanelLaunchSource = false)
+        private bool TryRebindControlPanelTab(IntPtr newExplorerHwnd, TabBarViewModel targetViewModel, string path, bool wasManagedControlPanelLaunchSource = false, bool reuseExistingTab = false)
         {
             if (targetViewModel == null || string.IsNullOrEmpty(path) || newExplorerHwnd == IntPtr.Zero)
             {
                 return false;
             }
 
-            TabItemViewModel reusableTab = null;
-            if (wasManagedControlPanelLaunchSource)
+            TabItemViewModel reusableTab = reuseExistingTab ? targetViewModel.FindDesktopLaunchTab(path) : null;
+            if (!reuseExistingTab && wasManagedControlPanelLaunchSource)
             {
                 if (targetViewModel.ActiveTab != null && _explorerService.IsControlPanelPath(targetViewModel.ActiveTab.Path))
                 {

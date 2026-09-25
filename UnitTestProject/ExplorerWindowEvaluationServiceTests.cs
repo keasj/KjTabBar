@@ -8,6 +8,47 @@ namespace UnitTestProject
     public class ExplorerWindowEvaluationServiceTests
     {
         [TestMethod]
+        public void Evaluate_ReuseIsLimitedToDesktopLaunches()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            string pc = "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}";
+            explorer.GetCurrentPathFunc = h => pc;
+            ExplorerWindowEvaluationService service = new ExplorerWindowEvaluationService(explorer, new DesktopPathClassifier(explorer));
+            ExplorerWindowEvaluationInput input = new ExplorerWindowEvaluationInput { ExplorerHwnd = (IntPtr)1, HasValidTarget = true };
+            Assert.IsFalse(service.Evaluate(input, null, null, null, null).ReuseExistingTab);
+            input.IsHiddenPending = true;
+            Assert.IsFalse(service.Evaluate(input, null, null, null, null).ReuseExistingTab, "Hidden alone is not desktop launch evidence.");
+            input.IsDesktopCandidate = true;
+            ExplorerWindowEvaluationResult result = service.Evaluate(input, null, null, null, null);
+            Assert.AreEqual(AbsorptionAction.Absorb, result.Action);
+            Assert.IsTrue(result.ReuseExistingTab);
+            input.WasManagedControlPanelLaunchSource = true;
+            Assert.IsFalse(service.Evaluate(input, null, null, null, null).ReuseExistingTab, "Internal host operations must not reuse tabs.");
+            input.WasManagedControlPanelLaunchSource = false;
+            input.HasValidTarget = false;
+            Assert.IsTrue(service.Evaluate(input, null, null, null, null).ReuseExistingTab, "Desktop startup must reuse restored tabs.");
+            input.IsDesktopCandidate = false;
+            Assert.IsFalse(service.Evaluate(input, null, null, null, null).ReuseExistingTab);
+        }
+
+        [TestMethod]
+        public void Evaluate_DesktopControlPanelLaunchReuses_ButInternalTransitionDoesNot()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            explorer.GetCurrentPathFunc = h => explorer.PowerOptionsPath;
+            explorer.IsControlPanelPathFunc = p => p == explorer.PowerOptionsPath;
+            ExplorerWindowEvaluationService service = new ExplorerWindowEvaluationService(explorer, new DesktopPathClassifier(explorer));
+            ExplorerWindowEvaluationInput input = new ExplorerWindowEvaluationInput
+            {
+                ExplorerHwnd = (IntPtr)1, HasValidTarget = true, IsControlPanelTabLaunchCandidate = true
+            };
+            ExplorerWindowEvaluationResult result = service.Evaluate(input, null, p => true, p => true, p => true);
+            Assert.AreEqual(AbsorptionAction.Absorb, result.Action);
+            Assert.IsTrue(result.ReuseExistingTab);
+            input.WasManagedControlPanelLaunchSource = true;
+            Assert.IsFalse(service.Evaluate(input, null, p => true, p => true, p => true).ReuseExistingTab);
+        }
+        [TestMethod]
         public void Evaluate_ControlPanelRootTitle_UsesAllControlPanelPathForTargetLookup()
         {
             MockExplorerService explorerService = new MockExplorerService();

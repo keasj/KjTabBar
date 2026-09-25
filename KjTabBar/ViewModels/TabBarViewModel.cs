@@ -315,6 +315,48 @@ namespace KjTabBar.ViewModels
             return null;
         }
 
+        internal TabItemViewModel FindDesktopLaunchTab(string path, TabItemViewModel excludedTab = null)
+        {
+            if (string.IsNullOrEmpty(path)) return null;
+            if (_activeTab != null && _activeTab != excludedTab && _tabs.Contains(_activeTab) && DesktopLaunchPathEquals(_activeTab.Path, path))
+                return _activeTab;
+            foreach (TabItemViewModel tab in _tabs)
+                if (tab != excludedTab && DesktopLaunchPathEquals(tab.Path, path)) return tab;
+            return null;
+        }
+
+        internal void AdoptDesktopLaunchPath(string path, TabItemViewModel source, string originalPath, string originalTitle)
+        {
+            bool sameOriginal = DesktopLaunchPathEquals(path, originalPath);
+            TabItemViewModel match = sameOriginal ? source : FindDesktopLaunchTab(path, source);
+            if (match == null)
+            {
+                match = new TabItemViewModel(path, _explorerService.GetFolderName(path), _explorerService);
+                _tabs.Add(match);
+            }
+            if (!sameOriginal)
+            {
+                source.Path = originalPath;
+                source.BaseTitle = originalTitle;
+            }
+            ClearPendingNavigationTracking();
+            ClearCancelledNavigationTracking();
+            NavigationTracker.UpdateCache(path, DateTime.UtcNow);
+            SetActiveTabOnly(match);
+            UpdateTabTitles();
+        }
+
+        internal bool DesktopLaunchPathEquals(string first, string second)
+        {
+            if (string.IsNullOrEmpty(first) || string.IsNullOrEmpty(second)) return false;
+            if (PathEquals(first, second)) return true;
+            if (_explorerService.IsControlPanelRootPath(first) && _explorerService.IsControlPanelRootPath(second)) return true;
+            string normalizedFirst = _explorerService.NormalizeShellNamespacePath(first);
+            string normalizedSecond = _explorerService.NormalizeShellNamespacePath(second);
+            return !string.IsNullOrEmpty(normalizedFirst) && !string.IsNullOrEmpty(normalizedSecond) &&
+                string.Equals(normalizedFirst.TrimEnd('\\'), normalizedSecond.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+        }
+
         public void AddTab()
         {
             string currentPath = null;

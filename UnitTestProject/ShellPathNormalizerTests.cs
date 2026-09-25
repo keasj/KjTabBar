@@ -40,6 +40,34 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void DesktopTabMatching_NormalizesShellAliasesWithoutMergingDifferentItems()
+        {
+            ShellPathNormalizer normalizer = CreateNormalizer();
+            MockExplorerService explorer = new MockExplorerService
+            {
+                NormalizeKnownPathFunc = normalizer.NormalizeKnownPath,
+                NormalizeShellNamespacePathFunc = normalizer.NormalizeShellNamespacePath,
+                IsControlPanelRootPathFunc = normalizer.IsControlPanelRootPath
+            };
+            string[] paths = new string[] { AllControlPanelPath, PowerOptionsPath, ProgramsAndFeaturesPath,
+                "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}", "::{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}",
+                "::{645FF040-5081-101B-9F08-00AA002F954E}" };
+            using (KjTabBar.ViewModels.TabBarViewModel vm = new KjTabBar.ViewModels.TabBarViewModel(
+                (IntPtr)100, new MockUserSettings(), explorer, @"C:\Other"))
+            {
+                foreach (string path in paths)
+                {
+                    KjTabBar.ViewModels.TabItemViewModel tab = new KjTabBar.ViewModels.TabItemViewModel(path, "Same display name", explorer);
+                    vm.Tabs.Add(tab);
+                    Assert.AreSame(tab, vm.FindDesktopLaunchTab("shell:" + path.ToLowerInvariant()), path);
+                }
+                Assert.AreSame(vm.Tabs[1], vm.FindDesktopLaunchTab("::{21EC2020-3AEA-1069-A2DD-08002B30309D}"), "Root alias");
+                Assert.AreSame(vm.Tabs[2], vm.FindDesktopLaunchTab(PowerOptionsPath + @"\0"), "Item view state");
+                Assert.AreSame(vm.Tabs[3], vm.FindDesktopLaunchTab(ProgramsAndFeaturesPath));
+                Assert.IsNull(vm.FindDesktopLaunchTab("::{00000000-0000-0000-0000-000000000001}"));
+            }
+        }
+        [TestMethod]
         public void IsControlPanelRootPath_Returns_True_For_ControlPanel_GUID_Path()
         {
             ShellPathNormalizer normalizer = CreateNormalizer();
