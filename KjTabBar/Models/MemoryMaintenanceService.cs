@@ -20,7 +20,7 @@ namespace KjTabBar.Models
             return MaintenanceInterval;
         }
 
-        public void PerformIfDue()
+        public async void PerformIfDue()
         {
             DateTime nowUtc = DateTime.UtcNow;
             if (_lastMaintenanceUtc != DateTime.MinValue)
@@ -37,9 +37,7 @@ namespace KjTabBar.Models
 
             try
             {
-                _explorerService.ReleaseCachedComObjects();
-                AppLogger.LogDiagnosticTiming("Maintenance.UiRelease", IntPtr.Zero, timer);
-                _ = ComThreadService.Instance.InvokeAsync(() =>
+                await ComThreadService.Instance.InvokeAsync(() =>
                 {
                     AppLogger.LogDiagnosticTiming("Maintenance.WorkerStart", IntPtr.Zero, timer);
                     _explorerService.ReleaseCachedComObjects();

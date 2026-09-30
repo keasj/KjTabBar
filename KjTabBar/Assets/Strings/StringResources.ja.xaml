@@ -16,6 +16,7 @@
     <system:String x:Key="MenuCloseTab">タブを閉じる(&amp;C)</system:String>
     <system:String x:Key="MenuCloseTabsToRight">右側のタブを閉じる(&amp;R)</system:String>
     <system:String x:Key="MenuCloseTabsToLeft">左側のタブを閉じる(&amp;L)</system:String>
+    <system:String x:Key="MenuChooseHistory">履歴から開く(&amp;H)</system:String>
     <system:String x:Key="MenuReopenClosedTab">閉じたタブを開く(&amp;T)</system:String>
     <system:String x:Key="MenuSettings">設定...</system:String>
     <system:String x:Key="MenuCopyHere">ここにコピー(&amp;C)</system:String>

@@ -54,6 +54,31 @@ namespace KjTabBar.ViewModels
             foreach (ClosedTabBatch batch in _history) items.AddRange(batch.Tabs);
             return items;
         }
+        internal List<List<ClosedTabInfo>> GetBatches()
+        {
+            List<List<ClosedTabInfo>> batches = new List<List<ClosedTabInfo>>();
+            foreach (ClosedTabBatch batch in _history) batches.Add(new List<ClosedTabInfo>(batch.Tabs));
+            return batches;
+        }
+
+        internal void RestoreBatches(List<List<ClosedTabInfo>> batches)
+        {
+            _history.Clear();
+            foreach (List<ClosedTabInfo> items in batches)
+            {
+                if (items.Count == 0) continue;
+                ClosedTabBatch batch = new ClosedTabBatch();
+                batch.Tabs.AddRange(items);
+                AddBatch(batch);
+            }
+        }
+
+        internal bool Contains(ClosedTabInfo item)
+        {
+            foreach (ClosedTabBatch batch in _history) if (batch.Tabs.Contains(item)) return true;
+            return false;
+        }
+
         public List<ClosedTabInfo> PeekLastBatch()
         {
             if (_history.Count == 0) return null;

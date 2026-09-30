@@ -12,6 +12,71 @@ namespace UnitTestProject
     public class ExplorerWindowInteractionServiceTests
     {
         [TestMethod]
+        public void FailedInitialNavigation_DoesNotOverwriteSavedTabOnNextSync()
+        {
+            string file = Path.Combine(Path.GetTempPath(), "KjTabBar-Rejected-" + Guid.NewGuid().ToString("N") + ".txt");
+            try
+            {
+                ProtectedTextStorage.SaveLines(file, new[] { @"C:\SavedA" });
+                foreach (bool throws in new[] { false, true })
+                {
+                    string current = null;
+                    MockExplorerService explorer = new MockExplorerService {
+                        GetCurrentPathFunc = h => current,
+                        NavigateFunc = (h,p) => { if (throws) throw new TimeoutException("Injected navigation failure"); return false; }
+                    };
+                    using (TabBarViewModel target = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, @"C:\DesktopB"))
+                    {
+                        ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                            explorer, new ExplorerWindowTrackingState(), new TabPersistenceService(file));
+                        service.InitializeTabsForNewWindow(target, @"C:\DesktopB", true, true);
+                        current = @"C:\DesktopB";
+                        target.NavigationTracker.InvalidateCache();
+                        target.SyncWithExplorerAsync().GetAwaiter().GetResult();
+                        Assert.AreEqual(@"C:\SavedA", target.Tabs[0].Path);
+                        Assert.AreEqual(current, target.ActiveTab.Path);
+                        Assert.AreEqual(2, target.Tabs.Count);
+                    }
+                }
+            }
+            finally { File.Delete(file); }
+        }
+
+        [TestMethod]
+        public void DesktopLaunch_RestoresSelectedDuplicateWithoutNavigatingToSavedOtherLocation()
+        {
+            foreach (string destination in new[] { @"C:\Work", "AllControlPanelPath", "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}" })
+            {
+                foreach (int savedIndex in new[] { 0, 2 })
+                {
+                    string directory = Path.Combine(Path.GetTempPath(), "KjTabBar-Restore-" + Guid.NewGuid().ToString("N"));
+                    Directory.CreateDirectory(directory);
+                    try
+                    {
+                        string file = Path.Combine(directory, "tabs.txt");
+                        ProtectedTextStorage.SaveLines(Path.Combine(directory, "tabs.snapshot.txt"),
+                            new[] { "kjtb-tabs-v1", savedIndex.ToString(), savedIndex == 0 ? @"C:\Other" : destination,
+                                @"C:\Other", destination, destination });
+                        MockExplorerService explorer = new MockExplorerService { GetCurrentPathFunc = h => destination };
+                        int navigations = 0;
+                        explorer.NavigateFunc = (h, p) => { navigations++; return true; };
+                        ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                            explorer, new ExplorerWindowTrackingState(), new TabPersistenceService(file));
+                        using (TabBarViewModel target = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, destination))
+                        {
+                            service.InitializeTabsForNewWindow(target, destination, true, true);
+                            Assert.AreEqual(3, target.Tabs.Count);
+                            Assert.AreEqual(savedIndex == 2 ? 2 : 1, target.ActiveTabIndex, destination);
+                            Assert.AreEqual(0, navigations, "Restoring the saved selection must not navigate away from the explicit destination.");
+                            Assert.IsFalse(target.IsRestoringControlPanelHost);
+                        }
+                    }
+                    finally { Directory.Delete(directory, true); }
+                }
+            }
+        }
+
+        [TestMethod]
         public void DesktopLaunch_ReusesActiveOrLeftmostMatch_AndDragStillAdds()
         {
             string[] paths = new string[]

@@ -16,6 +16,7 @@
     <system:String x:Key="MenuCloseTab">Close Tab(&amp;C)</system:String>
     <system:String x:Key="MenuCloseTabsToRight">Close Tabs to the Right(&amp;R)</system:String>
     <system:String x:Key="MenuCloseTabsToLeft">Close Tabs to the Left(&amp;L)</system:String>
+    <system:String x:Key="MenuChooseHistory">Open from History(&amp;H)</system:String>
     <system:String x:Key="MenuReopenClosedTab">Reopen Closed Tab(&amp;T)</system:String>
     <system:String x:Key="MenuSettings">Settings...</system:String>
     <system:String x:Key="MenuCopyHere">Copy Here(&amp;C)</system:String>

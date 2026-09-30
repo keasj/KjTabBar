@@ -10,6 +10,173 @@ namespace UnitTestProject
     [TestClass]
     public class DesktopRepeatedLaunchServiceTests
     {
+        [TestMethod]
+        public void IntermediateExplorerLocation_DoesNotDiscardConfirmedDestination()
+        {
+            string current = Assets;
+            MockExplorerService explorer = new MockExplorerService { GetCurrentPathFunc = h => current };
+            using (TabBarViewModel target = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer))
+            {
+                TabItemViewModel original = target.ActiveTab;
+                TaskCompletionSource<string> resolved = new TaskCompletionSource<string>();
+                using (DesktopRepeatedLaunchService service = CreateService(target, (s,c,h) => resolved.Task))
+                {
+                    service.CaptureInvocation((IntPtr)10, -4, 20);
+                    Task pending = service.OnForegroundAsync((IntPtr)100);
+                    foreach (string observed in new[] { @"C:\Intermediate", @"C:\Destination" })
+                    {
+                        current = observed;
+                        target.NavigationTracker.InvalidateCache();
+                        target.SyncWithExplorerAsync().GetAwaiter().GetResult();
+                    }
+                    resolved.SetResult(current);
+                    pending.GetAwaiter().GetResult();
+                    Assert.AreEqual(Assets, original.Path);
+                    Assert.AreEqual(current, target.ActiveTab.Path);
+                    Assert.AreEqual(2, target.Tabs.Count);
+                }
+            }
+        }
+
+        [TestMethod]
+        public void ExplorerRoundTrip_DoesNotApplyDelayedDesktopResult()
+        {
+            string current = Assets;
+            DateTime now = DateTime.UtcNow;
+            MockExplorerService explorer = new MockExplorerService { GetCurrentPathFunc = h => current };
+            using (TabBarViewModel target = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer))
+            {
+                TaskCompletionSource<string> resolved = new TaskCompletionSource<string>();
+                using (DesktopRepeatedLaunchService service = CreateService(target, (s,c,h) => resolved.Task, () => now))
+                {
+                    service.CaptureInvocation((IntPtr)10, -4, 20);
+                    Task pending = service.OnForegroundAsync((IntPtr)100);
+                    current = @"C:\UserNavigation";
+                    target.NavigationTracker.InvalidateCache();
+                    target.SyncWithExplorerAsync().GetAwaiter().GetResult();
+                    current = Assets;
+                    target.NavigationTracker.InvalidateCache();
+                    target.SyncWithExplorerAsync().GetAwaiter().GetResult();
+                    now = now.AddSeconds(3);
+                    resolved.SetResult(@"C:\DesktopDestination");
+                    pending.GetAwaiter().GetResult();
+                    Assert.AreEqual(1, target.Tabs.Count);
+                    Assert.AreEqual(Assets, target.ActiveTab.Path);
+                }
+            }
+        }
+
+        [TestMethod]
+        public void FailedDesktopResolution_PreservesOriginalAndObservedLocation()
+        {
+            foreach (bool throws in new[] { true, false })
+            {
+                string current = Assets;
+                MockExplorerService explorer = new MockExplorerService { GetCurrentPathFunc = h => current };
+                using (TabBarViewModel target = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer))
+                {
+                    TabItemViewModel original = target.ActiveTab;
+                    TaskCompletionSource<string> resolved = new TaskCompletionSource<string>();
+                    using (DesktopRepeatedLaunchService service = CreateService(target, (s,c,h) => resolved.Task))
+                    {
+                        service.CaptureInvocation((IntPtr)10, -4, 20);
+                        Task pending = service.OnForegroundAsync((IntPtr)100);
+                        current = @"C:\DesktopDestination";
+                        target.SyncWithExplorerAsync().GetAwaiter().GetResult();
+                        if (throws) resolved.SetException(new TimeoutException("Injected resolution failure"));
+                        else resolved.SetResult(null);
+                        pending.GetAwaiter().GetResult();
+                        Assert.AreEqual(Assets, original.Path);
+                        Assert.AreEqual(current, target.ActiveTab.Path);
+                        Assert.AreEqual(2, target.Tabs.Count);
+                    }
+                }
+            }
+        }
+
+        [TestMethod]
+        public void ReusedHost_SelectionReturnsToOriginal_DiscardsStaleDestination()
+        {
+            using (TabBarViewModel target = CreateTarget())
+            {
+                TabItemViewModel original = target.ActiveTab;
+                TabItemViewModel other = new TabItemViewModel(@"C:\Other", "Other", new MockExplorerService());
+                target.Tabs.Add(other);
+                TaskCompletionSource<string> resolved = new TaskCompletionSource<string>();
+                using (DesktopRepeatedLaunchService service = CreateService(target, (s, c, h) => resolved.Task))
+                {
+                    service.CaptureInvocation((IntPtr)10, -4, 20);
+                    Task pending = service.OnForegroundAsync((IntPtr)100);
+                    target.SelectTabCoreAsync(other).GetAwaiter().GetResult();
+                    target.SelectTabCoreAsync(original).GetAwaiter().GetResult();
+                    resolved.SetResult(@"C:\Destination");
+                    pending.GetAwaiter().GetResult();
+                    Assert.AreSame(original, target.ActiveTab);
+                    Assert.AreEqual(Assets, original.Path);
+                    Assert.AreEqual(2, target.Tabs.Count);
+                }
+            }
+        }
+
+        [TestMethod]
+        public void ReusedHost_ResolutionAfterCaptureDeadline_PreservesOriginalLocation()
+        {
+            foreach (bool synchronizeFirst in new[] { false, true })
+            {
+                string current = Assets;
+                MockExplorerService explorer = new MockExplorerService { GetCurrentPathFunc = h => current };
+                DateTime now = DateTime.UtcNow;
+                using (TabBarViewModel target = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer))
+                {
+                    TabItemViewModel original = target.ActiveTab;
+                    TaskCompletionSource<string> resolved = new TaskCompletionSource<string>();
+                    using (DesktopRepeatedLaunchService service = CreateService(target, (s, c, h) => resolved.Task, () => now))
+                    {
+                        service.CaptureInvocation((IntPtr)10, -4, 20);
+                        Task pending = service.OnForegroundAsync((IntPtr)100);
+                        current = @"C:\Destination";
+                        if (synchronizeFirst) target.SyncWithExplorerAsync().GetAwaiter().GetResult();
+                        now = now.AddSeconds(3);
+                        resolved.SetResult(current);
+                        pending.GetAwaiter().GetResult();
+                        Assert.AreEqual(Assets, original.Path, "Preserve the original folder even after synchronization.");
+                        Assert.AreEqual(current, target.ActiveTab.Path);
+                        Assert.AreEqual(2, target.Tabs.Count);
+                    }
+                }
+            }
+        }
+
+        [TestMethod]
+        public void ReusedHost_DelayedResolutionStillHonorsCancellationAndSelectionChanges()
+        {
+            for (int scenario = 0; scenario < 3; scenario++)
+            {
+                using (TabBarViewModel target = CreateTarget())
+                {
+                    TabItemViewModel original = target.ActiveTab;
+                    TabItemViewModel other = new TabItemViewModel(@"C:\Other", "Other", new MockExplorerService());
+                    target.Tabs.Add(other);
+                    DateTime now = DateTime.UtcNow;
+                    TaskCompletionSource<string> resolved = new TaskCompletionSource<string>();
+                    using (DesktopRepeatedLaunchService service = CreateService(target, (s, c, h) => resolved.Task, () => now))
+                    {
+                        service.CaptureInvocation((IntPtr)10, -4, 20);
+                        Task pending = service.OnForegroundAsync((IntPtr)100);
+                        if (scenario == 0) service.CancelForNewWindow();
+                        else if (scenario == 1) target.SelectTabCoreAsync(other).GetAwaiter().GetResult();
+                        else service.Dispose();
+                        now = now.AddSeconds(3);
+                        resolved.SetResult(@"C:\Destination");
+                        pending.GetAwaiter().GetResult();
+                        Assert.AreEqual(2, target.Tabs.Count);
+                        Assert.AreEqual(Assets, original.Path);
+                        Assert.AreSame(scenario == 1 ? other : original, target.ActiveTab);
+                    }
+                }
+            }
+        }
+
         private const string Assets = @"C:\Assets";
         private static TabBarViewModel CreateTarget()
         {

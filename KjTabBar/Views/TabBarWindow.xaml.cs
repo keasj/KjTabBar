@@ -472,7 +472,7 @@ namespace KjTabBar.Views
             ReturnFocusToExplorer();
         }
 
-        internal async Task ReopenClosedTabAsync(TabBarViewModel vm)
+        internal async Task ReopenClosedTabAsync(TabBarViewModel vm, ClosedTabInfo selectedItem = null)
         {
             if (vm == null) return;
             try
@@ -480,7 +480,7 @@ namespace KjTabBar.Views
                 ExplorerHostSwitchCoordinator coordinator = ExplorerHostSwitchCoordinator;
                 await vm.ReopenClosedTabAsync(
                     coordinator != null ? new Func<string, Task<bool>>(path => coordinator.PrepareForPathAsync(vm, path, vm.IsPreparedTabOperationCurrent)) : null,
-                    coordinator != null ? new Action<Action>(action => ExecuteTabSelectionWithPendingReveal(action, coordinator.CompletePendingReveal)) : null);
+                    coordinator != null ? new Action<Action>(action => ExecuteTabSelectionWithPendingReveal(action, coordinator.CompletePendingReveal)) : null, selectedItem);
                 if (PersistTabState != null) PersistTabState(vm);
             }
             catch (Exception ex)

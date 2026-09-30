@@ -53,8 +53,10 @@ namespace KjTabBar.Views
             Func<string, Task<bool>> preparePath, Action completePendingReveal)
         {
             if (tab == null || viewModel == null || openInNewWindow == null ||
-                viewModel.IsTabOperationPending || !viewModel.CanCloseTab(tab) ||
+                viewModel.IsTabOperationPending ||
                 !ShouldOpenInNewWindow(dragEffect, draggedPath, cursorScreenPoint, windowScreenRect)) return TabDetachResult.NotOpened;
+            if (!await viewModel.CanCloseTabAsync(tab)) return TabDetachResult.NotOpened;
+            if (!viewModel.PathEquals(tab.Path, draggedPath)) return TabDetachResult.NotOpened;
             // Opening can fail without changing the managed host. Never prepare a
             // different host until the independent window has been launched.
             if (!openInNewWindow(draggedPath)) return TabDetachResult.NotOpened;

@@ -37,6 +37,7 @@ namespace KjTabBar.Services
             internal string OriginalPath, OriginalTitle;
             internal IntPtr Host, Source;
             internal int Child, TabCount, Generation;
+            internal long SynchronizationVersion, PathChangeVersion;
             internal DateTime Started;
             internal bool RestoreMaximized;
         }
@@ -94,6 +95,8 @@ namespace KjTabBar.Services
                 OriginalTitle = target.ActiveTab.BaseTitle, Host = target.ExplorerHwnd,
                 Source = source, Child = child, TabCount = target.Tabs.Count,
                 Generation = _generation, Started = _utcNow(),
+                SynchronizationVersion = target.SynchronizationVersion,
+                PathChangeVersion = target.ActiveTab.PathChangeVersion,
                 RestoreMaximized = _shouldRestoreMaximized(target.ExplorerHwnd)
             };
             AppLogger.LogDiagnostic("DesktopRepeat", "Captured explicit invocation host=" + target.ExplorerHwnd + " restoreMaximized=" + _pending.RestoreMaximized);
@@ -109,7 +112,10 @@ namespace KjTabBar.Services
         {
             Request request = _pending;
             _pending = null;
-            if (request == null || request.Host != hwnd || !IsCurrent(request)) return;
+            // The deadline associates the foreground event with the invocation, not
+            // the duration of the already-started, timeout-bounded Shell resolution.
+            if (request == null || request.Host != hwnd || !IsCurrent(request) ||
+                _utcNow() - request.Started > TimeSpan.FromSeconds(2)) return;
             try
             {
                 string path = await _resolve(request.Source, request.Child, request.Host).ConfigureAwait(false);
@@ -117,8 +123,10 @@ namespace KjTabBar.Services
                 {
                     if (!IsCurrent(request) || _getForeground() != request.Host || string.IsNullOrEmpty(path)) return;
                     TabBarViewModel target = request.Target;
-                    if (!target.DesktopLaunchPathEquals(request.ActiveTab.Path, request.OriginalPath) &&
-                        !target.DesktopLaunchPathEquals(request.ActiveTab.Path, path)) return;
+                    bool stillAtOriginal = target.DesktopLaunchPathEquals(request.ActiveTab.Path, request.OriginalPath);
+                    // Returning to the original location is a newer Explorer navigation.
+                    if (stillAtOriginal && request.ActiveTab.PathChangeVersion != request.PathChangeVersion) return;
+                    if (!stillAtOriginal && !target.DesktopLaunchPathEquals(request.ActiveTab.Path, path)) return;
                     if (!target.TryBeginExternalTabOperation()) return;
                     try
                     {
@@ -131,6 +139,27 @@ namespace KjTabBar.Services
                 }).ConfigureAwait(false);
             }
             catch (Exception ex) { AppLogger.LogError("DesktopRepeat", "Repeated launch resolution failed.", ex); }
+            finally
+            {
+                try { await _applyOnUi(() => PreserveOriginalLocation(request)).ConfigureAwait(false); }
+                catch (Exception ex) { AppLogger.LogError("DesktopRepeat", "Failed to preserve the original location.", ex); }
+            }
+        }
+
+        private void PreserveOriginalLocation(Request request)
+        {
+            if (!IsCurrent(request)) return;
+            TabBarViewModel target = request.Target;
+            string observedPath = request.ActiveTab.Path;
+            if (string.IsNullOrEmpty(observedPath) ||
+                target.DesktopLaunchPathEquals(observedPath, request.OriginalPath) ||
+                !target.TryBeginExternalTabOperation()) return;
+            try
+            {
+                // Keep both observed locations without issuing navigation or applying an unverified result.
+                target.AdoptDesktopLaunchPath(observedPath, request.ActiveTab, request.OriginalPath, request.OriginalTitle);
+            }
+            finally { target.EndExternalTabOperation(); }
         }
 
         private static bool WasMaximizedBeforeLaunch(IntPtr hwnd)
@@ -149,7 +178,7 @@ namespace KjTabBar.Services
         private bool IsCurrent(Request request)
         {
             return !_disposed && !request.Target.IsDisposed && request.Generation == _generation &&
-                _utcNow() - request.Started <= TimeSpan.FromSeconds(2) &&
+                request.Target.SynchronizationVersion == request.SynchronizationVersion &&
                 ReferenceEquals(_findTarget(), request.Target) && request.Target.ExplorerHwnd == request.Host &&
                 ReferenceEquals(request.Target.ActiveTab, request.ActiveTab) &&
                 request.Target.Tabs.Count == request.TabCount && _isVisible(request.Host);

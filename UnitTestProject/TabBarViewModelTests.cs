@@ -10,6 +10,605 @@ namespace UnitTestProject
     public class TabBarViewModelTests
     {
         [TestMethod]
+        public void Repair3_HistoryMenuOpensChosenOlderEntry()
+        {
+            Exception failure = null;
+            System.Threading.Thread thread = new System.Threading.Thread(delegate ()
+            {
+                System.Windows.Threading.Dispatcher dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+                System.Threading.SynchronizationContext.SetSynchronizationContext(
+                    new System.Windows.Threading.DispatcherSynchronizationContext(dispatcher));
+                dispatcher.BeginInvoke(new Action(async delegate
+                {
+                    KjTabBar.Views.TabBarWindow window = null;
+                    try
+                    {
+                        SelectionAvailabilityExplorer explorer = new SelectionAvailabilityExplorer { Available = false };
+                        using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\Older_Name"))
+                        {
+                            vm.RememberLocationBeforeExplorerNavigation(@"C:\Other");
+                            TabItemViewModel missing = new TabItemViewModel(@"C:\Missing", "Missing", explorer);
+                            vm.Tabs.Add(missing); vm.CloseTab(missing);
+                            window = new KjTabBar.Views.TabBarWindow();
+                            System.Threading.Tasks.TaskCompletionSource<bool> completed = new System.Threading.Tasks.TaskCompletionSource<bool>();
+                            window.PersistTabState = model => completed.TrySetResult(true);
+                            KjTabBar.Views.TabBarWindowContextMenuBuilder builder =
+                                new KjTabBar.Views.TabBarWindowContextMenuBuilder(window, explorer);
+                            System.Windows.Controls.ContextMenu menu = new System.Windows.Controls.ContextMenu();
+                            typeof(KjTabBar.Views.TabBarWindowContextMenuBuilder).GetMethod("AddHistoryMenu",
+                                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                                .Invoke(builder, new object[] { menu, vm });
+                            System.Windows.Controls.MenuItem history = (System.Windows.Controls.MenuItem)menu.Items[0];
+                            Assert.AreEqual(2, history.Items.Count);
+                            System.Windows.Controls.MenuItem older = (System.Windows.Controls.MenuItem)history.Items[1];
+                            Assert.AreEqual(@"C:\Older_Name", ((System.Windows.Controls.TextBlock)older.Header).Text);
+                            older.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.MenuItem.ClickEvent));
+                            Assert.AreSame(completed.Task, await System.Threading.Tasks.Task.WhenAny(completed.Task,
+                                System.Threading.Tasks.Task.Delay(3000)));
+                            Assert.AreEqual(@"C:\Older_Name", vm.ActiveTab.Path);
+                            Assert.AreEqual(@"C:\Missing", vm.GetHistoryItems()[0].Path);
+                        }
+                    }
+                    catch (Exception ex) { failure = ex; }
+                    finally { if (window != null) window.Close(); dispatcher.InvokeShutdown(); }
+                }));
+                System.Windows.Threading.Dispatcher.Run();
+            });
+            thread.SetApartmentState(System.Threading.ApartmentState.STA);
+            thread.IsBackground = true;
+            thread.Start();
+            Assert.IsTrue(thread.Join(10000), "History menu stalled.");
+            if (failure != null) throw failure;
+        }
+
+        [TestMethod]
+        public void Repair3_DetachPrecheckRefreshesReconnectedSuccessor()
+        {
+            ReconnectingExplorer explorer = new ReconnectingExplorer();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\A"))
+            {
+                TabItemViewModel first = new TabItemViewModel(@"C:\Missing", "First", explorer);
+                TabItemViewModel successor = new TabItemViewModel(first.Path, "Second", explorer);
+                vm.Tabs.Add(first); vm.Tabs.Add(successor);
+                vm.SelectTabAsync(first, null, null).GetAwaiter().GetResult();
+                explorer.Available = true;
+                Assert.IsTrue(vm.CanCloseTabAsync(vm.ActiveTab).GetAwaiter().GetResult());
+                Assert.IsFalse(vm.IsTabOperationPending);
+            }
+        }
+
+        [TestMethod]
+        public void Repair3_ReconnectedDuplicateRefreshesAvailability() { VerifyReconnectedOperation(0); }
+        [TestMethod]
+        public void Repair3_ReconnectedInsertionRefreshesAvailability() { VerifyReconnectedOperation(1); }
+        [TestMethod]
+        public void Repair3_ClosingToReconnectedTabRefreshesAvailability() { VerifyReconnectedOperation(2); }
+
+        private static void VerifyReconnectedOperation(int operation)
+        {
+            ReconnectingExplorer explorer = new ReconnectingExplorer();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\A"))
+            {
+                TabItemViewModel original = vm.ActiveTab;
+                TabItemViewModel first = new TabItemViewModel(@"C:\Missing", "Missing", explorer);
+                TabItemViewModel second = new TabItemViewModel(first.Path, "Duplicate", explorer);
+                vm.Tabs.Add(first); vm.Tabs.Add(second);
+                vm.SelectTabAsync(first, null, null).GetAwaiter().GetResult();
+                explorer.Available = true;
+                if (operation == 0) vm.DuplicateTabAsync(second, null, null).GetAwaiter().GetResult();
+                else if (operation == 1) vm.InsertTabWithPathAsync(second.Path, 2, null, null).GetAwaiter().GetResult();
+                else vm.CloseTabsAsync(0, 1, null, null).GetAwaiter().GetResult();
+                Assert.AreEqual(operation == 2 ? 1 : 3, vm.Tabs.Count);
+                Assert.AreEqual(operation != 2, vm.Tabs.Contains(original));
+                Assert.AreEqual(second.Path, vm.ActiveTab.Path);
+                Assert.AreEqual(1, explorer.Navigations);
+            }
+        }
+
+        [TestMethod]
+        public void Repair3_SelectedOlderHistoryBypassesMissingLatestAndRetainsIt()
+        {
+            SelectionAvailabilityExplorer explorer = new SelectionAvailabilityExplorer { Available = false };
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\Current"))
+            {
+                vm.RememberLocationBeforeExplorerNavigation(@"C:\Other");
+                TabItemViewModel missing = new TabItemViewModel(@"C:\Missing", "Missing", explorer);
+                vm.Tabs.Add(missing); vm.CloseTab(missing);
+                System.Collections.Generic.List<ClosedTabInfo> items = vm.GetHistoryItems();
+                Assert.AreEqual(@"C:\Missing", items[0].Path);
+                vm.ReopenClosedTabAsync(null, null, items[1]).GetAwaiter().GetResult();
+                Assert.AreEqual(@"C:\Current", vm.ActiveTab.Path);
+                Assert.AreEqual(1, vm.GetHistoryItems().Count);
+                Assert.AreSame(items[0], vm.GetHistoryItems()[0]);
+            }
+        }
+
+        [TestMethod]
+        public void Repair3_HistorySurvivesRestartAndHistoryOnlyChangesAreSaved()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), "KjTabBar.Tests." + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                string file = Path.Combine(dir, "tabs.txt");
+                MockExplorerService explorer = new MockExplorerService();
+                explorer.GetCurrentPathFunc = hwnd => @"C:\Current";
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\Current"))
+                {
+                    TabPersistenceService storage = new TabPersistenceService(file);
+                    storage.SaveTabsIfChanged(vm, true);
+                    vm.RememberLocationBeforeExplorerNavigation(@"C:\Other");
+                    storage.SaveTabsIfChanged(vm, true);
+                }
+                using (TabBarViewModel restored = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\Current"))
+                {
+                    Assert.IsTrue(new TabPersistenceService(file).LoadTabsTo(restored));
+                    Assert.AreEqual(1, restored.GetHistoryItems().Count);
+                    Assert.AreEqual(@"C:\Current", restored.GetHistoryItems()[0].Path);
+                    restored.ReopenClosedTabAsync(null, null).GetAwaiter().GetResult();
+                    Assert.IsFalse(restored.HasClosedTabs);
+                }
+            }
+            finally { Directory.Delete(dir, true); }
+        }
+
+        [TestMethod]
+        public void Repair3_HistoryBatchSurvivesRestart()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), "KjTabBar.Tests." + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                string file = Path.Combine(dir, "tabs.txt");
+                MockExplorerService explorer = new MockExplorerService();
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\A"))
+                {
+                    vm.Tabs.Add(new TabItemViewModel(@"C:\B", "B", explorer));
+                    vm.Tabs.Add(new TabItemViewModel(@"C:\C", "C", explorer));
+                    vm.CloseTabsToRight(vm.ActiveTab);
+                    new TabPersistenceService(file).SaveTabsIfChanged(vm, true);
+                }
+                using (TabBarViewModel restored = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\A"))
+                {
+                    Assert.IsTrue(new TabPersistenceService(file).LoadTabsTo(restored, false, true));
+                    restored.ReopenClosedTabAsync(null, null).GetAwaiter().GetResult();
+                    Assert.AreEqual(3, restored.Tabs.Count);
+                    Assert.AreEqual(@"C:\B", restored.Tabs[1].Path);
+                    Assert.AreEqual(@"C:\C", restored.Tabs[2].Path);
+                    Assert.IsFalse(restored.HasClosedTabs);
+                }
+            }
+            finally { Directory.Delete(dir, true); }
+        }
+
+        [TestMethod]
+        public void Repair3_PendingCloseDoesNotPersistUnconfirmedHistory()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\A"))
+            {
+                vm.RememberLocationBeforeExplorerNavigation(@"C:\Other");
+                vm.Tabs.Add(new TabItemViewModel(@"C:\B", "B", explorer));
+                vm.CloseTab(vm.ActiveTab);
+                Assert.IsNotNull(vm.PendingClosePaths);
+                Assert.AreEqual(1, vm.GetPersistableHistory().Count);
+                Assert.AreEqual(2, vm.GetHistoryItems().Count);
+                vm.TimeoutPendingNavigation();
+                Assert.AreEqual(1, vm.GetHistoryItems().Count);
+            }
+        }
+
+        [TestMethod]
+        public void Repair3_CorruptHistoryPreventsOverwritingSnapshot()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), "KjTabBar.Tests." + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                string file = Path.Combine(dir, "tabs.txt");
+                TabPersistenceService storage = new TabPersistenceService(file);
+                string snapshot = storage.GetSnapshotFilePathInstance();
+                KjTabBar.Helpers.ProtectedTextStorage.SaveLines(snapshot,
+                    new[] { "kjtb-tabs-v2", "0", @"C:\A", "1", @"C:\A", "1", "1", "invalid", @"C:\B" });
+                byte[] before = File.ReadAllBytes(snapshot);
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), new MockExplorerService(), @"C:\Other"))
+                {
+                    Assert.IsFalse(storage.LoadTabsTo(vm));
+                    storage.SaveTabsIfChanged(vm, true);
+                    CollectionAssert.AreEqual(before, File.ReadAllBytes(snapshot));
+                }
+            }
+            finally { Directory.Delete(dir, true); }
+        }
+
+        [TestMethod]
+        public void Reaudit_ReopenDisposedDuringProbeDoesNotPrepareHost()
+        {
+            BlockingAvailabilityExplorerService explorer = new BlockingAvailabilityExplorerService();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\A"))
+            {
+                TabItemViewModel closed = new TabItemViewModel(@"C:\B", "B", explorer);
+                vm.Tabs.Add(closed); vm.CloseTab(closed);
+                bool prepared = false;
+                System.Threading.Tasks.Task reopening = vm.ReopenClosedTabAsync(path =>
+                {
+                    prepared = true;
+                    return System.Threading.Tasks.Task.FromResult(true);
+                }, null);
+                try
+                {
+                    Assert.IsTrue(explorer.Entered.Wait(2000));
+                    vm.Dispose();
+                }
+                finally { explorer.Release.Set(); }
+                reopening.GetAwaiter().GetResult();
+                Assert.IsFalse(prepared);
+                Assert.IsTrue(vm.HasClosedTabs);
+                Assert.AreEqual(1, vm.Tabs.Count);
+                Assert.IsFalse(vm.IsTabOperationPending);
+            }
+        }
+
+        [TestMethod]
+        public void Reaudit_AutoCloseRetainsTabChangedWhileNavigationIsAccepted()
+        {
+            SelectionAvailabilityExplorer explorer = new SelectionAvailabilityExplorer { Available = false };
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\Missing"))
+            {
+                TabItemViewModel original = vm.ActiveTab;
+                explorer.NavigateFunc = (hwnd, path) => { original.Path = @"C:\Restored"; return true; };
+                vm.SelectTabAsync(original, null, null).GetAwaiter().GetResult();
+                Assert.IsTrue(vm.Tabs.Contains(original));
+                Assert.IsFalse(vm.HasClosedTabs);
+                Assert.IsFalse(vm.IsTabOperationPending);
+            }
+        }
+
+        [TestMethod]
+        public void Reaudit_QueuedClickIsDiscardedWhenDisposedDuringProbe()
+        {
+            LatestClickExplorer explorer = new LatestClickExplorer();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\A"))
+            {
+                TabItemViewModel original = vm.ActiveTab;
+                TabItemViewModel b = new TabItemViewModel(@"C:\B", "B", explorer);
+                TabItemViewModel c = new TabItemViewModel(@"C:\C", "C", explorer);
+                vm.Tabs.Add(b); vm.Tabs.Add(c);
+                System.Threading.Tasks.Task first = vm.SelectTabAsync(b, null, null);
+                System.Threading.Tasks.Task last;
+                try
+                {
+                    Assert.IsTrue(explorer.Entered.Wait(2000));
+                    last = vm.SelectTabAsync(c, null, null);
+                    vm.Dispose();
+                }
+                finally { explorer.Release.Set(); }
+                System.Threading.Tasks.Task.WhenAll(first, last).GetAwaiter().GetResult();
+                Assert.AreSame(original, vm.ActiveTab);
+                Assert.AreEqual(3, vm.Tabs.Count);
+                Assert.IsFalse(vm.HasClosedTabs);
+                Assert.AreEqual(0, explorer.CChecks);
+            }
+        }
+
+        [TestMethod]
+        public void Reaudit_ReopenRefreshesNegativeAvailabilityAfterFolderReturns()
+        {
+            ReconnectingExplorer explorer = new ReconnectingExplorer();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\A"))
+            {
+                TabItemViewModel missing = new TabItemViewModel(@"C:\Missing", "Missing", explorer);
+                vm.Tabs.Add(missing);
+                vm.SelectTabAsync(missing, null, null).GetAwaiter().GetResult();
+                Assert.IsFalse(vm.Tabs.Contains(missing));
+                Assert.IsTrue(vm.HasClosedTabs);
+                explorer.Available = true;
+                vm.ReopenClosedTabAsync(null, null).GetAwaiter().GetResult();
+                Assert.AreEqual(@"C:\Missing", vm.ActiveTab.Path);
+                Assert.IsFalse(vm.HasClosedTabs);
+                Assert.AreEqual(1, explorer.Navigations);
+            }
+        }
+
+        [TestMethod]
+        public void Reaudit_ReopenProbeFailurePreservesHistoryAndCanRetry()
+        {
+            ReconnectingExplorer explorer = new ReconnectingExplorer();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\A"))
+            {
+                TabItemViewModel missing = new TabItemViewModel(@"C:\Missing", "Missing", explorer);
+                vm.Tabs.Add(missing);
+                vm.SelectTabAsync(missing, null, null).GetAwaiter().GetResult();
+                explorer.Fail = true;
+                vm.ReopenClosedTabAsync(null, null).GetAwaiter().GetResult();
+                Assert.IsTrue(vm.HasClosedTabs);
+                Assert.AreEqual(1, vm.Tabs.Count);
+                Assert.IsFalse(vm.IsTabOperationPending);
+                explorer.Fail = false;
+                explorer.Available = true;
+                vm.ReopenClosedTabAsync(null, null).GetAwaiter().GetResult();
+                Assert.IsFalse(vm.HasClosedTabs);
+            }
+        }
+
+        private sealed class ReconnectingExplorer : MockExplorerService
+        {
+            private readonly int _ownerThread = System.Threading.Thread.CurrentThread.ManagedThreadId;
+            private bool _cached;
+            internal bool Available, Fail;
+            internal int Navigations;
+            public override bool IsTabPathCurrentlyAvailable(string path)
+            {
+                if (path != @"C:\Missing") return true;
+                if (System.Threading.Thread.CurrentThread.ManagedThreadId != _ownerThread)
+                {
+                    if (Fail) throw new TimeoutException("Availability timeout");
+                    _cached = Available;
+                }
+                return _cached;
+            }
+            public override string GetCurrentPath(IntPtr hwnd) { return @"C:\A"; }
+            public override bool Navigate(IntPtr hwnd, string path) { Navigations++; return true; }
+        }
+
+        [TestMethod]
+        public void Reaudit_LatestClickWinsDuringProbeWithoutClosingEarlierMissingTab()
+        {
+            LatestClickExplorer explorer = new LatestClickExplorer();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\A"))
+            {
+                TabItemViewModel b = new TabItemViewModel(@"C:\B", "B", explorer);
+                TabItemViewModel c = new TabItemViewModel(@"C:\C", "C", explorer);
+                TabItemViewModel d = new TabItemViewModel(@"C:\D", "D", explorer);
+                vm.Tabs.Add(b); vm.Tabs.Add(c); vm.Tabs.Add(d);
+                System.Threading.Tasks.Task first = vm.SelectTabAsync(b, null, null);
+                System.Threading.Tasks.Task second, last;
+                try
+                {
+                    Assert.IsTrue(explorer.Entered.Wait(2000));
+                    second = vm.SelectTabAsync(c, null, null);
+                    last = vm.SelectTabAsync(d, null, null);
+                }
+                finally { explorer.Release.Set(); }
+                System.Threading.Tasks.Task.WhenAll(first, second, last).GetAwaiter().GetResult();
+                Assert.AreSame(d, vm.ActiveTab);
+                Assert.IsTrue(vm.Tabs.Contains(b));
+                Assert.IsFalse(vm.HasClosedTabs);
+                Assert.AreEqual(0, explorer.CChecks);
+                Assert.IsFalse(vm.IsTabOperationPending);
+            }
+        }
+
+        private sealed class LatestClickExplorer : MockExplorerService
+        {
+            internal readonly System.Threading.ManualResetEventSlim Entered = new System.Threading.ManualResetEventSlim();
+            internal readonly System.Threading.ManualResetEventSlim Release = new System.Threading.ManualResetEventSlim();
+            internal int CChecks;
+            public override string GetCurrentPath(IntPtr hwnd) { return @"C:\A"; }
+            public override bool IsTabPathCurrentlyAvailable(string path)
+            {
+                if (path == @"C:\C") CChecks++;
+                if (path != @"C:\B") return true;
+                Entered.Set();
+                if (!Release.Wait(3000)) throw new TimeoutException();
+                return false;
+            }
+        }
+
+        [TestMethod]
+        public void Reaudit_AutoCloseDoesNotRemoveTabChangedDuringHostPreparation()
+        {
+            SelectionAvailabilityExplorer explorer = new SelectionAvailabilityExplorer { Available = false };
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\Missing"))
+            {
+                TabItemViewModel original = vm.ActiveTab;
+                System.Threading.ManualResetEventSlim entered = new System.Threading.ManualResetEventSlim();
+                System.Threading.Tasks.TaskCompletionSource<bool> ready = new System.Threading.Tasks.TaskCompletionSource<bool>();
+                System.Threading.Tasks.Task selecting = vm.SelectTabAsync(original, path => { entered.Set(); return ready.Task; }, null);
+                Assert.IsTrue(entered.Wait(2000));
+                original.Path = @"C:\Restored";
+                ready.SetResult(true);
+                selecting.GetAwaiter().GetResult();
+                Assert.IsTrue(vm.Tabs.Contains(original));
+                Assert.IsFalse(vm.HasClosedTabs);
+                Assert.IsFalse(vm.IsTabOperationPending);
+            }
+        }
+
+        [TestMethod]
+        public void Reaudit_ExplorerNavigationKeepsPreviousLocationInHistory()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            explorer.GetCurrentPathFunc = hwnd => @"C:\Desktop";
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"Z:\Original"))
+            {
+                vm.SyncWithExplorerAsync().GetAwaiter().GetResult();
+                Assert.AreEqual(@"C:\Desktop", vm.ActiveTab.Path);
+                Assert.IsTrue(vm.HasClosedTabs);
+                vm.ReopenClosedTabAsync(null, null).GetAwaiter().GetResult();
+                Assert.AreEqual(@"Z:\Original", vm.ActiveTab.Path);
+                Assert.AreEqual(2, vm.Tabs.Count);
+            }
+        }
+
+        [TestMethod]
+        public void Reaudit_NavigationArrivalDoesNotCreateHistory()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            explorer.GetCurrentPathFunc = hwnd => @"C:\A";
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\A"))
+            {
+                TabItemViewModel target = new TabItemViewModel(@"C:\B", "B", explorer);
+                vm.Tabs.Add(target);
+                vm.SelectTab(target);
+                explorer.GetCurrentPathFunc = hwnd => @"C:\B";
+                vm.SyncWithExplorerAsync().GetAwaiter().GetResult();
+                Assert.IsNull(vm.NavigationTracker.NavigatingToPath);
+                Assert.IsFalse(vm.HasClosedTabs);
+            }
+        }
+
+        [TestMethod]
+        public void SelectionAvailability_DiscardsMissingResultAfterHostChange()
+        {
+            VerifyInterruptedAvailability(false);
+        }
+
+        [TestMethod]
+        public void SelectionAvailability_DiscardsMissingResultAfterDisposal()
+        {
+            VerifyInterruptedAvailability(true);
+        }
+
+        private static void VerifyInterruptedAvailability(bool dispose)
+        {
+            BlockingAvailabilityExplorerService explorer = new BlockingAvailabilityExplorerService();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\A"))
+            {
+                TabItemViewModel target = new TabItemViewModel(@"C:\B", "B", explorer);
+                vm.Tabs.Add(target);
+                System.Threading.Tasks.Task selecting = vm.SelectTabAsync(target, null, null);
+                try
+                {
+                    Assert.IsTrue(explorer.Entered.Wait(2000));
+                    if (dispose) vm.Dispose();
+                    else vm.SetExplorerHwnd((IntPtr)456);
+                }
+                finally { explorer.Release.Set(); }
+                selecting.GetAwaiter().GetResult();
+                Assert.IsTrue(vm.Tabs.Contains(target));
+                Assert.IsFalse(vm.HasClosedTabs);
+                Assert.IsFalse(vm.IsTabOperationPending);
+            }
+        }
+
+        [TestMethod]
+        public void SelectionAvailability_SyncNeverProbesInactiveOrActiveTabs()
+        {
+            CountingAvailabilityExplorer explorer = new CountingAvailabilityExplorer();
+            explorer.GetCurrentPathFunc = hwnd => @"C:\A";
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\A"))
+            {
+                vm.Tabs.Add(new TabItemViewModel(@"Z:\Offline", "Offline", explorer));
+                explorer.Calls = 0;
+                for (int i = 0; i < 3; i++)
+                {
+                    vm.NavigationTracker.InvalidateCache();
+                    vm.SyncWithExplorerAsync().GetAwaiter().GetResult();
+                }
+                Assert.AreEqual(0, explorer.Calls);
+                Assert.AreEqual(2, vm.Tabs.Count);
+                Assert.IsFalse(vm.HasClosedTabs);
+            }
+        }
+
+        [TestMethod]
+        public void SelectionAvailability_ClosesOnlyClickedMissingTabAndKeepsHistory()
+        {
+            DeletedInactiveTabExplorerService explorer = new DeletedInactiveTabExplorerService();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\Alive"))
+            {
+                TabItemViewModel original = vm.ActiveTab;
+                TabItemViewModel missing = new TabItemViewModel(@"C:\DeletedFolder", "Missing", explorer);
+                TabItemViewModel duplicate = new TabItemViewModel(missing.Path, "Duplicate", explorer);
+                vm.Tabs.Add(missing);
+                vm.Tabs.Add(duplicate);
+                bool prepared = false;
+                vm.SelectTabAsync(missing, path => { prepared = true; return System.Threading.Tasks.Task.FromResult(true); }, null).GetAwaiter().GetResult();
+                Assert.IsFalse(vm.Tabs.Contains(missing));
+                Assert.IsTrue(vm.Tabs.Contains(duplicate));
+                Assert.AreSame(original, vm.ActiveTab);
+                Assert.IsTrue(vm.HasClosedTabs);
+                Assert.IsFalse(prepared);
+                Assert.IsFalse(vm.IsTabOperationPending);
+            }
+        }
+
+        [TestMethod]
+        public void SelectionAvailability_LastMissingTabNavigatesHomeBeforeClosing()
+        {
+            VerifyMissingActiveSelection(true);
+        }
+
+        [TestMethod]
+        public void SelectionAvailability_LastMissingTabIsRetainedIfHomeNavigationFails()
+        {
+            VerifyMissingActiveSelection(false);
+        }
+
+        private static void VerifyMissingActiveSelection(bool succeeds)
+        {
+            SelectionAvailabilityExplorer explorer = new SelectionAvailabilityExplorer();
+            explorer.Available = false;
+            explorer.NavigateFunc = (hwnd, path) => succeeds;
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\Missing"))
+            {
+                TabItemViewModel original = vm.ActiveTab;
+                vm.SelectTabAsync(original, null, null).GetAwaiter().GetResult();
+                Assert.AreEqual(1, vm.Tabs.Count);
+                Assert.AreEqual(!succeeds, vm.Tabs.Contains(original));
+                Assert.AreEqual(succeeds, vm.HasClosedTabs);
+                Assert.IsFalse(vm.IsTabOperationPending);
+            }
+        }
+
+        [TestMethod]
+        public void SelectionAvailability_TimeoutRetainsTabAndLaterSelectionRetries()
+        {
+            SelectionAvailabilityExplorer explorer = new SelectionAvailabilityExplorer();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\A"))
+            {
+                TabItemViewModel original = vm.ActiveTab;
+                TabItemViewModel target = new TabItemViewModel(@"C:\Missing", "Target", explorer);
+                vm.Tabs.Add(target);
+                explorer.Fail = true;
+                vm.SelectTabAsync(target, null, null).GetAwaiter().GetResult();
+                Assert.AreEqual(2, vm.Tabs.Count);
+                Assert.AreSame(original, vm.ActiveTab);
+                Assert.IsFalse(vm.HasClosedTabs);
+                explorer.Fail = false;
+                vm.SelectTabAsync(target, null, null).GetAwaiter().GetResult();
+                Assert.AreSame(target, vm.ActiveTab);
+                Assert.IsFalse(vm.IsTabOperationPending);
+            }
+        }
+
+        [TestMethod]
+        public void SelectionAvailability_DiscardsMissingResultAfterPathChangesBack()
+        {
+            BlockingAvailabilityExplorerService explorer = new BlockingAvailabilityExplorerService();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\A"))
+            {
+                TabItemViewModel target = new TabItemViewModel(@"C:\B", "B", explorer);
+                vm.Tabs.Add(target);
+                System.Threading.Tasks.Task selecting = vm.SelectTabAsync(target, null, null);
+                try
+                {
+                    Assert.IsTrue(explorer.Entered.Wait(2000));
+                    target.Path = @"C:\Other";
+                    target.Path = @"C:\B";
+                }
+                finally { explorer.Release.Set(); }
+                selecting.GetAwaiter().GetResult();
+                Assert.IsTrue(vm.Tabs.Contains(target));
+                Assert.IsFalse(vm.HasClosedTabs);
+                Assert.IsFalse(vm.IsTabOperationPending);
+            }
+        }
+
+        private sealed class SelectionAvailabilityExplorer : MockExplorerService
+        {
+            internal bool Available = true;
+            internal bool Fail;
+            public override bool IsTabPathCurrentlyAvailable(string path)
+            {
+                if (path != @"C:\Missing") return true;
+                if (Fail) throw new TimeoutException("Simulated availability timeout");
+                return Available;
+            }
+        }
+
+        [TestMethod]
         public void Overlap_CloseThenNewRequestTimeoutRetainsCloseRollback()
         {
             SequentialFailureExplorer explorer = new SequentialFailureExplorer();
@@ -377,13 +976,13 @@ namespace UnitTestProject
         }
 
         [TestMethod]
-        public void Review_Sync_DiscardsAvailabilityAfterSelectionChanges()
+        public void Review_SelectAsync_DiscardsAvailabilityAfterSelectionChanges()
         {
             VerifyStaleAvailability(false);
         }
 
         [TestMethod]
-        public void Review_Sync_DiscardsAvailabilityAfterSelectionChangesBack()
+        public void Review_SelectAsync_DiscardsAvailabilityAfterSelectionChangesBack()
         {
             VerifyStaleAvailability(true);
         }
@@ -396,7 +995,7 @@ namespace UnitTestProject
                 TabItemViewModel original = vm.ActiveTab;
                 TabItemViewModel next = new TabItemViewModel(@"C:\B", "B", explorer);
                 vm.Tabs.Add(next);
-                System.Threading.Tasks.Task syncing = vm.SyncWithExplorerAsync();
+                System.Threading.Tasks.Task syncing = vm.SelectTabAsync(next, null, null);
                 try
                 {
                     Assert.IsTrue(explorer.Entered.Wait(2000));
@@ -420,7 +1019,7 @@ namespace UnitTestProject
             {
                 Entered.Set();
                 if (!Release.Wait(3000)) throw new TimeoutException();
-                return true;
+                return false;
             }
         }
 
@@ -435,7 +1034,9 @@ namespace UnitTestProject
                 vm.Tabs.Add(target);
                 System.Threading.Tasks.TaskCompletionSource<bool> ready = new System.Threading.Tasks.TaskCompletionSource<bool>();
                 bool revealed = false;
-                System.Threading.Tasks.Task selecting = vm.SelectTabAsync(target, path => ready.Task, () => revealed = true);
+                System.Threading.ManualResetEventSlim prepared = new System.Threading.ManualResetEventSlim();
+                System.Threading.Tasks.Task selecting = vm.SelectTabAsync(target, path => { prepared.Set(); return ready.Task; }, () => revealed = true);
+                Assert.IsTrue(prepared.Wait(2000));
                 vm.Tabs.Remove(target);
                 ready.SetResult(true);
                 selecting.GetAwaiter().GetResult();
@@ -578,8 +1179,10 @@ namespace UnitTestProject
                 vm.Tabs.Add(closed); vm.CloseTab(closed);
                 System.Threading.Tasks.TaskCompletionSource<bool> ready = new System.Threading.Tasks.TaskCompletionSource<bool>();
                 bool revealed = false;
-                System.Threading.Tasks.Task reopening = vm.ReopenClosedTabAsync(path => ready.Task,
+                System.Threading.ManualResetEventSlim prepared = new System.Threading.ManualResetEventSlim();
+                System.Threading.Tasks.Task reopening = vm.ReopenClosedTabAsync(path => { prepared.Set(); return ready.Task; },
                     action => { try { action(); } finally { revealed = true; } });
+                Assert.IsTrue(prepared.Wait(2000));
                 vm.Dispose(); ready.SetResult(true);
                 reopening.GetAwaiter().GetResult();
                 Assert.AreEqual(1, vm.Tabs.Count);
@@ -1355,7 +1958,7 @@ namespace UnitTestProject
         }
 
         [TestMethod]
-        public void SyncWithExplorerAsync_Removes_Unavailable_Inactive_Tab()
+        public void SyncWithExplorerAsync_Preserves_Unavailable_Inactive_Tab()
         {
             DeletedInactiveTabExplorerService mockExplorer = new DeletedInactiveTabExplorerService();
             MockUserSettings mockSettings = new MockUserSettings();
@@ -1367,14 +1970,16 @@ namespace UnitTestProject
 
             vm.SyncWithExplorerAsync().GetAwaiter().GetResult();
 
-            Assert.AreEqual(2, vm.Tabs.Count);
+            Assert.AreEqual(3, vm.Tabs.Count);
             Assert.AreEqual(@"C:\Alive", vm.ActiveTab.Path);
             Assert.AreEqual(@"C:\Alive", vm.Tabs[0].Path);
-            Assert.AreEqual(@"C:\OtherAlive", vm.Tabs[1].Path);
+            Assert.AreEqual(@"C:\DeletedFolder", vm.Tabs[1].Path);
+            Assert.AreEqual(@"C:\OtherAlive", vm.Tabs[2].Path);
+            Assert.IsFalse(vm.HasClosedTabs);
         }
 
         [TestMethod]
-        public void SyncWithExplorerAsync_Removes_Unavailable_Active_Tab_And_Selects_Existing_Matching_Tab()
+        public void SyncWithExplorerAsync_DoesNotRemoveTabs_WhenExplorerMovesToExistingPath()
         {
             DeletedActiveTabExplorerService mockExplorer = new DeletedActiveTabExplorerService();
             MockUserSettings mockSettings = new MockUserSettings();
@@ -1383,11 +1988,11 @@ namespace UnitTestProject
             vm.Tabs.Clear();
             vm.InsertTabWithPath(@"C:\Desktop", 0, false);
             vm.InsertTabWithPath(@"C:\DeletedFolder", 1, false);
-            vm.SelectTab(vm.Tabs[1]);
+            vm.SetActiveTabOnly(vm.Tabs[1]);
 
             vm.SyncWithExplorerAsync().GetAwaiter().GetResult();
 
-            Assert.AreEqual(1, vm.Tabs.Count);
+            Assert.AreEqual(2, vm.Tabs.Count);
             Assert.AreEqual(@"C:\Desktop", vm.ActiveTab.Path);
             Assert.AreEqual(@"C:\Desktop", vm.Tabs[0].Path);
         }

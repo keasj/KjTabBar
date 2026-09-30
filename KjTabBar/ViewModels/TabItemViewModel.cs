@@ -25,6 +25,7 @@ namespace KjTabBar.ViewModels
         private string _title;
         private Models.IExplorerService _explorerService;
         private string _path;
+        internal long PathChangeVersion { get; private set; }
         private bool _isActive;
         private ImageSource _iconSource;
 
@@ -53,6 +54,7 @@ namespace KjTabBar.ViewModels
                 }
 
                 _path = value;
+                PathChangeVersion++;
                 OnPropertyChanged("Path");
                 UpdateIconSource();
             }

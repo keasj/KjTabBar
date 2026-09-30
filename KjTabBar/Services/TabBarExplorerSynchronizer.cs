@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Threading.Tasks;
 using KjTabBar.Helpers;
 using KjTabBar.Models;
@@ -51,40 +50,6 @@ namespace KjTabBar.Services
                 DateTime syncNowUtc = DateTime.UtcNow;
                 if (_viewModel.ActiveTab == null) return;
 
-                IntPtr availabilityHost = _viewModel.ExplorerHwnd;
-                List<string> pathsToCheck = new List<string>();
-                HashSet<string> uniquePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (ViewModels.TabItemViewModel tab in _viewModel.Tabs)
-                {
-                    if (!string.IsNullOrEmpty(tab.Path) && uniquePaths.Add(tab.Path)) pathsToCheck.Add(tab.Path);
-                }
-                Dictionary<string, bool> availability = await ComThreadService.Instance.InvokeAsync(delegate
-                {
-                    ExplorerManager manager = _explorerService as ExplorerManager;
-                    if (manager != null && manager.UsesShellWorker) return manager.GetPathAvailability(pathsToCheck);
-                    Dictionary<string, bool> values = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-                    foreach (string path in pathsToCheck)
-                    {
-                        if (!values.ContainsKey(path)) values[path] = _explorerService.IsTabPathCurrentlyAvailable(path);
-                    }
-                    return values;
-                });
-                if (!_viewModel.IsSynchronizationCurrent(version) || _viewModel.IsRestoringControlPanelHost || _viewModel.ExplorerHwnd != availabilityHost || _viewModel.ActiveTab == null)
-                {
-                    _viewModel.NavigationTracker.InvalidateCache();
-                    return;
-                }
-                Func<string, bool> isAvailable = path =>
-                {
-                    bool value;
-                    return path == null || !availability.TryGetValue(path, out value) || value;
-                };
-
-                if (_viewModel.RemoveUnavailableInactiveTabs(isAvailable, currentPath))
-                {
-                    shouldUpdateTitles = true;
-                }
-
                 if (_viewModel.NavigationTracker.NavigatingToPath == null &&
                     _viewModel.NavigationTracker.IsExplorerHostSwitchGraceActive(syncNowUtc) &&
                     !string.IsNullOrEmpty(currentPath) &&
@@ -129,6 +94,8 @@ namespace KjTabBar.Services
                     if (!_viewModel.PathEquals(_viewModel.ActiveTab.Path, normalizedCPPath) ||
                          !string.Equals(_viewModel.ActiveTab.BaseTitle, localizedCPTitle, StringComparison.OrdinalIgnoreCase))
                     {
+                        if (_viewModel.NavigationTracker.NavigatingToPath == null)
+                            _viewModel.RememberLocationBeforeExplorerNavigation(normalizedCPPath);
                         _viewModel.ActiveTab.Path = normalizedCPPath;
                         _viewModel.ActiveTab.BaseTitle = localizedCPTitle;
                         _viewModel.ActiveTab.Title = _viewModel.ActiveTab.BaseTitle;
@@ -171,21 +138,6 @@ namespace KjTabBar.Services
                     return;
                 }
 
-                if (!isAvailable(_viewModel.ActiveTab.Path))
-                {
-                    ViewModels.TabItemViewModel matchingTab = _viewModel.FindTabByPath(currentPath);
-                    if (matchingTab != null && matchingTab != _viewModel.ActiveTab)
-                    {
-                        ViewModels.TabItemViewModel unavailableActiveTab = _viewModel.ActiveTab;
-                        _viewModel.RememberRemovedTab(unavailableActiveTab);
-                        _viewModel.Tabs.Remove(unavailableActiveTab);
-                        _viewModel.SetActiveTabOnly(matchingTab);
-                        _viewModel.ClearPendingNavigationTracking();
-                        shouldUpdateTitles = true;
-                        return;
-                    }
-                }
-
                 // ナビゲート先パスと一致 → タブ切り替え中のナビゲーション完了
                 if (_viewModel.NavigationTracker.NavigatingToPath != null && _viewModel.PathEquals(_viewModel.NavigationTracker.NavigatingToPath, currentPath))
                 {
@@ -218,6 +170,7 @@ namespace KjTabBar.Services
                     }
                 }
 
+                _viewModel.RememberLocationBeforeExplorerNavigation(currentPath);
                 _viewModel.ActiveTab.Path = currentPath;
                 _viewModel.ActiveTab.BaseTitle = _explorerService.GetFolderName(currentPath);
                 _viewModel.ActiveTab.Title = _viewModel.ActiveTab.BaseTitle;

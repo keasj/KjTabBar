@@ -89,6 +89,7 @@ namespace KjTabBar.Views
                 await _window.ReopenClosedTabAsync(vm);
             };
             menu.Items.Add(reopenItem);
+            AddHistoryMenu(menu, vm);
 
             if (onClosed != null)
             {
@@ -113,6 +114,7 @@ namespace KjTabBar.Views
                 await _window.ReopenClosedTabAsync(vm);
             };
             menu.Items.Add(reopenItem);
+            AddHistoryMenu(menu, vm);
 
             menu.Items.Add(new Separator());
 
@@ -132,6 +134,31 @@ namespace KjTabBar.Views
 
             menu.PlacementTarget = placementTarget;
             menu.IsOpen = true;
+        }
+
+        private void AddHistoryMenu(ContextMenu menu, TabBarViewModel vm)
+        {
+            MenuItem history = new MenuItem
+            {
+                Header = _window.TryFindResource("MenuChooseHistory") as string ?? "履歴から開く",
+                IsEnabled = vm != null && vm.HasClosedTabs
+            };
+            if (vm != null)
+            {
+                foreach (ClosedTabInfo item in vm.GetHistoryItems())
+                {
+                    ClosedTabInfo selected = item;
+                    MenuItem entry = new MenuItem
+                    {
+                        // TextBlock prevents underscores in paths being interpreted as access keys.
+                        Header = new TextBlock { Text = item.Path, MaxWidth = 600, TextTrimming = TextTrimming.CharacterEllipsis },
+                        ToolTip = item.Path
+                    };
+                    entry.Click += async (sender, args) => { await _window.ReopenClosedTabAsync(vm, selected); };
+                    history.Items.Add(entry);
+                }
+            }
+            menu.Items.Add(history);
         }
 
         public void ApplyFluentMenuStyle(ContextMenu menu)

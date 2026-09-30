@@ -38,14 +38,43 @@ namespace KjTabBar.Models
                     bool isProtectedFile = hasSnapshot || ProtectedTextStorage.IsProtectedFile(file);
                     string[] paths;
                     PersistedActiveTabSelection activeTabSelection;
+                    List<List<ClosedTabInfo>> history = new List<List<ClosedTabInfo>>();
                     if (hasSnapshot)
                     {
                         string[] state = ProtectedTextStorage.LoadLines(snapshot);
                         int activeIndex;
-                        if (state.Length < 3 || state[0] != "kjtb-tabs-v1" || !int.TryParse(state[1], out activeIndex))
+                        if (state.Length < 3 || (state[0] != "kjtb-tabs-v1" && state[0] != "kjtb-tabs-v2") || !int.TryParse(state[1], out activeIndex))
                             throw new InvalidDataException("Invalid tab snapshot.");
-                        paths = new string[state.Length - 3];
-                        Array.Copy(state, 3, paths, 0, paths.Length);
+                        if (state[0] == "kjtb-tabs-v1")
+                        {
+                            paths = new string[state.Length - 3];
+                            Array.Copy(state, 3, paths, 0, paths.Length);
+                        }
+                        else
+                        {
+                            int cursor = 3;
+                            int pathCount = ReadCount(state, ref cursor);
+                            paths = new string[pathCount];
+                            Array.Copy(state, cursor, paths, 0, pathCount);
+                            cursor += pathCount;
+                            int batchCount = ReadCount(state, ref cursor);
+                            if (batchCount > 50) throw new InvalidDataException("Too many history batches.");
+                            for (int batch = 0; batch < batchCount; batch++)
+                            {
+                                int count = ReadCount(state, ref cursor);
+                                List<ClosedTabInfo> items = new List<ClosedTabInfo>();
+                                for (int item = 0; item < count; item++)
+                                {
+                                    int position;
+                                    if (cursor + 1 >= state.Length || !int.TryParse(state[cursor++], out position) ||
+                                        position < 0 || string.IsNullOrEmpty(state[cursor]))
+                                        throw new InvalidDataException("Invalid history item.");
+                                    items.Add(new ClosedTabInfo(state[cursor++], position));
+                                }
+                                history.Add(items);
+                            }
+                            if (cursor != state.Length) throw new InvalidDataException("Unexpected snapshot content.");
+                        }
                         activeTabSelection = new PersistedActiveTabSelection(activeIndex >= 0 ? (int?)activeIndex : null, state[2]);
                     }
                     else
@@ -55,7 +84,8 @@ namespace KjTabBar.Models
                     }
                     _tabsLoadFailed = false;
                     viewModel.RestoreTabs(paths, activeTabSelection.Path, activeTabSelection.Index, deferControlPanelNavigation, deferNavigation);
-                    _lastSavedTabs = BuildPersistedStateString(paths, activeTabSelection.Path, activeTabSelection.Index);
+                    viewModel.RestoreHistory(history);
+                    _lastSavedTabs = BuildPersistedStateString(paths, activeTabSelection.Path, activeTabSelection.Index) + HistoryState(history);
                     if (!isProtectedFile && paths.Length > 0)
                     {
                         ProtectedTextStorage.SaveLines(file, paths);
@@ -117,8 +147,9 @@ namespace KjTabBar.Models
                 }
                 // This single atomic replacement is the authoritative commit. The two
                 // legacy files remain mirrors for compatibility with older versions.
-                List<string> snapshot = new List<string> { "kjtb-tabs-v1", (activeTabIndex ?? -1).ToString(), activeTabPath ?? string.Empty };
+                List<string> snapshot = new List<string> { "kjtb-tabs-v2", (activeTabIndex ?? -1).ToString(), activeTabPath ?? string.Empty, paths.Count.ToString() };
                 snapshot.AddRange(paths);
+                snapshot.AddRange(SerializeHistory(viewModel.GetPersistableHistory()));
                 ProtectedTextStorage.SaveLines(GetSnapshotFilePathInstance(), snapshot);
                 ProtectedTextStorage.SaveLines(file, paths);
                 SaveActiveTabSelection(activeTabIndex, activeTabPath);
@@ -130,10 +161,40 @@ namespace KjTabBar.Models
             }
         }
 
+        private static int ReadCount(string[] state, ref int cursor)
+        {
+            int count;
+            if (cursor >= state.Length || !int.TryParse(state[cursor++], out count) ||
+                count < 0 || count > state.Length - cursor)
+                throw new InvalidDataException("Invalid snapshot count.");
+            return count;
+        }
+
+        private static List<string> SerializeHistory(List<List<ClosedTabInfo>> history)
+        {
+            List<string> result = new List<string> { history.Count.ToString() };
+            foreach (List<ClosedTabInfo> batch in history)
+            {
+                result.Add(batch.Count.ToString());
+                foreach (ClosedTabInfo item in batch)
+                {
+                    result.Add(item.Position.ToString());
+                    result.Add(item.Path);
+                }
+            }
+            return result;
+        }
+
+        private static string HistoryState(List<List<ClosedTabInfo>> history)
+        {
+            return "\n" + string.Join("\n", SerializeHistory(history));
+        }
+
         private static string BuildCurrentTabsString(TabBarViewModel viewModel)
         {
             List<string> paths = BuildPersistablePathList(viewModel);
-            return BuildPersistedStateString(paths, GetPersistableActiveTabPath(viewModel), GetPersistableActiveTabIndex(viewModel));
+            return BuildPersistedStateString(paths, GetPersistableActiveTabPath(viewModel), GetPersistableActiveTabIndex(viewModel)) +
+                HistoryState(viewModel.GetPersistableHistory());
         }
 
         private static string BuildPersistedStateString(IList<string> paths, string activeTabPath, int? activeTabIndex)
