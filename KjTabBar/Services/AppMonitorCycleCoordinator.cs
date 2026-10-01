@@ -90,7 +90,7 @@ namespace KjTabBar.Services
 
             if (_memoryMaintenance != null)
             {
-                _memoryMaintenance.PerformIfDue();
+                _ = _memoryMaintenance.PerformIfDue();
             }
 
             AppLogger.LogDiagnosticTiming("Cycle.Completed", IntPtr.Zero, cycleTimer);

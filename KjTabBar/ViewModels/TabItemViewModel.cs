@@ -56,7 +56,7 @@ namespace KjTabBar.ViewModels
                 _path = value;
                 PathChangeVersion++;
                 OnPropertyChanged("Path");
-                UpdateIconSource();
+                _ = UpdateIconSourceAsync();
             }
         }
 
@@ -79,7 +79,7 @@ namespace KjTabBar.ViewModels
             _baseTitle = string.IsNullOrEmpty(title) ? _explorerService.GetLocalizedHomeTitle() : title;
             _title = _baseTitle;
             _isActive = false;
-            UpdateIconSource();
+            _ = UpdateIconSourceAsync();
         }
 
         internal static bool ShouldUseFileAttributeIconLookup(string normalizedPath)
@@ -130,7 +130,7 @@ namespace KjTabBar.ViewModels
             _iconGeneration++;
         }
 
-        private async void UpdateIconSource()
+        private async Task UpdateIconSourceAsync()
         {
             string path = _path;
             int generation = ++_iconGeneration;
@@ -163,12 +163,12 @@ namespace KjTabBar.ViewModels
                 if (PendingIcons.TryGetValue(key, out existing)) return existing;
                 TaskCompletionSource<ImageSource> completion = new TaskCompletionSource<ImageSource>(TaskCreationOptions.RunContinuationsAsynchronously);
                 PendingIcons.Add(key, completion.Task);
-                LoadSharedIconAsync(key, manager, completion);
+                _ = LoadSharedIconAsync(key, manager, completion);
                 return completion.Task;
             }
         }
 
-        private static async void LoadSharedIconAsync(string path, ExplorerManager manager, TaskCompletionSource<ImageSource> completion)
+        private static async Task LoadSharedIconAsync(string path, ExplorerManager manager, TaskCompletionSource<ImageSource> completion)
         {
             ImageSource icon = null;
             await IconLoadGate.WaitAsync();

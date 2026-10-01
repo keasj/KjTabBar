@@ -472,11 +472,11 @@ namespace KjTabBar.Services
             Task<bool> operation = AbsorbExplorerWindowAsync(newExplorerHwnd, targetViewModel, path,
                 allowSpecialPath, isControlPanelPath, ignoreExplorerWindow, wasManagedControlPanelLaunchSource, reuseExistingTab: reuseExistingTab);
             if (operation.IsCompleted) return operation.GetAwaiter().GetResult();
-            ObserveAbsorption(operation);
+            _ = ObserveAbsorptionAsync(operation);
             return false;
         }
 
-        private async void ObserveAbsorption(Task<bool> operation)
+        private async Task ObserveAbsorptionAsync(Task<bool> operation)
         {
             try { await operation; }
             catch (Exception ex) { AppLogger.LogError("ExplorerWindowInteractionService", "Absorption failed.", ex); }

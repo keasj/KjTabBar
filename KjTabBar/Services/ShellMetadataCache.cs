@@ -30,7 +30,7 @@ namespace KjTabBar.Services
                 }
                 if (background)
                 {
-                    if (_pending.Count < 64 && _pending.Add(key)) RefreshAsync(key, load);
+                    if (_pending.Count < 64 && _pending.Add(key)) _ = RefreshAsync(key, load);
                     return fallback;
                 }
             }
@@ -39,7 +39,7 @@ namespace KjTabBar.Services
             return value;
         }
 
-        private async void RefreshAsync(string key, Func<string> load)
+        private async Task RefreshAsync(string key, Func<string> load)
         {
             try
             {

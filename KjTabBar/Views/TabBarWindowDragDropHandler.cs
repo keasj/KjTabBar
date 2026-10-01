@@ -134,7 +134,7 @@ namespace KjTabBar.Views
             e.Handled = true;
         }
 
-        public async void HandleDrop(ItemsControl tabItemsControl, DragEventArgs e, TabBarViewModel vm, Action onFinished)
+        public async Task HandleDrop(ItemsControl tabItemsControl, DragEventArgs e, TabBarViewModel vm, Action onFinished)
         {
             e.Handled = true;
             try

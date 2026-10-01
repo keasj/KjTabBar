@@ -1186,7 +1186,12 @@ namespace KjTabBar.ViewModels
             ObserveSelection(SelectTabCoreAsync(tab));
         }
 
-        private async void ObserveSelection(Task operation)
+        private void ObserveSelection(Task operation)
+        {
+            _ = ObserveSelectionAsync(operation);
+        }
+
+        private async Task ObserveSelectionAsync(Task operation)
         {
             try { await operation; }
             catch (Exception ex) { AppLogger.LogError("TabBarViewModel", "Tab operation failed.", ex); }

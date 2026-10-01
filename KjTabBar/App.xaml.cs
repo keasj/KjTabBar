@@ -46,11 +46,23 @@ namespace KjTabBar
 
         private bool _shutdownRequested;
 
-        private async void RequestShutdownAfterFileOperations()
+        private void RequestShutdownAfterFileOperations()
+        {
+            _ = RequestShutdownAfterFileOperationsAsync();
+        }
+
+        private async Task RequestShutdownAfterFileOperationsAsync()
         {
             if (_shutdownRequested) return;
             _shutdownRequested = true;
-            await FileOperationTracker.Shared.StopAndWaitAsync();
+            try
+            {
+                await FileOperationTracker.Shared.StopAndWaitAsync();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("App", "Failed while waiting for file operations during shutdown.", ex);
+            }
             Shutdown();
         }
 
@@ -369,7 +381,14 @@ namespace KjTabBar
             }
         }
 
-        private async void ForegroundEventCallback(
+        private void ForegroundEventCallback(
+            IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
+            int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
+        {
+            _ = ForegroundEventCallbackAsync(hWinEventHook, eventType, hwnd, idObject, idChild, dwEventThread, dwmsEventTime);
+        }
+
+        private async Task ForegroundEventCallbackAsync(
             IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
             int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
         {
@@ -468,12 +487,12 @@ namespace KjTabBar
                     NativeMethods.POINT mousePos;
                     if (NativeMethods.GetCursorPos(out mousePos) && window.IsPointOverAbsorbZone(mousePos))
                     {
-                        _ = ComThreadService.Instance.InvokeAsync(() =>
+                        _ = ObserveManualAbsorptionAsync(ComThreadService.Instance.InvokeAsync(() =>
                         {
                             string path = _explorerService.GetCurrentPath(hwnd);
                             if (!string.IsNullOrEmpty(path))
                             {
-                                Dispatcher.BeginInvoke(new Action(async () =>
+                                _ = ObserveManualAbsorptionAsync(Dispatcher.InvokeAsync(new Func<Task>(async () =>
                                 {
                                     try
                                     {
@@ -488,15 +507,27 @@ namespace KjTabBar
                                             }, activeTabBarVM, null);
                                     }
                                     catch (Exception ex) { AppLogger.LogError("App", "Manual absorption failed.", ex); }
-                                }));
+                                })).Task.Unwrap());
                             }
-                        });
+                        }));
                     }
                 }
             }
             catch (Exception ex)
             {
                 Helpers.AppLogger.LogError("App", "MoveSizeEndEventCallback failed.", ex);
+            }
+        }
+
+        private async Task ObserveManualAbsorptionAsync(Task operation)
+        {
+            try
+            {
+                await operation;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("App", "Manual absorption operation failed.", ex);
             }
         }
     }

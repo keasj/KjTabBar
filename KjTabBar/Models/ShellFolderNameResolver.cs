@@ -129,7 +129,10 @@ namespace KjTabBar.Models
                 AppLogger.LogError("ShellFolderNameResolver", "Shell.Application title lookup failed.", ex);
             }
 
-            if (displayPath.StartsWith("::{") || displayPath.StartsWith("shell:"))
+            bool isShellNamespacePath =
+                displayPath.StartsWith("::{", StringComparison.OrdinalIgnoreCase) ||
+                displayPath.StartsWith("shell:", StringComparison.OrdinalIgnoreCase);
+            if (isShellNamespacePath)
             {
                 IntPtr pidl = IntPtr.Zero;
                 uint dummyOut;
@@ -151,6 +154,11 @@ namespace KjTabBar.Models
                         NativeMethods.ILFree(pidl);
                     }
                 }
+            }
+
+            if (isShellNamespacePath)
+            {
+                return path;
             }
 
             try

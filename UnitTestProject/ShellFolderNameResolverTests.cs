@@ -46,6 +46,27 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void GetFolderName_ReturnsShellPath_WhenShellTitleCannotBeResolved()
+        {
+            ShellFolderNameResolver resolver = new ShellFolderNameResolver(
+                () => "Home",
+                () => "ControlPanel",
+                path => false,
+                path => path,
+                path => path,
+                () => null,
+                null,
+                null
+            );
+
+            const string shellPath = "::{00000000-0000-0000-0000-000000000000}";
+
+            string title = resolver.GetFolderName(shellPath);
+
+            Assert.AreEqual(shellPath, title);
+        }
+
+        [TestMethod]
         public void GetFolderName_FallsBackToDirectoryInfoName_ForNormalPath()
         {
             ShellFolderNameResolver resolver = new ShellFolderNameResolver(

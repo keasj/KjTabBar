@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Threading.Tasks;
 using KjTabBar.Helpers;
 using KjTabBar.Services;
 
@@ -20,7 +21,12 @@ namespace KjTabBar.Models
             return MaintenanceInterval;
         }
 
-        public async void PerformIfDue()
+        public Task PerformIfDue()
+        {
+            return PerformIfDueAsync();
+        }
+
+        public async Task PerformIfDueAsync()
         {
             DateTime nowUtc = DateTime.UtcNow;
             if (_lastMaintenanceUtc != DateTime.MinValue)

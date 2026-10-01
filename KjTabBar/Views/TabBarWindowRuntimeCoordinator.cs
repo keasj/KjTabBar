@@ -279,9 +279,9 @@ namespace KjTabBar.Views
             HandlePositionTimerTick();
         }
 
-        private async void SyncTimer_Tick(object sender, EventArgs e)
+        private void SyncTimer_Tick(object sender, EventArgs e)
         {
-            await HandleSyncTimerTickAsync();
+            _ = HandleSyncTimerTickAsync();
         }
 
         private void RunQueuedPositionUpdate()

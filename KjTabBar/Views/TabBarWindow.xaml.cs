@@ -359,7 +359,12 @@ namespace KjTabBar.Views
 
         // ====== イベントハンドラ ======
 
-        private async void AddTab_Click(object sender, RoutedEventArgs e)
+        private void AddTab_Click(object sender, RoutedEventArgs e)
+        {
+            _ = ObserveEventTaskAsync(AddTab_ClickAsync(sender, e), "AddTab_Click");
+        }
+
+        private async Task AddTab_ClickAsync(object sender, RoutedEventArgs e)
         {
             TabBarViewModel vm = GetVM();
             if (vm == null) return;
@@ -390,7 +395,12 @@ namespace KjTabBar.Views
             ReturnFocusToExplorer();
         }
 
-        private async void CloseTab_Click(object sender, RoutedEventArgs e)
+        private void CloseTab_Click(object sender, RoutedEventArgs e)
+        {
+            _ = ObserveEventTaskAsync(CloseTab_ClickAsync(sender, e), "CloseTab_Click");
+        }
+
+        private async Task CloseTab_ClickAsync(object sender, RoutedEventArgs e)
         {
             e.Handled = true;
             Button button = (Button)sender;
@@ -404,7 +414,12 @@ namespace KjTabBar.Views
             e.Handled = true;
         }
 
-        private async void Tab_Click(object sender, MouseButtonEventArgs e)
+        private void Tab_Click(object sender, MouseButtonEventArgs e)
+        {
+            _ = ObserveEventTaskAsync(Tab_ClickAsync(sender, e), "Tab_Click");
+        }
+
+        private async Task Tab_ClickAsync(object sender, MouseButtonEventArgs e)
         {
             FrameworkElement element = (FrameworkElement)sender;
             TabItemViewModel tab = (TabItemViewModel)element.DataContext;
@@ -539,7 +554,24 @@ namespace KjTabBar.Views
             _isDragging = false;
         }
 
-        private async void Tab_MouseMove(object sender, MouseEventArgs e)
+        private void Tab_MouseMove(object sender, MouseEventArgs e)
+        {
+            _ = ObserveEventTaskAsync(Tab_MouseMoveAsync(sender, e), "Tab_MouseMove");
+        }
+
+        private async Task ObserveEventTaskAsync(Task operation, string operationName)
+        {
+            try
+            {
+                await operation;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("TabBarWindow", operationName + " failed.", ex);
+            }
+        }
+
+        private async Task Tab_MouseMoveAsync(object sender, MouseEventArgs e)
         {
             if (e.LeftButton == MouseButtonState.Pressed && !_isDragging)
             {
@@ -656,7 +688,7 @@ namespace KjTabBar.Views
             if (_dragDropHandler != null)
             {
                 TabBarViewModel vm = GetVM();
-                _dragDropHandler.HandleDrop(TabItemsControl, e, vm, ReturnFocusToExplorer);
+                _ = _dragDropHandler.HandleDrop(TabItemsControl, e, vm, ReturnFocusToExplorer);
             }
         }
 
