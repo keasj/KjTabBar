@@ -360,6 +360,20 @@ namespace UnitTestProject
                 }
             }
         }
+
+        [TestMethod]
+        public void UnrelatedForeground_DoesNotDiscardPendingInvocation()
+        {
+            TabBarViewModel target = CreateTarget();
+            using (DesktopRepeatedLaunchService service = CreateService(target, (s, c, h) => Task.FromResult(@"C:\Other")))
+            {
+                service.CaptureInvocation((IntPtr)10, -4, 20);
+                service.OnForegroundAsync((IntPtr)200).GetAwaiter().GetResult();
+                service.OnForegroundAsync((IntPtr)100).GetAwaiter().GetResult();
+                Assert.AreEqual(@"C:\Other", target.ActiveTab.Path);
+            }
+        }
+
         [TestMethod]
         public void ForegroundWithoutInvocation_DoesNotDuplicate()
         {

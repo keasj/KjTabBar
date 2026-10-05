@@ -111,10 +111,11 @@ namespace KjTabBar.Services
         internal async Task OnForegroundAsync(IntPtr hwnd)
         {
             Request request = _pending;
+            if (request == null || request.Host != hwnd) return;
             _pending = null;
             // The deadline associates the foreground event with the invocation, not
             // the duration of the already-started, timeout-bounded Shell resolution.
-            if (request == null || request.Host != hwnd || !IsCurrent(request) ||
+            if (!IsCurrent(request) ||
                 _utcNow() - request.Started > TimeSpan.FromSeconds(2)) return;
             try
             {

@@ -6,6 +6,7 @@ namespace KjTabBar.Models
 {
     internal sealed class ExplorerWindowTrackingState
     {
+        private const int MaxAbsorptionFailureRetryCount = 3;
         private static readonly TimeSpan ExplicitIndependentLaunchTimeout = TimeSpan.FromSeconds(5);
         private static readonly TimeSpan InternalHostSwitchLaunchTimeout = TimeSpan.FromSeconds(10);
         private static readonly TimeSpan RecentClosedManagedExplorerRectRetention = TimeSpan.FromSeconds(10);
@@ -27,6 +28,7 @@ namespace KjTabBar.Models
         public HashSet<IntPtr> InternalHostSwitchLaunchWindows { get; private set; }
         public HashSet<IntPtr> ProcessingExplorerWindows { get; private set; }
         public Dictionary<IntPtr, int> AbsorbPathRetryCounts { get; private set; }
+        public Dictionary<IntPtr, int> AbsorptionFailureRetryCounts { get; private set; }
         public HashSet<IntPtr> DesktopLaunchCandidates { get; private set; }
         public HashSet<IntPtr> DesktopInteractiveLaunchCandidates { get; private set; }
         public HashSet<IntPtr> ControlPanelTabLaunchCandidates { get; private set; }
@@ -66,6 +68,7 @@ namespace KjTabBar.Models
             InternalHostSwitchLaunchWindows = new HashSet<IntPtr>();
             ProcessingExplorerWindows = new HashSet<IntPtr>();
             AbsorbPathRetryCounts = new Dictionary<IntPtr, int>();
+            AbsorptionFailureRetryCounts = new Dictionary<IntPtr, int>();
             DesktopLaunchCandidates = new HashSet<IntPtr>();
             DesktopInteractiveLaunchCandidates = new HashSet<IntPtr>();
             ControlPanelTabLaunchCandidates = new HashSet<IntPtr>();
@@ -157,6 +160,7 @@ namespace KjTabBar.Models
             RemoveClosedWindows(IgnoredWindows, explorerWindows);
             RemoveClosedWindows(InternalHostSwitchLaunchWindows, explorerWindows);
             RemoveClosedWindowKeys(AbsorbPathRetryCounts, explorerWindows);
+            RemoveClosedWindowKeys(AbsorptionFailureRetryCounts, explorerWindows);
             RemoveClosedWindows(DesktopLaunchCandidates, explorerWindows);
             RemoveClosedWindows(DesktopInteractiveLaunchCandidates, explorerWindows);
             RemoveClosedWindows(ControlPanelTabLaunchCandidates, explorerWindows);
@@ -187,10 +191,27 @@ namespace KjTabBar.Models
         public void ClearAbsorptionState(IntPtr hwnd)
         {
             AbsorbPathRetryCounts.Remove(hwnd);
+            AbsorptionFailureRetryCounts.Remove(hwnd);
             DesktopLaunchCandidates.Remove(hwnd);
             DesktopInteractiveLaunchCandidates.Remove(hwnd);
             ControlPanelTabLaunchCandidates.Remove(hwnd);
             ManagedControlPanelLaunchWindows.Remove(hwnd);
+        }
+
+        public int RegisterAbsorptionFailure(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return MaxAbsorptionFailureRetryCount;
+            int count;
+            AbsorptionFailureRetryCounts.TryGetValue(hwnd, out count);
+            count++;
+            AbsorptionFailureRetryCounts[hwnd] = count;
+            return count;
+        }
+
+        public bool HasExceededAbsorptionFailureRetries(IntPtr hwnd)
+        {
+            int count;
+            return AbsorptionFailureRetryCounts.TryGetValue(hwnd, out count) && count >= MaxAbsorptionFailureRetryCount;
         }
 
         public void RememberRecentClosedManagedExplorerRect(NativeMethods.RECT rect, DateTime closedUtc, NativeMethods.WINDOWPLACEMENT? placement = null)

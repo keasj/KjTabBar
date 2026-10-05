@@ -507,8 +507,9 @@ namespace KjTabBar.Services
                 if (reservedHere) targetViewModel.EndExternalTabOperation();
                 if (!completed)
                 {
+                    // Keep the window eligible for a bounded retry. The outcome coordinator
+                    // decides when repeated failures should become a permanent ignore.
                     RestoreUnabsorbedWindow(newExplorerHwnd);
-                    if (ignoreExplorerWindow != null) ignoreExplorerWindow(newExplorerHwnd);
                 }
             }
         }

@@ -52,15 +52,24 @@ namespace KjTabBar.Services
         {
             if (result != null && (result.Action == AbsorptionAction.Absorb || result.Action == AbsorptionAction.AbsorbWithFallback))
             {
-                _windowTracking.ClearAbsorptionState(hwnd);
                 TabBarViewModel target = result.Action == AbsorptionAction.Absorb && result.IsControlPanelPath && controlPanelTarget != null
                     ? controlPanelTarget : validTarget;
+                bool completed = false;
                 try
                 {
-                    await _interactionService.AbsorbExplorerWindowAsync(hwnd, target, result.ResolvedPath,
+                    completed = await _interactionService.AbsorbExplorerWindowAsync(hwnd, target, result.ResolvedPath,
                         result.AllowSpecialPath, result.IsControlPanelPath, _ignoreExplorerWindow, result.WasManagedControlPanelLaunchSource, operationReserved, result.ReuseExistingTab);
                 }
                 catch (Exception ex) { _logError("App", "AbsorbExplorerWindow failed.", ex); }
+                if (completed)
+                {
+                    _windowTracking.ClearAbsorptionState(hwnd);
+                }
+                else
+                {
+                    int failureCount = _windowTracking.RegisterAbsorptionFailure(hwnd);
+                    if (_windowTracking.HasExceededAbsorptionFailureRetries(hwnd)) _windowTracking.IgnoreWindow(hwnd);
+                }
                 return;
             }
             ApplyOutcome(hwnd, retryCount, result, validTarget, controlPanelTarget);

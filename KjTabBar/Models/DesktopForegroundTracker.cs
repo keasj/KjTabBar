@@ -4,7 +4,7 @@ namespace KjTabBar.Models
 {
     internal sealed class DesktopForegroundTracker
     {
-        private static readonly TimeSpan DesktopLaunchDetectWindow = TimeSpan.FromSeconds(2);
+        private static readonly TimeSpan DesktopLaunchDetectWindow = TimeSpan.FromSeconds(5);
         private bool _isDesktopForeground;
         private DateTime _lastDesktopLaunchTokenUtc = DateTime.MinValue;
         private DateTime _lastDesktopInteractiveLaunchTokenUtc = DateTime.MinValue;
