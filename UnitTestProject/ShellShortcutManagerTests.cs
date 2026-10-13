@@ -8,6 +8,54 @@ namespace UnitTestProject
     public class ShellShortcutManagerTests
     {
         [TestMethod]
+        public void ElevatedLinks_PreservePathsAndFileTypes_AndReportPartialFailure()
+        {
+            string[] values = { @"C:\出力\a & b.txt", @"C:\入力\a & b.txt", "0", @"C:\出力\folder", @"C:\入力\folder", "1" };
+            int calls = 0;
+            int result = KjTabBar.Services.SymbolicLinkElevationService.Execute(values, (link, target, flags) =>
+            {
+                Assert.AreEqual(values[calls * 3], link);
+                Assert.AreEqual(values[calls * 3 + 1], target);
+                Assert.AreEqual((uint)calls, flags);
+                calls++;
+                return calls != 1;
+            });
+            Assert.AreEqual(2, calls);
+            Assert.AreEqual(1, result);
+        }
+
+        [TestMethod]
+        public void ElevatedLinks_ValidateEntireBatchBeforeCreating()
+        {
+            string[] values = { @"C:\output\ok", @"C:\input\ok", "0", "relative", @"C:\input\other", "1" };
+            int calls = 0;
+            int result = KjTabBar.Services.SymbolicLinkElevationService.Execute(values, (link, target, flags) => { calls++; return true; });
+            Assert.AreEqual(1, result);
+            Assert.AreEqual(0, calls);
+        }
+
+        [TestMethod]
+        public void ElevatedLinks_ReturnSuccessWhenAllCreated()
+        {
+            int result = KjTabBar.Services.SymbolicLinkElevationService.Execute(
+                new[] { @"C:\output\file", @"C:\input\file", "0" }, (link, target, flags) => true);
+            Assert.AreEqual(0, result);
+        }
+
+        [TestMethod]
+        public void ElevatedLinks_RejectRequestWhoseContentsChanged()
+        {
+            string path = System.IO.Path.GetTempFileName();
+            try
+            {
+                System.IO.File.WriteAllText(path, "modified request");
+                Assert.AreEqual(1, KjTabBar.Services.SymbolicLinkElevationService.Run(
+                    new[] { KjTabBar.Services.SymbolicLinkElevationService.StartupArgument, path, "wrong hash" }));
+            }
+            finally { System.IO.File.Delete(path); }
+        }
+
+        [TestMethod]
         public void ResolveShortcutTarget_ReturnsInputPath_WhenNotLnkFile()
         {
             ShellShortcutManager manager = new ShellShortcutManager(

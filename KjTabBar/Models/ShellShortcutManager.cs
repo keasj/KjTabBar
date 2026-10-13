@@ -282,7 +282,7 @@ namespace KjTabBar.Models
                 if (!NativeMethods.CreateSymbolicLink(linkPath, sourcePath, flags))
                 {
                     int errorCode = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
-                    if (errorCode == 1314)
+                    if (errorCode == 1314 || errorCode == 5)
                     {
                         failedLinks.Add(link);
                     }
@@ -295,11 +295,15 @@ namespace KjTabBar.Models
 
             if (failedLinks.Count > 0)
             {
-                System.Windows.MessageBox.Show(
-                    "シンボリックリンクを作成する権限がありません。Windowsの設定で開発者モードをオンにするか、権限のある場所を指定してください。",
-                    "権限の確認",
-                    System.Windows.MessageBoxButton.OK,
-                    System.Windows.MessageBoxImage.Warning);
+                int result = Services.SymbolicLinkElevationService.Create(failedLinks, ownerHwnd);
+                if (result == 1223)
+                {
+                    ShowOperationError("管理者権限の確認がキャンセルされたため、権限が必要なシンボリックリンクの作成を中止しました。");
+                }
+                else if (result != 0)
+                {
+                    otherErrorOccurred = true;
+                }
             }
             
             if (otherErrorOccurred)

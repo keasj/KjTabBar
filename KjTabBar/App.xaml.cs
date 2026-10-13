@@ -128,6 +128,13 @@ namespace KjTabBar
 
         private void Application_Startup(object sender, StartupEventArgs e)
         {
+            if (SymbolicLinkElevationService.IsWorkerRequest(e != null ? e.Args : null))
+            {
+                _isShellWorker = true;
+                Shutdown(SymbolicLinkElevationService.Run(e.Args));
+                return;
+            }
+
             if (ShellWorkerHost.IsWorkerRequest(e != null ? e.Args : null))
             {
                 _isShellWorker = true;

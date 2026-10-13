@@ -18,7 +18,7 @@ Instead of hooking into or modifying Explorer itself, it places an independent t
   - Drag an independent Explorer window onto the dedicated merge zone at the right edge of the tab bar to absorb it as a new tab
   - When absorbed by dragging, Control Panel items such as Power Options are added as separate tabs even when an equivalent tab already exists
   - Show a context menu on right-drag drop such as "Copy here", "Move here", and "Create symbolic link here"
-  - Symbolic links are created with the current standard-user privileges; if privileges are insufficient, the app shows guidance instead of retrying as administrator.
+  - Symbolic links are first created with the current user privileges. If privileges are insufficient, a dedicated helper retries only the failed links as administrator after Windows UAC approval. Canceling UAC stops that retry.
 - **Seamless tracking and UI integration**
   - Tracks Explorer position, size, and DPI scale changes in real time
   - Automatically follows the Windows dark/light mode setting
