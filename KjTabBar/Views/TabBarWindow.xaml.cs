@@ -548,6 +548,44 @@ namespace KjTabBar.Views
 
         // ====== ドラッグ&ドロップ（WPF） ======
 
+        internal static bool IsWindowMoveBackground(DependencyObject source, DependencyObject background, DependencyObject absorbZone)
+        {
+            DependencyObject current = source;
+            while (current != null && current != background)
+            {
+                FrameworkElement element = current as FrameworkElement;
+                if (current == absorbZone || current is System.Windows.Controls.Primitives.ButtonBase ||
+                    (element != null && element.DataContext is TabItemViewModel))
+                {
+                    return false;
+                }
+                current = current is System.Windows.Media.Visual
+                    ? System.Windows.Media.VisualTreeHelper.GetParent(current)
+                    : LogicalTreeHelper.GetParent(current);
+            }
+            return current != null && current == background;
+        }
+
+        private void Background_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton != MouseButton.Left || e.ClickCount != 1 ||
+                !IsWindowMoveBackground(e.OriginalSource as DependencyObject, sender as DependencyObject, AbsorbDropZone))
+            {
+                return;
+            }
+
+            TabBarViewModel vm = GetVM();
+            if (vm == null || !NativeMethods.IsWindow(vm.ExplorerHwnd)) return;
+            NativeMethods.POINT cursor;
+            if (!NativeMethods.GetCursorPos(out cursor)) return;
+
+            // Let Explorer own the native move loop; the bar follows its existing location hook.
+            NativeMethods.ReleaseCapture();
+            int coordinates = unchecked((cursor.X & 0xffff) | ((cursor.Y & 0xffff) << 16));
+            e.Handled = NativeMethods.PostMessage(vm.ExplorerHwnd, NativeMethods.WM_NCLBUTTONDOWN,
+                new IntPtr(NativeMethods.HTCAPTION), new IntPtr(coordinates));
+        }
+
         private void Tab_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             _dragStartPoint = e.GetPosition(null);

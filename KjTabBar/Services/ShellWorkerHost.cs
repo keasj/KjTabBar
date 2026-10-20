@@ -69,6 +69,7 @@ namespace KjTabBar.Services
             {
                 case ShellOperation.DesktopInvokedShortcut:
                     return new[] { DesktopRepeatedLaunchService.ResolveInvokedShortcut(ParseWindow(path), int.Parse(request[2], CultureInfo.InvariantCulture), explorer) };
+                case ShellOperation.DirectoryExists: return new[] { Directory.Exists(path) ? "1" : "0" };
                 case ShellOperation.Ping: return new[] { Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture) };
                 case ShellOperation.WindowRegistered:
                     return new[] { explorer.IsExplorerWindowRegistered(ParseWindow(path)) ? "1" : "0" };

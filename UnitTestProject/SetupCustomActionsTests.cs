@@ -115,17 +115,17 @@ namespace UnitTestProject
         }
 
         [TestMethod]
-        public void ShouldTerminateKjTabBarProcess_Returns_True_When_Process_Path_Is_Unavailable()
+        public void ShouldTerminateKjTabBarProcess_Returns_False_When_Process_Path_Is_Unavailable()
         {
-            Assert.IsTrue(SetupCustomActions.ShouldTerminateKjTabBarProcess(
+            Assert.IsFalse(SetupCustomActions.ShouldTerminateKjTabBarProcess(
                 @"C:\Program Files\KjTabBar\KjTabBar.exe",
                 null));
         }
 
         [TestMethod]
-        public void ShouldTerminateKjTabBarProcess_Returns_True_When_Installed_Path_Is_Unresolved()
+        public void ShouldTerminateKjTabBarProcess_Returns_False_When_Installed_Path_Is_Unresolved()
         {
-            Assert.IsTrue(SetupCustomActions.ShouldTerminateKjTabBarProcess(
+            Assert.IsFalse(SetupCustomActions.ShouldTerminateKjTabBarProcess(
                 null,
                 @"C:\Other\KjTabBar.exe"));
         }

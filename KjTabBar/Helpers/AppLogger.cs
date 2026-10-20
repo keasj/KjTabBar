@@ -126,7 +126,9 @@ namespace KjTabBar.Helpers
 
             try
             {
-                string sanitized = text;
+                // Mask complete paths before replacing known roots, or their descendants leak.
+                string sanitized = SidRegex.Replace(text, "<sid>");
+                sanitized = WindowsPathRegex.Replace(sanitized, "<path>");
                 sanitized = ReplaceKnownPath(sanitized, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "<user-profile>");
                 sanitized = ReplaceKnownPath(sanitized, Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "<appdata>");
                 sanitized = ReplaceKnownPath(sanitized, Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "<localappdata>");

@@ -122,6 +122,8 @@ namespace KjTabBar.Services
 
         public bool PrepareForPath(TabBarViewModel viewModel, string targetPath)
         {
+            if (System.Threading.SynchronizationContext.Current != null)
+                throw new InvalidOperationException("Use PrepareForPathAsync on a synchronization-context thread.");
             return PrepareForPathAsync(viewModel, targetPath).GetAwaiter().GetResult();
         }
 

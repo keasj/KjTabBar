@@ -90,8 +90,10 @@ Expected outputs:
 - `Setup\Release_en\setup.exe`
 - `Setup\Release_en\Setup.msi`
 
-Patch the built MSI so a running `KjTabBar.exe` is closed before Windows Installer runs `InstallValidate`, and so any installed KjTabBar version is replaced automatically.
+Patch the built MSI so a running `KjTabBar.exe` at the target installation path is asked to exit normally before Windows Installer runs `InstallValidate`, and so any installed KjTabBar version is replaced automatically.
 Without this patch, the Visual Studio setup project's InstallerClass custom action runs too late to prevent the FilesInUse dialog.
+
+The request waits for application-owned file operations. Setup stops if the target does not exit within the bounded wait or its identity cannot be checked; it never force-terminates a process. Older releases without the shutdown signal must be closed from their tray menu before setup. Other installation paths are not shutdown targets.
 
 ```powershell
 .\tools\Patch-SetupMsiPreClose.ps1 -MsiPath 'Setup\Release\Setup.msi'

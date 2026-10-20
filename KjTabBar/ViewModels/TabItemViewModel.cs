@@ -17,7 +17,14 @@ namespace KjTabBar.ViewModels
         private static readonly object IconCacheSync = new object();
         private static readonly Dictionary<string, ImageSource> IconCache = new Dictionary<string, ImageSource>(StringComparer.OrdinalIgnoreCase);
         private static readonly Queue<string> IconCacheOrder = new Queue<string>();
-        private static readonly Dictionary<string, Task<ImageSource>> PendingIcons = new Dictionary<string, Task<ImageSource>>(StringComparer.OrdinalIgnoreCase);
+        private sealed class IconRequest
+        {
+            internal readonly TaskCompletionSource<ImageSource> Completion = new TaskCompletionSource<ImageSource>(TaskCreationOptions.RunContinuationsAsynchronously);
+            internal readonly HashSet<CancellationToken> Consumers = new HashSet<CancellationToken>();
+            internal readonly CancellationTokenSource Cancellation = new CancellationTokenSource();
+        }
+        private static readonly Dictionary<string, IconRequest> PendingIcons = new Dictionary<string, IconRequest>(StringComparer.OrdinalIgnoreCase);
+        private CancellationTokenSource _iconCancellation;
         private static readonly SemaphoreSlim IconLoadGate = new SemaphoreSlim(1, 1);
         private static readonly ImageSource DefaultIcon = CreateDefaultIcon();
         private int _iconGeneration;
@@ -128,10 +135,27 @@ namespace KjTabBar.ViewModels
         {
             _iconUpdatesStopped = true;
             _iconGeneration++;
+            CancelIconRequest();
+        }
+
+        private void CancelIconRequest()
+        {
+            if (_iconCancellation == null) return;
+            _iconCancellation.Cancel();
+            _iconCancellation.Dispose();
+            _iconCancellation = null;
+        }
+
+        internal void ResumeIconUpdates()
+        {
+            if (!_iconUpdatesStopped) return;
+            _iconUpdatesStopped = false;
+            _ = UpdateIconSourceAsync();
         }
 
         private async Task UpdateIconSourceAsync()
         {
+            CancelIconRequest();
             string path = _path;
             int generation = ++_iconGeneration;
             if (_iconUpdatesStopped) return;
@@ -143,7 +167,10 @@ namespace KjTabBar.ViewModels
                 if (manager != null && manager.UsesShellWorker)
                 {
                     if (!TryGetCachedIcon(path ?? string.Empty, out icon))
-                        icon = await GetSharedIconAsync(path, manager);
+                    {
+                        _iconCancellation = new CancellationTokenSource();
+                        icon = await GetSharedIconAsync(path, manager, _iconCancellation.Token);
+                    }
                 }
                 else icon = LoadIcon(path, _explorerService);
                 if (!_iconUpdatesStopped && generation == _iconGeneration && icon != null) IconSource = icon;
@@ -154,34 +181,59 @@ namespace KjTabBar.ViewModels
             }
         }
 
-        private static Task<ImageSource> GetSharedIconAsync(string path, ExplorerManager manager)
+        private static async Task<ImageSource> GetSharedIconAsync(string path, ExplorerManager manager, CancellationToken consumer)
         {
             string key = path ?? string.Empty;
+            IconRequest request;
             lock (IconCacheSync)
             {
-                Task<ImageSource> existing;
-                if (PendingIcons.TryGetValue(key, out existing)) return existing;
-                TaskCompletionSource<ImageSource> completion = new TaskCompletionSource<ImageSource>(TaskCreationOptions.RunContinuationsAsynchronously);
-                PendingIcons.Add(key, completion.Task);
-                _ = LoadSharedIconAsync(key, manager, completion);
-                return completion.Task;
+                bool created = !PendingIcons.TryGetValue(key, out request);
+                if (created) { request = new IconRequest(); PendingIcons.Add(key, request); }
+                request.Consumers.Add(consumer);
+                if (created) _ = LoadSharedIconAsync(key, manager, request);
+            }
+            using (consumer.Register(() => CancelIconConsumer(key, request, consumer)))
+                return await request.Completion.Task;
+        }
+
+        private static void CancelIconConsumer(string key, IconRequest request, CancellationToken consumer)
+        {
+            lock (IconCacheSync)
+            {
+                IconRequest current;
+                if (!PendingIcons.TryGetValue(key, out current) || current != request) return;
+                request.Consumers.Remove(consumer);
+                if (request.Consumers.Count != 0) return;
+                PendingIcons.Remove(key);
+                request.Cancellation.Cancel();
+                request.Completion.TrySetResult(null);
             }
         }
 
-        private static async Task LoadSharedIconAsync(string path, ExplorerManager manager, TaskCompletionSource<ImageSource> completion)
+        internal static int PendingIconRequestCount
+        {
+            get { lock (IconCacheSync) return PendingIcons.Count; }
+        }
+
+        private static async Task LoadSharedIconAsync(string path, ExplorerManager manager, IconRequest request)
         {
             ImageSource icon = null;
-            await IconLoadGate.WaitAsync();
+            bool acquired = false;
+            CancellationToken cancellation = request.Cancellation.Token;
             try
             {
+                await IconLoadGate.WaitAsync(cancellation);
+                acquired = true;
                 if (!TryGetCachedIcon(path, out icon))
                 {
                     for (int attempt = 0; attempt < 3; attempt++)
                     {
+                        cancellation.ThrowIfCancellationRequested();
                         try
                         {
                             icon = await Services.ComThreadService.Instance.InvokeAsync(delegate
                             {
+                                cancellation.ThrowIfCancellationRequested();
                                 byte[] bytes = manager.GetIconBytes(path);
                                 if (bytes.Length == 0) return null;
                                 using (System.IO.MemoryStream stream = new System.IO.MemoryStream(bytes, false))
@@ -194,6 +246,7 @@ namespace KjTabBar.ViewModels
                             if (icon != null) AddCachedIcon(path, icon);
                             break;
                         }
+                        catch (OperationCanceledException) { throw; }
                         catch (Exception ex)
                         {
                             if (attempt == 2 || ex is ObjectDisposedException)
@@ -201,16 +254,22 @@ namespace KjTabBar.ViewModels
                                 AppLogger.LogErrorThrottled("TabItemViewModel", "IconLookup", "Failed to load a tab icon.", ex, TimeSpan.FromMinutes(1));
                                 break;
                             }
-                            await Task.Delay(200 * (attempt + 1));
+                            await Task.Delay(200 * (attempt + 1), cancellation);
                         }
                     }
                 }
             }
+            catch (OperationCanceledException) { }
             finally
             {
-                IconLoadGate.Release();
-                lock (IconCacheSync) PendingIcons.Remove(path);
-                completion.TrySetResult(icon);
+                if (acquired) IconLoadGate.Release();
+                lock (IconCacheSync)
+                {
+                    IconRequest current;
+                    if (PendingIcons.TryGetValue(path, out current) && current == request) PendingIcons.Remove(path);
+                }
+                request.Completion.TrySetResult(icon);
+                request.Cancellation.Dispose();
             }
         }
 

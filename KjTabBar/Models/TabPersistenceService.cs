@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 using KjTabBar.Helpers;
 using KjTabBar.ViewModels;
 
@@ -15,21 +16,37 @@ namespace KjTabBar.Models
         private string _lastObservedTabs = "";
         private DateTime _lastObservedTabsChangedUtc = DateTime.MinValue;
         private bool _tabsLoadFailed;
+        private Task _pendingSave = Task.CompletedTask;
+        private readonly Action<string, IList<string>> _saveLines;
 
         public TabPersistenceService()
             : this(null)
         {
         }
 
-        internal TabPersistenceService(string tabsFilePath)
+        internal TabPersistenceService(string tabsFilePath, Action<string, IList<string>> saveLines = null)
         {
             _tabsFilePath = tabsFilePath;
+            _saveLines = saveLines ?? ProtectedTextStorage.SaveLines;
+        }
+
+        internal void FlushPendingSave()
+        {
+            _pendingSave.GetAwaiter().GetResult();
+        }
+
+        internal Task SaveTabsInBackground(TabBarViewModel viewModel, bool force = false)
+        {
+            // Coalesce periodic saves while the previous immutable snapshot is being written.
+            if (!_pendingSave.IsCompleted) return _pendingSave;
+            return SaveTabsCore(viewModel, force, true);
         }
 
         public bool LoadTabsTo(TabBarViewModel viewModel, bool deferControlPanelNavigation = false, bool deferNavigation = false)
         {
             try
             {
+                FlushPendingSave();
                 string file = GetTabsFilePathInstance();
                 string snapshot = GetSnapshotFilePathInstance();
                 if (File.Exists(snapshot) || File.Exists(file))
@@ -105,15 +122,21 @@ namespace KjTabBar.Models
 
         public void SaveTabsIfChanged(TabBarViewModel viewModel, bool force = false)
         {
+            FlushPendingSave();
+            SaveTabsCore(viewModel, force, false).GetAwaiter().GetResult();
+        }
+
+        private Task SaveTabsCore(TabBarViewModel viewModel, bool force, bool background)
+        {
             try
             {
-                if (viewModel == null || viewModel.Tabs.Count == 0) return;
+                if (viewModel == null || viewModel.Tabs.Count == 0) return Task.CompletedTask;
                 // Awaiting Shell acceptance is not a committed selection.
-                if (viewModel.IsTabOperationPending && viewModel.PendingClosePaths == null) return;
+                if (viewModel.IsTabOperationPending && viewModel.PendingClosePaths == null) return Task.CompletedTask;
                 if (_tabsLoadFailed)
                 {
                     AppLogger.LogInfo("TabPersistenceService", "Skipped saving tabs.txt because the previous load failed.");
-                    return;
+                    return Task.CompletedTask;
                 }
 
                 string currentTabsString = BuildCurrentTabsString(viewModel);
@@ -126,38 +149,46 @@ namespace KjTabBar.Models
 
                 if (_lastSavedTabs == currentTabsString)
                 {
-                    return;
+                    return Task.CompletedTask;
                 }
 
                 if (!force &&
                     _lastObservedTabsChangedUtc != DateTime.MinValue &&
                     (nowUtc - _lastObservedTabsChangedUtc) < SaveDebounceInterval)
                 {
-                    return;
+                    return Task.CompletedTask;
                 }
 
                 List<string> paths = BuildPersistablePathList(viewModel);
                 string activeTabPath = GetPersistableActiveTabPath(viewModel);
                 int? activeTabIndex = GetPersistableActiveTabIndex(viewModel);
                 string file = GetTabsFilePathInstance();
-                string dir = Path.GetDirectoryName(file);
-                if (!Directory.Exists(dir))
-                {
-                    Directory.CreateDirectory(dir);
-                }
                 // This single atomic replacement is the authoritative commit. The two
                 // legacy files remain mirrors for compatibility with older versions.
                 List<string> snapshot = new List<string> { "kjtb-tabs-v2", (activeTabIndex ?? -1).ToString(), activeTabPath ?? string.Empty, paths.Count.ToString() };
                 snapshot.AddRange(paths);
                 snapshot.AddRange(SerializeHistory(viewModel.GetPersistableHistory()));
-                ProtectedTextStorage.SaveLines(GetSnapshotFilePathInstance(), snapshot);
-                ProtectedTextStorage.SaveLines(file, paths);
-                SaveActiveTabSelection(activeTabIndex, activeTabPath);
-                _lastSavedTabs = currentTabsString;
+                string snapshotFile = GetSnapshotFilePathInstance();
+                Action write = delegate
+                {
+                    try
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(file));
+                        _saveLines(snapshotFile, snapshot);
+                        _saveLines(file, paths);
+                        SaveActiveTabSelection(activeTabIndex, activeTabPath);
+                        _lastSavedTabs = currentTabsString;
+                    }
+                    catch (Exception ex) { AppLogger.LogError("TabPersistenceService", "Failed to save tabs.txt.", ex); }
+                };
+                if (background) _pendingSave = Task.Run(write);
+                else { write(); _pendingSave = Task.CompletedTask; }
+                return _pendingSave;
             }
             catch (Exception ex)
             {
                 AppLogger.LogError("TabPersistenceService", "Failed to save tabs.txt.", ex);
+                return Task.CompletedTask;
             }
         }
 
@@ -349,7 +380,7 @@ namespace KjTabBar.Models
             List<string> lines = new List<string>();
             lines.Add("index=" + (activeTabIndex.HasValue ? activeTabIndex.Value.ToString() : string.Empty));
             lines.Add(activeTabPath);
-            ProtectedTextStorage.SaveLines(activeTabFilePath, lines);
+            _saveLines(activeTabFilePath, lines);
         }
 
         private static bool IsPathPersistable(string path)

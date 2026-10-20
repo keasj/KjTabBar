@@ -13,105 +13,72 @@ $actionTarget = 'CloseRunningKjTabBar'
 $managedInstallActionName = '_E2E8DF0E_1F4F_45B4_A665_76E7300B4B0F.install'
 $commitCustomActionFlag = 0x0200
 $scriptContent = @"
-Function GetRunningKjTabBarCount(service)
+Function TargetProcesses(service, targetPath)
     On Error Resume Next
-    Dim processes
-
+    Dim processes, process, matches, executable
+    Set TargetProcesses = Nothing
+    Set matches = CreateObject("Scripting.Dictionary")
     Err.Clear
-    Set processes = service.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name='KjTabBar.exe'")
-    If Err.Number <> 0 Then
-        GetRunningKjTabBarCount = -1
-        Exit Function
-    End If
-
-    Err.Clear
-    GetRunningKjTabBarCount = processes.Count
-    If Err.Number <> 0 Then
-        GetRunningKjTabBarCount = -1
-    End If
-End Function
-
-Function WaitForKjTabBarExit(service)
-    On Error Resume Next
-    Dim attempt
-    Dim deletionEvent
-    Dim eventSource
-    Dim runningCount
-
-    runningCount = GetRunningKjTabBarCount(service)
-    If runningCount = 0 Then
-        WaitForKjTabBarExit = True
-        Exit Function
-    End If
-    If runningCount < 0 Then
-        WaitForKjTabBarExit = False
-        Exit Function
-    End If
-
-    Err.Clear
-    Set eventSource = service.ExecNotificationQuery("SELECT * FROM __InstanceDeletionEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_Process' AND TargetInstance.Name='KjTabBar.exe'")
-    If Err.Number <> 0 Then
-        WaitForKjTabBarExit = False
-        Exit Function
-    End If
-
-    For attempt = 1 To 10
+    Set processes = service.ExecQuery("SELECT ProcessId, ExecutablePath FROM Win32_Process WHERE Name='KjTabBar.exe'")
+    If Err.Number <> 0 Then Exit Function
+    For Each process In processes
         Err.Clear
-        Set deletionEvent = eventSource.NextEvent(1000)
-        Err.Clear
-
-        runningCount = GetRunningKjTabBarCount(service)
-        If runningCount = 0 Then
-            WaitForKjTabBarExit = True
-            Exit Function
-        End If
-        If runningCount < 0 Then
-            WaitForKjTabBarExit = False
-            Exit Function
-        End If
+        executable = process.ExecutablePath
+        If Err.Number <> 0 Or IsNull(executable) Then Exit Function
+        If Len(executable) = 0 Then Exit Function
+        If StrComp(executable, targetPath, 1) = 0 Then matches.Add CStr(process.ProcessId), process
     Next
-
-    WaitForKjTabBarExit = False
+    If Err.Number <> 0 Then Exit Function
+    Set TargetProcesses = matches
 End Function
 
 Function CloseRunningKjTabBar()
     On Error Resume Next
-    Dim process
-    Dim processes
-    Dim runningCount
-    Dim service
-
+    Dim service, matches, shell, fso, targetPath, targetDir, key, command, result
+    Dim eventSource, deletionEvent, attempt, record
     CloseRunningKjTabBar = 3
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    targetDir = Session.Property("TARGETDIR")
+    If Len(targetDir) = 0 Then Exit Function
+    targetPath = fso.GetAbsolutePathName(fso.BuildPath(targetDir, "KjTabBar.exe"))
     Err.Clear
     Set service = GetObject("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
-    If Err.Number <> 0 Then
-        Exit Function
-    End If
-
-    runningCount = GetRunningKjTabBarCount(service)
-    If runningCount < 0 Then
-        Exit Function
-    End If
-    If runningCount = 0 Then
+    If Err.Number <> 0 Then Exit Function
+    Set matches = TargetProcesses(service, targetPath)
+    If matches Is Nothing Then Exit Function
+    If matches.Count = 0 Then
         CloseRunningKjTabBar = 1
         Exit Function
     End If
 
-    Err.Clear
-    Set processes = service.ExecQuery("SELECT * FROM Win32_Process WHERE Name='KjTabBar.exe'")
-    If Err.Number <> 0 Then
-        Exit Function
-    End If
-
-    For Each process In processes
-        Err.Clear
-        process.Terminate()
-        Err.Clear
+    Set shell = CreateObject("WScript.Shell")
+    For Each key In matches.Keys
+        ' Request the application's normal shutdown. Older versions fail safely.
+        command = Chr(34) & shell.ExpandEnvironmentStrings("%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe") & Chr(34)
+        command = command & " -NoProfile -NonInteractive -WindowStyle Hidden -Command " & Chr(34)
+        command = command & "try { [void][Threading.EventWaitHandle]::OpenExisting('Local\KjTabBar_Shutdown_" & key & "').Set(); exit 0 } catch { exit 1 }" & Chr(34)
+        result = shell.Run(command, 0, True)
     Next
 
-    If WaitForKjTabBarExit(service) Then
-        CloseRunningKjTabBar = 1
-    End If
+    Err.Clear
+    Set eventSource = service.ExecNotificationQuery("SELECT * FROM __InstanceDeletionEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_Process' AND TargetInstance.Name='KjTabBar.exe'")
+    If Err.Number <> 0 Then Exit Function
+    For attempt = 0 To 10
+        Set matches = TargetProcesses(service, targetPath)
+        If matches Is Nothing Then Exit Function
+        If matches.Count = 0 Then
+            CloseRunningKjTabBar = 1
+            Exit Function
+        End If
+        If attempt < 10 Then
+            Err.Clear
+            Set deletionEvent = eventSource.NextEvent(1000)
+            Err.Clear
+        End If
+    Next
+    Set record = Session.Installer.CreateRecord(1)
+    record.StringData(0) = "KjTabBar is still running. Finish file operations, close KjTabBar, and retry setup."
+    Session.Message &H01000000, record
 End Function
 "@
 

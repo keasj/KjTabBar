@@ -13,6 +13,7 @@ namespace KjTabBar.ViewModels
     {
         private IntPtr _explorerHwnd;
         private ObservableCollection<TabItemViewModel> _tabs;
+        private readonly HashSet<TabItemViewModel> _ownedIconTabs = new HashSet<TabItemViewModel>();
         private TabItemViewModel _activeTab;
         private int _activeTabIndex;
         private readonly TabNavigationStateTracker _navigationTracker = new TabNavigationStateTracker();
@@ -240,6 +241,7 @@ namespace KjTabBar.ViewModels
 
             _explorerHwnd = explorerHwnd;
             _tabs = new ObservableCollection<TabItemViewModel>();
+            _tabs.CollectionChanged += Tabs_CollectionChanged;
 
             string currentPath = initialPath;
             if (string.IsNullOrEmpty(currentPath))
@@ -264,6 +266,26 @@ namespace KjTabBar.ViewModels
                 _metadataDispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
                 manager.FolderTitlesChanged += FolderTitlesChanged;
             }
+        }
+
+        private void Tabs_CollectionChanged(object sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        {
+            if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Move) return;
+            if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
+            {
+                foreach (TabItemViewModel tab in _ownedIconTabs) tab.StopIconUpdates();
+                _ownedIconTabs.Clear();
+            }
+            if (e.OldItems != null)
+                foreach (TabItemViewModel tab in e.OldItems)
+                    if (!_tabs.Contains(tab)) { _ownedIconTabs.Remove(tab); tab.StopIconUpdates(); }
+            if (e.NewItems != null)
+                foreach (TabItemViewModel tab in e.NewItems)
+                {
+                    _ownedIconTabs.Add(tab);
+                    if (_isDisposed) tab.StopIconUpdates();
+                    else tab.ResumeIconUpdates();
+                }
         }
 
         private void FolderTitlesChanged(object sender, EventArgs e)
@@ -1060,7 +1082,14 @@ namespace KjTabBar.ViewModels
 
         public void ReopenClosedTab()
         {
-            ReopenClosedTabAsync(null, null).GetAwaiter().GetResult();
+            if (System.Threading.SynchronizationContext.Current != null)
+                throw new InvalidOperationException("Use ReopenClosedTabAsync on a synchronization-context thread.");
+            ReopenClosedTabAsync().GetAwaiter().GetResult();
+        }
+
+        public Task ReopenClosedTabAsync()
+        {
+            return ReopenClosedTabAsync(null, null);
         }
 
         internal async Task ReopenClosedTabAsync(Func<string, Task<bool>> preparePath, Action<Action> withPendingReveal, ClosedTabInfo selectedItem = null)

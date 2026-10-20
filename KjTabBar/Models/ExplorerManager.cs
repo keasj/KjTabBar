@@ -407,6 +407,13 @@ namespace KjTabBar.Models
                 () => _shellWorker.Invoke(operation, path)[0], IsOnUiThread, fallback);
         }
 
+        internal bool IsDirectoryForDrop(string path)
+        {
+            return _shellWorker != null
+                ? _shellWorker.Invoke(Services.ShellOperation.DirectoryExists, path)[0] == "1"
+                : Directory.Exists(path);
+        }
+
         internal Dictionary<string, bool> GetPathAvailability(IList<string> paths)
         {
             string[] results = _shellWorker.Invoke(Services.ShellOperation.PathsAvailable, new List<string>(paths).ToArray());

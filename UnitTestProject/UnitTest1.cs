@@ -12,6 +12,19 @@ namespace UnitTestProject
     public class SecurityRegressionTests
     {
         [TestMethod]
+        public void SanitizeForLog_HidesDescendantsOfCurrentUserDirectories()
+        {
+            string[] roots = { Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), Path.GetTempPath() };
+            foreach (string root in roots)
+            {
+                string result = AppLogger.SanitizeForLog(Path.Combine(root, "PrivateProject", "customer.txt"));
+                Assert.IsFalse(result.Contains("PrivateProject"), result);
+                Assert.IsFalse(result.Contains("customer.txt"), result);
+            }
+        }
+
+        [TestMethod]
         public void LoadFromPath_Returns_Default_Settings_When_Dtd_Is_Present()
         {
             string tempFile = Path.GetTempFileName();

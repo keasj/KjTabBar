@@ -364,7 +364,9 @@ namespace KjTabBar.Views
                 long version = vm.SynchronizationVersion;
                 string targetPath = await ComThreadService.Instance.InvokeAsync(() => explorer.ResolveShortcutTarget(source));
                 bool isShellPath = IsShellNamespacePath(targetPath);
-                bool isDirectoryPath = !isShellPath && await Task.Run(() => Directory.Exists(targetPath));
+                ExplorerManager manager = explorer as ExplorerManager;
+                bool isDirectoryPath = !isShellPath && await ComThreadService.Instance.InvokeAsync(() =>
+                    manager != null ? manager.IsDirectoryForDrop(targetPath) : Directory.Exists(targetPath));
                 if (!vm.IsSynchronizationCurrent(version)) return inserted;
                 if (string.IsNullOrEmpty(targetPath) || (!isDirectoryPath && !isShellPath)) continue;
                 int before = vm.Tabs.Count;

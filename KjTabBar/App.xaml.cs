@@ -44,6 +44,7 @@ namespace KjTabBar
             TaskScheduler.UnobservedTaskException += TaskScheduler_UnobservedTaskException;
         }
 
+        private SetupShutdownService _setupShutdown;
         private bool _shutdownRequested;
 
         private void RequestShutdownAfterFileOperations()
@@ -69,6 +70,7 @@ namespace KjTabBar
         private void Application_Exit(object sender, ExitEventArgs e)
         {
             if (_isShellWorker) return;
+            if (_setupShutdown != null) _setupShutdown.Dispose();
             if (_desktopRepeatedLaunch != null) _desktopRepeatedLaunch.Dispose();
             if (_diagnosticDispatcherProbe != null) _diagnosticDispatcherProbe.Dispose();
             _appRuntimeCoordinator.Shutdown(new AppRuntimeContext
@@ -206,6 +208,8 @@ namespace KjTabBar
             }
 
             _mutex = _bootstrapResult.Mutex;
+            _setupShutdown = new SetupShutdownService(() =>
+                Dispatcher.BeginInvoke(new Action(RequestShutdownAfterFileOperations)));
             _desktopRepeatedLaunch = new DesktopRepeatedLaunchService((ExplorerManager)_explorerService,
                 _bootstrapResult.Services.AppUiDispatcherAdapter.FindValidTabBarTarget);
 
@@ -486,7 +490,7 @@ namespace KjTabBar
                     ? _bootstrapResult.Services.AppUiDispatcherAdapter.FindValidTabBarTarget()
                     : null;
                 if (activeTabBarVM == null) return;
-                if (hwnd == activeTabBarVM.ExplorerHwnd) return;
+                if (hwnd == activeTabBarVM.ExplorerHwnd || _tabBars.Contains(hwnd)) return;
 
                 TabBarWindow window;
                 if (_tabBars.TryGetTabBarWindow(activeTabBarVM.ExplorerHwnd, out window))

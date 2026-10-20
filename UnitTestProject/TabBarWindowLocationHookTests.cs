@@ -264,6 +264,47 @@ namespace UnitTestProject
             Assert.AreSame(viewModel, persistedViewModel);
         }
 
+        [TestMethod]
+        public void WindowMoveBackground_ExcludesTabControlsAndAbsorptionZone()
+        {
+            Exception failure = null;
+            System.Threading.Thread thread = new System.Threading.Thread(delegate ()
+            {
+                try
+                {
+                    System.Windows.Controls.Border background = new System.Windows.Controls.Border();
+                    System.Windows.Controls.Grid grid = new System.Windows.Controls.Grid();
+                    background.Child = grid;
+                    System.Windows.Controls.Border blank = new System.Windows.Controls.Border();
+                    System.Windows.Controls.Border zone = new System.Windows.Controls.Border();
+                    System.Windows.Controls.TextBlock zoneLabel = new System.Windows.Controls.TextBlock();
+                    zone.Child = zoneLabel;
+                    System.Windows.Controls.Button button = new System.Windows.Controls.Button();
+                    System.Windows.Controls.Border tab = new System.Windows.Controls.Border();
+                    tab.DataContext = new TabItemViewModel(null, "test", new MockExplorerService());
+                    System.Windows.Controls.TextBlock tabLabel = new System.Windows.Controls.TextBlock();
+                    tab.Child = tabLabel;
+                    grid.Children.Add(blank);
+                    grid.Children.Add(zone);
+                    grid.Children.Add(button);
+                    grid.Children.Add(tab);
+                    Assert.IsTrue(TabBarWindow.IsWindowMoveBackground(background, background, zone));
+                    Assert.IsTrue(TabBarWindow.IsWindowMoveBackground(blank, background, zone));
+                    Assert.IsFalse(TabBarWindow.IsWindowMoveBackground(button, background, zone));
+                    Assert.IsFalse(TabBarWindow.IsWindowMoveBackground(tabLabel, background, zone));
+                    Assert.IsFalse(TabBarWindow.IsWindowMoveBackground(zoneLabel, background, zone));
+                    Assert.IsFalse(TabBarWindow.IsWindowMoveBackground(null, background, zone));
+                    Assert.IsFalse(TabBarWindow.IsWindowMoveBackground(new System.Windows.Controls.Border(), background, zone));
+                }
+                catch (Exception ex) { failure = ex; }
+            });
+            thread.SetApartmentState(System.Threading.ApartmentState.STA);
+            thread.IsBackground = true;
+            thread.Start();
+            Assert.IsTrue(thread.Join(TimeSpan.FromSeconds(10)), "STA test did not finish.");
+            if (failure != null) throw failure;
+        }
+
         private static TabBarWindowRuntimeCoordinator CreateCoordinator(
             Func<bool> isExplorerAlive,
             Action updatePosition,

@@ -405,145 +405,46 @@ namespace KjTabBar
 
         private void KillRunningInstances()
         {
-            string installedExePath = null;
-            string installedTargetDir;
-            bool hasInstalledExecutablePath = false;
+            string installedExePath;
+            string targetDir;
+            if (!TryGetInstalledExecutablePathFromContext(out installedExePath, out targetDir))
+                throw new InstallException("Cannot identify the installed executable. Close KjTabBar and retry setup.");
+            Process[] processes = Process.GetProcessesByName("KjTabBar");
             try
             {
-                hasInstalledExecutablePath = TryGetInstalledExecutablePathFromContext(out installedExePath, out installedTargetDir);
-            }
-            catch (Exception ex)
-            {
-                AppLogger.LogError("SetupCustomActions", "Installed executable path resolution failed during setup.", ex);
-            }
-
-            if (!hasInstalledExecutablePath)
-            {
-                AppLogger.LogInfo("SetupCustomActions", "Installed executable path could not be resolved. Falling back to process-name termination.");
-            }
-
-            KillRunningInstancesByName(hasInstalledExecutablePath ? installedExePath : null, true);
-        }
-
-        private static void KillRunningInstancesByName(string installedExePath, bool excludeCurrentProcess)
-        {
-            try
-            {
-                int currentProcessId = Process.GetCurrentProcess().Id;
-                Process[] processes = Process.GetProcessesByName("KjTabBar");
-                for (int i = 0; i < processes.Length; i++)
+                foreach (Process process in processes)
                 {
-                    try
-                    {
-                        if (excludeCurrentProcess && processes[i].Id == currentProcessId)
-                        {
-                            continue;
-                        }
-
-                        if (!IsTargetInstalledProcess(processes[i], installedExePath))
-                        {
-                            continue;
-                        }
-
-                        TerminateProcess(processes[i]);
-                    }
-                    catch
-                    {
-                        AppLogger.LogInfo("SetupCustomActions", "Failed to terminate a KjTabBar process during setup.");
-                        // 個別のプロセス終了失敗は無視
-                    }
-                    finally
-                    {
-                        processes[i].Dispose();
-                    }
+                    using (Process current = Process.GetCurrentProcess())
+                        if (process.Id == current.Id) continue;
+                    if (!IsTargetInstalledProcess(process, installedExePath)) continue;
+                    if (!process.HasExited &&
+                        (!Services.SetupShutdownService.TryRequest(process.Id) || !process.WaitForExit(10000)))
+                        throw new InstallException("KjTabBar is still running. Finish file operations, close it, and retry setup.");
                 }
             }
-            catch
-            {
-                AppLogger.LogInfo("SetupCustomActions", "Failed to enumerate KjTabBar processes during setup.");
-                // プロセス取得失敗は無視して続行
-            }
-        }
-
-        private static void TerminateProcess(Process process)
-        {
-            if (process == null)
-            {
-                return;
-            }
-
-            try
-            {
-                if (process.HasExited)
-                {
-                    return;
-                }
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                if (process.CloseMainWindow() && process.WaitForExit(2000))
-                {
-                    return;
-                }
-            }
-            catch
-            {
-            }
-
-            if (!process.HasExited)
-            {
-                process.Kill();
-                process.WaitForExit(5000);
-            }
+            finally { foreach (Process process in processes) process.Dispose(); }
         }
 
         internal static bool IsTargetInstalledProcess(Process process, string installedExePath)
         {
-            if (process == null)
-            {
-                return false;
-            }
-
-            if (string.IsNullOrEmpty(installedExePath))
-            {
-                return true;
-            }
-
+            if (process == null || string.IsNullOrEmpty(installedExePath)) return false;
             try
             {
-                string processPath = process.MainModule != null ? process.MainModule.FileName : null;
-                if (string.IsNullOrEmpty(processPath))
-                {
-                    AppLogger.LogInfo("SetupCustomActions", "Terminating a KjTabBar-named process because its executable path could not be determined.");
-                    return ShouldTerminateKjTabBarProcess(installedExePath, null);
-                }
-
-                return ShouldTerminateKjTabBarProcess(installedExePath, processPath);
+                if (process.HasExited) return false;
+                return ShouldTerminateKjTabBarProcess(installedExePath,
+                    process.MainModule != null ? process.MainModule.FileName : null);
             }
             catch (Exception ex)
             {
-                AppLogger.LogError("SetupCustomActions", "Terminating a KjTabBar-named process because its executable path check failed.", ex);
-                return ShouldTerminateKjTabBarProcess(installedExePath, null);
+                AppLogger.LogError("SetupCustomActions", "Could not verify the running executable; setup must be retried after closing it.", ex);
+                throw new InstallException("Cannot verify the running executable. Close KjTabBar and retry setup.", ex);
             }
         }
 
         internal static bool ShouldTerminateKjTabBarProcess(string installedExePath, string processPath)
         {
-            if (string.IsNullOrEmpty(installedExePath))
-            {
-                return true;
-            }
-
-            if (string.IsNullOrEmpty(processPath))
-            {
-                return true;
-            }
-
-            return IsInstalledExecutablePathMatch(installedExePath, processPath);
+            return !string.IsNullOrEmpty(installedExePath) && !string.IsNullOrEmpty(processPath) &&
+                IsInstalledExecutablePathMatch(installedExePath, processPath);
         }
 
         internal static bool IsInstalledExecutablePathMatch(string installedExePath, string processPath)

@@ -28,7 +28,7 @@ namespace KjTabBar
                 }
                 else
                 {
-                    AppLogger.LogInfo("SetupRegistryManager", "Skipped startup Run registration because the target user SID could not be resolved.");
+                    AppLogger.LogError("SetupRegistryManager", "Skipped startup Run registration because the target user SID could not be resolved.", null);
                 }
             }
             catch (Exception ex)
@@ -73,9 +73,9 @@ namespace KjTabBar
                     DeleteRegistryValue(usersKey, userSid + @"\" + StartupApprovedRunSubKeyPath);
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                AppLogger.LogInfo("SetupRegistryManager", "Failed while enumerating user hives for startup cleanup.");
+                AppLogger.LogError("SetupRegistryManager", "Failed while enumerating user hives for startup cleanup.", ex);
             }
             finally
             {
@@ -108,9 +108,9 @@ namespace KjTabBar
                 DeleteRegistryValue(baseKey, StartupRunSubKeyPath);
                 DeleteRegistryValue(baseKey, StartupApprovedRunSubKeyPath);
             }
-            catch
+            catch (Exception ex)
             {
-                AppLogger.LogInfo("SetupRegistryManager", "Failed while opening base registry hive for startup cleanup.");
+                AppLogger.LogError("SetupRegistryManager", "Failed while opening base registry hive for startup cleanup.", ex);
             }
             finally
             {
@@ -135,9 +135,9 @@ namespace KjTabBar
                 string runCommand = key.GetValue(SetupCustomActions.StartupValueName) as string;
                 return SetupCustomActions.IsStartupRunCommandForExecutable(runCommand, installedExePath);
             }
-            catch
+            catch (Exception ex)
             {
-                AppLogger.LogInfo("SetupRegistryManager", "Failed while reading startup registry value.");
+                AppLogger.LogError("SetupRegistryManager", "Failed while reading startup registry value.", ex);
                 return false;
             }
             finally
@@ -160,9 +160,9 @@ namespace KjTabBar
                     key.DeleteValue(SetupCustomActions.StartupValueName, false);
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                AppLogger.LogInfo("SetupRegistryManager", "Failed while deleting startup registry value.");
+                AppLogger.LogError("SetupRegistryManager", "Failed while deleting startup registry value.", ex);
             }
             finally
             {

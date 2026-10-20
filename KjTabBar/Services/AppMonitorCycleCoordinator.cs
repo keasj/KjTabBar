@@ -79,7 +79,7 @@ namespace KjTabBar.Services
             AppLogger.LogDiagnosticTiming("Cycle.TargetFound", IntPtr.Zero, cycleTimer);
             if (saveTarget != null)
             {
-                _tabPersistence.SaveTabsIfChanged(saveTarget);
+                _ = _tabPersistence.SaveTabsInBackground(saveTarget);
             }
 
             List<IntPtr> hiddenToRestore = _windowTracking.GetHiddenWindowsToRestore(_maxHiddenDuration, nowUtc);

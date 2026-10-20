@@ -97,6 +97,7 @@ namespace KjTabBar.Services
                 {
                     context.TabPersistence.SaveTabsIfChanged(context.SaveTarget, true);
                 }
+                if (context.TabPersistence != null) context.TabPersistence.FlushPendingSave();
             }
             catch
             {
