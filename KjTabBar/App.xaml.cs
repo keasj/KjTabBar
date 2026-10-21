@@ -496,7 +496,7 @@ namespace KjTabBar
                 if (_tabBars.TryGetTabBarWindow(activeTabBarVM.ExplorerHwnd, out window))
                 {
                     NativeMethods.POINT mousePos;
-                    if (NativeMethods.GetCursorPos(out mousePos) && window.IsPointOverAbsorbZone(mousePos))
+                    if (NativeMethods.GetCursorPos(out mousePos) && window.IsPointOverAbsorbZone(mousePos, hwnd))
                     {
                         _ = ObserveManualAbsorptionAsync(ComThreadService.Instance.InvokeAsync(() =>
                         {

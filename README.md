@@ -72,3 +72,21 @@ For details, see the [LICENSE](LICENSE) file.
 Latest version:
 
 https://github.com/keasj/KjTabBar/releases/latest
+
+## Export and import tab lists (v1.4.6.0)
+
+Right-click a tab or the tab bar background and choose Export Tab List or Import Tab List.
+The `.txt` file uses UTF-8 (export: no BOM, CRLF; import: optional BOM, CRLF or LF).
+
+```text
+active=1
+C:\Users
+D:\Documents
+shell:RecycleBinFolder
+```
+
+`active` is zero-based: this example selects the second tab. Import replaces the current window's list,
+preserving order, duplicates, Unicode, UNC paths and Shell paths without checking folder existence or access.
+Navigation to the selected tab is attempted; unavailable entries remain in the list.
+Invalid files (including empty lists, blank entries and out-of-range indices) leave the current tabs unchanged.
+File read/write errors are displayed. The menu is disabled while a tab operation is in progress.

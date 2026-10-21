@@ -109,6 +109,7 @@
     <Compile Include="SettingsViewModelTests.cs" />
     <Compile Include="TabBarViewModelTests.cs" />
     <Compile Include="TabItemViewModelTests.cs" />
+    <Compile Include="TabListFileTests.cs" />
     <Compile Include="TestTabPersistenceFactory.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

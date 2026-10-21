@@ -49,6 +49,7 @@ namespace KjTabBar.Services
 
                 DateTime syncNowUtc = DateTime.UtcNow;
                 if (_viewModel.ActiveTab == null) return;
+                if (_viewModel.ShouldKeepImportedSelection(currentPath)) return;
 
                 if (_viewModel.NavigationTracker.NavigatingToPath == null &&
                     _viewModel.NavigationTracker.IsExplorerHostSwitchGraceActive(syncNowUtc) &&

@@ -428,6 +428,11 @@ namespace KjTabBar.Models
             return values;
         }
 
+        internal bool TryGetCachedFolderName(string path, out string title)
+        {
+            return _metadata.TryGetCached(Services.ShellOperation.FolderName + ":" + path, out title);
+        }
+
         public string GetFolderName(string path)
         {
             if (_shellWorker != null) return GetDisplayMetadata(Services.ShellOperation.FolderName, path);

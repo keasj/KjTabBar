@@ -135,7 +135,7 @@ namespace KjTabBar.Models
                 Type shellType = Type.GetTypeFromProgID("WScript.Shell");
                 if (shellType == null)
                 {
-                    ShowOperationError("ショートカットを作成できませんでした。");
+                    ShowOperationError("ShortcutCreateUnavailable");
                     return;
                 }
 
@@ -189,19 +189,19 @@ namespace KjTabBar.Models
                     if (result != 0 || shf.fAnyOperationsAborted)
                     {
                         AppLogger.LogInfo("ShellShortcutManager", "SHFileOperation failed while moving temporary shortcuts.");
-                        ShowOperationError("ショートカットの配置に失敗しました。");
+                        ShowOperationError("ShortcutPlacementFailed");
                     }
                 }
 
                 if (!anyShortcutCreated)
                 {
-                    ShowOperationError("ショートカットを作成できませんでした。");
+                    ShowOperationError("ShortcutCreateUnavailable");
                 }
             }
             catch (Exception ex)
             {
                 AppLogger.LogError("ShellShortcutManager", "Failed to create shortcut file.", ex);
-                ShowOperationError("ショートカットの作成に失敗しました。");
+                ShowOperationError("ShortcutCreateFailed");
             }
             finally
             {
@@ -298,7 +298,7 @@ namespace KjTabBar.Models
                 int result = Services.SymbolicLinkElevationService.Create(failedLinks, ownerHwnd);
                 if (result == 1223)
                 {
-                    ShowOperationError("管理者権限の確認がキャンセルされたため、権限が必要なシンボリックリンクの作成を中止しました。");
+                    ShowOperationError("SymbolicLinkElevationCancelled");
                 }
                 else if (result != 0)
                 {
@@ -308,11 +308,7 @@ namespace KjTabBar.Models
             
             if (otherErrorOccurred)
             {
-                System.Windows.MessageBox.Show(
-                    "一部のシンボリックリンクの作成に失敗しました。",
-                    "エラー",
-                    System.Windows.MessageBoxButton.OK,
-                    System.Windows.MessageBoxImage.Error);
+                ShowOperationError("SymbolicLinkPartialFailure", "SymbolicLinkErrorTitle");
             }
         }
 
@@ -339,11 +335,21 @@ namespace KjTabBar.Models
             return false;
         }
 
-        private void ShowOperationError(string message)
+        internal static System.Windows.ResourceDictionary LoadOperationErrorResources()
         {
+            // Load a thread-local dictionary on the operation's STA, not UI-owned resources.
+            List<System.Windows.ResourceDictionary> dictionaries = new List<System.Windows.ResourceDictionary>();
+            new Services.LanguageResourceService().ApplyLanguageResource(dictionaries,
+                System.Threading.Thread.CurrentThread.CurrentUICulture);
+            return dictionaries[0];
+        }
+
+        private void ShowOperationError(string messageKey, string titleKey = "LinkOperationErrorTitle")
+        {
+            System.Windows.ResourceDictionary resources = LoadOperationErrorResources();
             System.Windows.MessageBox.Show(
-                message,
-                "操作エラー",
+                (string)resources[messageKey],
+                (string)resources[titleKey],
                 System.Windows.MessageBoxButton.OK,
                 System.Windows.MessageBoxImage.Error);
         }

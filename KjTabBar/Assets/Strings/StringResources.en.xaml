@@ -37,4 +37,15 @@
     <system:String x:Key="TrayMenuExit">Exit</system:String>
     <system:String x:Key="ErrorStandardUserLaunch">KjTabBar could not start as a standard user. Please start it without administrator privileges.</system:String>
     <system:String x:Key="DetachSourceRetainedMessage">The new window opened, but the original tab was kept because switching folders did not complete.</system:String>
+    <system:String x:Key="MenuExportTabs">Export Tab List...</system:String>
+    <system:String x:Key="MenuImportTabs">Import Tab List...</system:String>
+    <system:String x:Key="TabListFileFilter">Text files (*.txt)|*.txt</system:String>
+    <system:String x:Key="TabListTransferError">Unable to read or write the tab list. Check the file format and file permissions.</system:String>
+    <system:String x:Key="ShortcutCreateUnavailable">Could not create shortcuts.</system:String>
+    <system:String x:Key="ShortcutPlacementFailed">Failed to place shortcuts.</system:String>
+    <system:String x:Key="ShortcutCreateFailed">Failed to create shortcuts.</system:String>
+    <system:String x:Key="SymbolicLinkElevationCancelled">Administrator approval was cancelled. Symbolic links requiring elevated permissions were not created.</system:String>
+    <system:String x:Key="SymbolicLinkPartialFailure">Some symbolic links could not be created.</system:String>
+    <system:String x:Key="LinkOperationErrorTitle">Operation Error</system:String>
+    <system:String x:Key="SymbolicLinkErrorTitle">Error</system:String>
 </ResourceDictionary>

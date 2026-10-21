@@ -37,4 +37,15 @@
     <system:String x:Key="TrayMenuExit">終了</system:String>
     <system:String x:Key="ErrorStandardUserLaunch">標準ユーザーとして起動できませんでした。管理者として実行せずに KjTabBar を起動してください。</system:String>
     <system:String x:Key="DetachSourceRetainedMessage">新しいウィンドウは開きましたが、フォルダーの切り替えが完了しなかったため、元のタブを残しました。</system:String>
+    <system:String x:Key="MenuExportTabs">タブリストのエクスポート...</system:String>
+    <system:String x:Key="MenuImportTabs">タブリストのインポート...</system:String>
+    <system:String x:Key="TabListFileFilter">テキストファイル (*.txt)|*.txt</system:String>
+    <system:String x:Key="TabListTransferError">タブリストを読み書きできませんでした。ファイル形式とファイルの読み書き権限を確認してください。</system:String>
+    <system:String x:Key="ShortcutCreateUnavailable">ショートカットを作成できませんでした。</system:String>
+    <system:String x:Key="ShortcutPlacementFailed">ショートカットの配置に失敗しました。</system:String>
+    <system:String x:Key="ShortcutCreateFailed">ショートカットの作成に失敗しました。</system:String>
+    <system:String x:Key="SymbolicLinkElevationCancelled">管理者権限の確認がキャンセルされたため、権限が必要なシンボリックリンクの作成を中止しました。</system:String>
+    <system:String x:Key="SymbolicLinkPartialFailure">一部のシンボリックリンクの作成に失敗しました。</system:String>
+    <system:String x:Key="LinkOperationErrorTitle">操作エラー</system:String>
+    <system:String x:Key="SymbolicLinkErrorTitle">エラー</system:String>
 </ResourceDictionary>

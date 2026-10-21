@@ -28,6 +28,8 @@ namespace KjTabBar.ViewModels
         private bool _isDisposed;
         private System.Windows.Threading.Dispatcher _metadataDispatcher;
         private int _metadataUpdateQueued;
+        private readonly Dictionary<string, string> _pendingFolderTitles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _resolvedFolderTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private bool _isReopeningClosedTabs;
         private bool _isClosingTabs;
         private bool _isPreparingTabOperation;
@@ -290,15 +292,54 @@ namespace KjTabBar.ViewModels
 
         private void FolderTitlesChanged(object sender, EventArgs e)
         {
-            if (_isDisposed || _metadataDispatcher == null || _metadataDispatcher.HasShutdownStarted ||
-                System.Threading.Interlocked.Exchange(ref _metadataUpdateQueued, 1) != 0) return;
+            ShellMetadataChangedEventArgs change = e as ShellMetadataChangedEventArgs;
+            if (change == null || _isDisposed || _metadataDispatcher == null || _metadataDispatcher.HasShutdownStarted) return;
+            lock (_pendingFolderTitles) _pendingFolderTitles[change.Key] = change.Value;
+            if (System.Threading.Interlocked.Exchange(ref _metadataUpdateQueued, 1) != 0) return;
             _metadataDispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(delegate
             {
-                System.Threading.Interlocked.Exchange(ref _metadataUpdateQueued, 0);
+                Dictionary<string, string> changes;
+                lock (_pendingFolderTitles)
+                {
+                    changes = new Dictionary<string, string>(_pendingFolderTitles, StringComparer.OrdinalIgnoreCase);
+                    _pendingFolderTitles.Clear();
+                    System.Threading.Interlocked.Exchange(ref _metadataUpdateQueued, 0);
+                }
                 if (_isDisposed) return;
-                foreach (TabItemViewModel tab in _tabs) tab.BaseTitle = _explorerService.GetFolderName(tab.Path);
-                UpdateTabTitles();
+                ApplyFolderTitleChanges(changes);
             }));
+        }
+
+        internal void ApplyFolderTitleChanges(IDictionary<string, string> changes)
+        {
+            // Consume notification values directly: rereading every tab here causes
+            // cache eviction/refresh cycles when the open tabs exceed cache capacity.
+            ExplorerManager manager = _explorerService as ExplorerManager;
+            HashSet<string> livePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (TabItemViewModel tab in _tabs)
+            {
+                string path = tab.Path ?? string.Empty;
+                livePaths.Add(path);
+                string title;
+                if (changes.TryGetValue(ShellOperation.FolderName + ":" + path, out title))
+                {
+                    tab.BaseTitle = title;
+                    _resolvedFolderTitles.Add(path);
+                }
+                else if (manager != null && manager.UsesShellWorker && !_resolvedFolderTitles.Contains(path))
+                {
+                    // Requests beyond the worker queue limit were not submitted. Retry
+                    // only unresolved names, never names already delivered and evicted.
+                    if (manager.TryGetCachedFolderName(path, out title))
+                    {
+                        tab.BaseTitle = title;
+                        _resolvedFolderTitles.Add(path);
+                    }
+                    else manager.GetFolderName(path);
+                }
+            }
+            _resolvedFolderTitles.IntersectWith(livePaths);
+            UpdateTabTitles();
         }
 
         private void ApplyUserSettings()
@@ -650,6 +691,90 @@ namespace KjTabBar.ViewModels
             {
                 SetActiveTabOnly(_tabs[rollbackIndex]);
             }
+        }
+
+        private string _importSourcePath;
+        private long _importSelectionVersion = -1;
+        private IntPtr _importHost;
+
+        internal bool ShouldKeepImportedSelection(string currentPath)
+        {
+            // Only the import's selection may suppress synchronization. Later selections
+            // and host changes must retain their normal timeout/rollback behavior.
+            if (_importSelectionVersion != _selectionVersion || _importHost != _explorerHwnd ||
+                _activeTab == null) return false;
+            if (!string.IsNullOrEmpty(currentPath) && PathEquals(currentPath, _activeTab.Path))
+            {
+                _importSelectionVersion = -1;
+                return false;
+            }
+            // A failed initial read is not evidence that the imported entry can be replaced.
+            // Establish the first observed source, then resume normal tracking on a change.
+            if (string.IsNullOrEmpty(_importSourcePath)) _importSourcePath = currentPath;
+            if (string.IsNullOrEmpty(currentPath) || PathEquals(currentPath, _importSourcePath))
+            {
+                if (_navigationTracker.NavigatingToPath != null &&
+                    (DateTime.UtcNow - _navigationTracker.NavigateStartTime).TotalSeconds > 5)
+                    ClearPendingNavigationTracking();
+                return true;
+            }
+            _importSelectionVersion = -1;
+            return false;
+        }
+
+        internal async Task<bool> ImportTabsAsync(TabListFile list, Func<string, Task<bool>> preparePath, Action completePendingReveal)
+        {
+            if (list == null) throw new ArgumentNullException(nameof(list));
+            if (!TryBeginExternalTabOperation()) return false;
+            try
+            {
+                string sourcePath = await _explorerService.ReadPathAsync(_explorerHwnd);
+                if (_isDisposed) return false;
+                InvalidateSelection();
+                ClearPendingNavigationTracking();
+                ClearCancelledNavigationTracking();
+                _importSourcePath = sourcePath;
+                _tabs.Clear();
+                _activeTab = null;
+                _activeTabIndex = -1;
+                foreach (string path in list.Paths)
+                    _tabs.Add(new TabItemViewModel(path, _explorerService.GetFolderName(path), _explorerService));
+                SetActiveTabOnly(_tabs[list.ActiveIndex]);
+                UpdateTabTitles();
+            }
+            finally { EndExternalTabOperation(); }
+
+            TabItemViewModel selected = _activeTab;
+            await RunPreparedTabOperationAsync(selected.Path,
+                async () =>
+                {
+                    IntPtr selectionHost = _explorerHwnd;
+                    string selectionPath = selected.Path;
+                    Task selection = SelectTabCoreAsync(selected, true);
+                    long version = SynchronizationVersion;
+                    try { await selection; }
+                    catch
+                    {
+                        // The list is already replaced. Preserve it even when reading the
+                        // Explorer path fails, but never guard a newer selection or host.
+                        if (!_isDisposed && SynchronizationVersion == version &&
+                            _explorerHwnd == selectionHost && _activeTab == selected &&
+                            _tabs.Contains(selected) && PathEquals(selected.Path, selectionPath))
+                        {
+                            _importSelectionVersion = _selectionVersion;
+                            _importHost = selectionHost;
+                        }
+                        throw;
+                    }
+                },
+                () => _tabs.Contains(selected), preparePath, completePendingReveal, true);
+            if (!_isDisposed && _tabs.Contains(selected) && LastNavigationFailed) SetActiveTabOnly(selected);
+            if (!_isDisposed && _activeTab == selected)
+            {
+                _importSelectionVersion = _selectionVersion;
+                _importHost = _explorerHwnd;
+            }
+            return true;
         }
 
         public void RestoreTabs(string[] paths)
@@ -1226,10 +1351,10 @@ namespace KjTabBar.ViewModels
             catch (Exception ex) { AppLogger.LogError("TabBarViewModel", "Tab operation failed.", ex); }
         }
 
-        internal async Task SelectTabCoreAsync(TabItemViewModel tab)
+        internal async Task SelectTabCoreAsync(TabItemViewModel tab, bool skipAvailabilityCheck = false)
         {
             _selectionsInFlight++;
-            try { await SelectTabImplementationAsync(tab); }
+            try { await SelectTabImplementationAsync(tab, skipAvailabilityCheck); }
             catch
             {
                 LastNavigationFailed = true;
@@ -1239,7 +1364,7 @@ namespace KjTabBar.ViewModels
             finally { _selectionsInFlight--; }
         }
 
-        private async Task SelectTabImplementationAsync(TabItemViewModel tab)
+        private async Task SelectTabImplementationAsync(TabItemViewModel tab, bool skipAvailabilityCheck)
         {
             LastNavigationFailed = true;
             if (_isDisposed || tab == null || GetTabIndex(tab) < 0) return;
@@ -1262,7 +1387,7 @@ namespace KjTabBar.ViewModels
                 shouldUpdateTitles = true;
             }
 
-            if (!_explorerService.IsTabPathCurrentlyAvailable(path))
+            if (!skipAvailabilityCheck && !_explorerService.IsTabPathCurrentlyAvailable(path))
             {
                 return;
             }

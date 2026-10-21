@@ -196,7 +196,7 @@ namespace KjTabBar.Views
             return DataContext as TabBarViewModel;
         }
 
-        internal bool IsPointOverAbsorbZone(NativeMethods.POINT screenPoint)
+        internal bool IsPointOverAbsorbZone(NativeMethods.POINT screenPoint, IntPtr draggedWindow)
         {
             if (AbsorbDropZone == null || !IsLoaded || !AbsorbDropZone.IsVisible)
             {
@@ -209,9 +209,32 @@ namespace KjTabBar.Views
             return screenPoint.X >= topLeft.X &&
                    screenPoint.X < bottomRight.X &&
                    screenPoint.Y >= topLeft.Y &&
-                   screenPoint.Y < bottomRight.Y;
+                   screenPoint.Y < bottomRight.Y && IsDropTargetInFront(draggedWindow);
         }
 
+        internal bool IsDropTargetInFront(IntPtr draggedWindow)
+        {
+            if (!IsLoaded || !IsVisible) return false;
+            IntPtr target = new WindowInteropHelper(this).Handle;
+            return IsDropTargetInFront(target, draggedWindow,
+                hwnd => NativeMethods.GetWindow(hwnd, NativeMethods.GW_HWNDPREV),
+                NativeMethods.IsBlockingDropWindow, ExplorerHwnd);
+        }
+
+        internal static bool IsDropTargetInFront(IntPtr target, IntPtr draggedWindow,
+            Func<IntPtr, IntPtr> getPreviousWindow, Func<IntPtr, bool> isBlockingWindow, IntPtr explorerHost = default(IntPtr))
+        {
+            if (target == IntPtr.Zero) return false;
+            System.Collections.Generic.HashSet<IntPtr> visited = new System.Collections.Generic.HashSet<IntPtr>();
+            visited.Add(target);
+            for (IntPtr current = getPreviousWindow(target); current != IntPtr.Zero; current = getPreviousWindow(current))
+            {
+                // Window order can change during enumeration; reject an inconsistent snapshot.
+                if (!visited.Add(current)) return false;
+                if (current != draggedWindow && current != explorerHost && isBlockingWindow(current)) return false;
+            }
+            return true;
+        }
         // ====== エクスプローラー状態チェック ======
 
         public bool IsExplorerAlive()
@@ -445,6 +468,50 @@ namespace KjTabBar.Views
             }
             ReturnFocusToExplorer();
             e.Handled = true;
+        }
+
+        internal async Task TransferTabListAsync(TabBarViewModel vm, bool importing)
+        {
+            if (vm == null || vm.IsDisposed || vm.IsTabOperationPending) return;
+            string title = TryFindResource(importing ? "MenuImportTabs" : "MenuExportTabs") as string;
+            string filter = TryFindResource("TabListFileFilter") as string ?? "Text files (*.txt)|*.txt";
+            try
+            {
+                if (importing)
+                {
+                    Microsoft.Win32.OpenFileDialog dialog = new Microsoft.Win32.OpenFileDialog
+                    {
+                        Title = title, Filter = filter, DefaultExt = ".txt", Multiselect = false
+                    };
+                    if (dialog.ShowDialog(this) != true) return;
+                    TabListFile list = await Task.Run(() => TabListFile.Read(dialog.FileName));
+                    ExplorerHostSwitchCoordinator coordinator = ExplorerHostSwitchCoordinator;
+                    bool imported = await vm.ImportTabsAsync(list,
+                        coordinator != null ? new Func<string, Task<bool>>(path => coordinator.PrepareForPathAsync(vm, path, vm.IsPreparedTabOperationCurrent)) : null,
+                        coordinator != null ? new Action(coordinator.CompletePendingReveal) : null);
+                    if (imported && PersistTabState != null) PersistTabState(vm);
+                }
+                else
+                {
+                    Microsoft.Win32.SaveFileDialog dialog = new Microsoft.Win32.SaveFileDialog
+                    {
+                        Title = title, Filter = filter, DefaultExt = ".txt", AddExtension = true,
+                        FileName = "tabs.txt", OverwritePrompt = true
+                    };
+                    if (dialog.ShowDialog(this) != true || vm.IsDisposed || vm.IsTabOperationPending) return;
+                    string[] paths = new string[vm.Tabs.Count];
+                    for (int i = 0; i < paths.Length; i++) paths[i] = vm.Tabs[i].Path;
+                    int activeIndex = vm.Tabs.IndexOf(vm.ActiveTab);
+                    await FileOperationTracker.Shared.RunAsync(() => TabListFile.Write(dialog.FileName, paths, activeIndex));
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("TabBarWindow", "Tab list transfer failed.", ex);
+                MessageBox.Show(this, TryFindResource("TabListTransferError") as string ?? "Unable to read or write the tab list. Check the file format and file permissions.",
+                    title ?? "KjTabBar", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally { ReturnFocusToExplorer(); }
         }
 
         internal async Task DuplicateTabAsync(TabBarViewModel vm, TabItemViewModel tab)

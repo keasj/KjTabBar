@@ -5,6 +5,18 @@ using KjTabBar.Helpers;
 
 namespace KjTabBar.Services
 {
+    internal sealed class ShellMetadataChangedEventArgs : EventArgs
+    {
+        internal string Key { get; private set; }
+        internal string Value { get; private set; }
+
+        internal ShellMetadataChangedEventArgs(string key, string value)
+        {
+            Key = key;
+            Value = value;
+        }
+    }
+
     internal sealed class ShellMetadataCache
     {
         private sealed class Entry
@@ -17,6 +29,22 @@ namespace KjTabBar.Services
         private readonly HashSet<string> _pending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Queue<string> _order = new Queue<string>();
         internal event EventHandler Updated;
+
+        internal bool TryGetCached(string key, out string value)
+        {
+            lock (_sync)
+            {
+                Entry entry;
+                if (_entries.TryGetValue(key, out entry) &&
+                    DateTime.UtcNow - entry.UpdatedUtc < TimeSpan.FromSeconds(30))
+                {
+                    value = entry.Value;
+                    return true;
+                }
+                value = null;
+                return false;
+            }
+        }
 
         internal string Get(string key, Func<string> load, bool background, string fallback)
         {
@@ -46,7 +74,7 @@ namespace KjTabBar.Services
                 string value = await ComThreadService.Instance.InvokeAsync(load);
                 Store(key, value);
                 EventHandler handler = Updated;
-                if (handler != null) handler(this, EventArgs.Empty);
+                if (handler != null) handler(this, new ShellMetadataChangedEventArgs(key, value));
             }
             catch (Exception ex)
             {

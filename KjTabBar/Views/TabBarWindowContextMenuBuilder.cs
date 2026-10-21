@@ -90,6 +90,7 @@ namespace KjTabBar.Views
             };
             menu.Items.Add(reopenItem);
             AddHistoryMenu(menu, vm);
+            AddTabListMenu(menu, vm);
 
             if (onClosed != null)
             {
@@ -115,6 +116,7 @@ namespace KjTabBar.Views
             };
             menu.Items.Add(reopenItem);
             AddHistoryMenu(menu, vm);
+            AddTabListMenu(menu, vm);
 
             menu.Items.Add(new Separator());
 
@@ -134,6 +136,25 @@ namespace KjTabBar.Views
 
             menu.PlacementTarget = placementTarget;
             menu.IsOpen = true;
+        }
+
+        private void AddTabListMenu(ContextMenu menu, TabBarViewModel vm)
+        {
+            menu.Items.Add(new Separator());
+            MenuItem export = new MenuItem
+            {
+                Header = _window.TryFindResource("MenuExportTabs") as string ?? "Export Tab List...",
+                IsEnabled = vm != null && vm.Tabs.Count > 0 && !vm.IsTabOperationPending
+            };
+            export.Click += async (sender, args) => { await _window.TransferTabListAsync(vm, false); };
+            menu.Items.Add(export);
+            MenuItem import = new MenuItem
+            {
+                Header = _window.TryFindResource("MenuImportTabs") as string ?? "Import Tab List...",
+                IsEnabled = vm != null && !vm.IsTabOperationPending
+            };
+            import.Click += async (sender, args) => { await _window.TransferTabListAsync(vm, true); };
+            menu.Items.Add(import);
         }
 
         private void AddHistoryMenu(ContextMenu menu, TabBarViewModel vm)

@@ -305,6 +305,84 @@ namespace UnitTestProject
             if (failure != null) throw failure;
         }
 
+        [TestMethod]
+        public void DropVisibility_RejectsAppAheadEvenWhenDropPointIsExposed()
+        {
+            IntPtr target = (IntPtr)1;
+            IntPtr app = (IntPtr)2;
+            IntPtr dragged = (IntPtr)3;
+            Assert.IsFalse(TabBarWindow.IsDropTargetInFront(target, dragged,
+                hwnd => hwnd == target ? app : hwnd == app ? dragged : IntPtr.Zero,
+                hwnd => true));
+        }
+
+        [TestMethod]
+        public void DropVisibility_AllowsDraggedExplorerAndNonBlockingOverlays()
+        {
+            IntPtr target = (IntPtr)1;
+            IntPtr app = (IntPtr)2;
+            IntPtr dragged = (IntPtr)3;
+            Assert.IsTrue(TabBarWindow.IsDropTargetInFront(target, dragged,
+                hwnd => hwnd == target ? dragged : hwnd == dragged ? app : IntPtr.Zero,
+                hwnd => hwnd == dragged));
+        }
+
+        [TestMethod]
+        public void DropVisibility_BackgroundDropRejectsCoveringWindowWithoutSourceExemption()
+        {
+            Assert.IsFalse(TabBarWindow.IsDropTargetInFront((IntPtr)1, IntPtr.Zero,
+                hwnd => hwnd == (IntPtr)1 ? (IntPtr)2 : IntPtr.Zero, hwnd => true));
+            Assert.IsTrue(TabBarWindow.IsDropTargetInFront((IntPtr)1, IntPtr.Zero,
+                hwnd => IntPtr.Zero, hwnd => true));
+        }
+
+        [TestMethod]
+        public void DropVisibility_RejectsMissingTargetAndChangingWindowOrder()
+        {
+            Assert.IsFalse(TabBarWindow.IsDropTargetInFront(IntPtr.Zero, IntPtr.Zero,
+                hwnd => IntPtr.Zero, hwnd => false));
+            Assert.IsFalse(TabBarWindow.IsDropTargetInFront((IntPtr)1, IntPtr.Zero,
+                hwnd => hwnd == (IntPtr)1 ? (IntPtr)2 : (IntPtr)1, hwnd => false));
+        }
+        [TestMethod]
+        public void DropVisibility_ObservedClockAndShellToolStylesDoNotBlockForegroundTarget()
+        {
+            // Styles observed on the user's clocks and Shell island window.
+            Assert.IsTrue(NativeMethods.IsDropOverlayStyle(0x80108, true));
+            Assert.IsTrue(NativeMethods.IsDropOverlayStyle(0x200088));
+            Assert.IsFalse(NativeMethods.IsDropOverlayStyle(0x100));
+            Assert.IsFalse(NativeMethods.IsDropOverlayStyle(0x80108, false));
+            Assert.IsFalse(NativeMethods.IsDropOverlayStyle(0x108, true));
+            IntPtr target = (IntPtr)1;
+            IntPtr clock = (IntPtr)2;
+            Assert.IsTrue(TabBarWindow.IsDropTargetInFront(target, IntPtr.Zero,
+                hwnd => hwnd == target ? clock : IntPtr.Zero,
+                hwnd => !NativeMethods.IsDropOverlayStyle(0x80108, true)));
+        }
+
+        [TestMethod]
+        public void DropVisibility_OleSourceCanRemainInFrontOfTarget()
+        {
+            IntPtr target = (IntPtr)1;
+            IntPtr source = (IntPtr)2;
+            Assert.IsTrue(TabBarWindow.IsDropTargetInFront(target, source,
+                hwnd => hwnd == target ? source : IntPtr.Zero, hwnd => true));
+            Assert.IsFalse(TabBarWindow.IsDropTargetInFront(target, source,
+                hwnd => hwnd == target ? source : hwnd == source ? (IntPtr)3 : IntPtr.Zero,
+                hwnd => true));
+        }
+
+        [TestMethod]
+        public void DropVisibility_HostAboveUnownedBarDoesNotBlockButOtherAppStillDoes()
+        {
+            IntPtr target = (IntPtr)1;
+            IntPtr host = (IntPtr)2;
+            Assert.IsTrue(TabBarWindow.IsDropTargetInFront(target, IntPtr.Zero,
+                hwnd => hwnd == target ? host : IntPtr.Zero, hwnd => true, host));
+            Assert.IsFalse(TabBarWindow.IsDropTargetInFront(target, IntPtr.Zero,
+                hwnd => hwnd == target ? host : hwnd == host ? (IntPtr)3 : IntPtr.Zero,
+                hwnd => true, host));
+        }
         private static TabBarWindowRuntimeCoordinator CreateCoordinator(
             Func<bool> isExplorerAlive,
             Action updatePosition,

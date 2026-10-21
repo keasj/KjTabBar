@@ -20,6 +20,8 @@ namespace KjTabBar.Views
         private readonly IExplorerService _explorerService;
         private readonly TabBarWindowContextMenuBuilder _contextMenuBuilder;
         private bool _wasRightDrag = false;
+        private IDataObject _sourceDragData;
+        private IntPtr _dragSourceWindow;
         private IDataObject _dragData;
         private string[] _dragPaths;
 
@@ -65,8 +67,26 @@ namespace KjTabBar.Views
             return requested & allowed;
         }
 
+        private bool RejectBackgroundDrop(DragEventArgs e)
+        {
+            if (!ReferenceEquals(_sourceDragData, e.Data))
+            {
+                _sourceDragData = e.Data;
+                // OLE keeps the source foreground when dragging into another window.
+                // Capture it once; foreground status is not a target eligibility check.
+                _dragSourceWindow = NativeMethods.GetForegroundWindow();
+            }
+            if (_window.IsDropTargetInFront(_dragSourceWindow)) return false;
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            _wasRightDrag = false;
+            _dragData = null;
+            _dragPaths = null;
+            return true;
+        }
         public void HandleDragEnter(DragEventArgs e)
         {
+            if (RejectBackgroundDrop(e)) return;
             if (!ReferenceEquals(_dragData, e.Data)) { _dragData = null; _dragPaths = null; }
             if ((e.AllowedEffects & DragDropEffects.Link) != 0)
             {
@@ -85,6 +105,7 @@ namespace KjTabBar.Views
 
         public void HandleDragOver(ItemsControl tabItemsControl, DragEventArgs e)
         {
+            if (RejectBackgroundDrop(e)) return;
             if ((e.KeyStates & DragDropKeyStates.RightMouseButton) == DragDropKeyStates.RightMouseButton)
                 _wasRightDrag = true;
             else if ((e.KeyStates & DragDropKeyStates.LeftMouseButton) == DragDropKeyStates.LeftMouseButton)
@@ -139,6 +160,7 @@ namespace KjTabBar.Views
             e.Handled = true;
             try
             {
+                if (RejectBackgroundDrop(e)) return;
                 int dropIndex = GetDropIndex(tabItemsControl, e);
                 if (vm == null) return;
 
@@ -266,7 +288,7 @@ namespace KjTabBar.Views
                 AppLogger.LogError("TabBarWindowDragDropHandler", "Drop failed.", ex);
                 onFinished?.Invoke();
             }
-            finally { _dragData = null; _dragPaths = null; }
+            finally { _dragData = null; _dragPaths = null; _sourceDragData = null; _dragSourceWindow = IntPtr.Zero; }
         }
 
         private int GetDropIndex(ItemsControl tabItemsControl, DragEventArgs e)

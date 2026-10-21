@@ -6,6 +6,34 @@ namespace KjTabBar.Helpers
 {
     public static class NativeMethods
     {
+        [DllImport("dwmapi.dll", EntryPoint = "DwmGetWindowAttribute")]
+        private static extern int DwmGetWindowCloaked(IntPtr hwnd, int attribute, out int cloaked, int size);
+
+        internal static bool IsBlockingDropWindow(IntPtr hwnd)
+        {
+            if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return false;
+            int cloaked;
+            if (DwmGetWindowCloaked(hwnd, 14 /* DWMWA_CLOAKED */, out cloaked, sizeof(int)) == 0 && cloaked != 0)
+                return false;
+            // Tool windows and non-activating overlays (clocks, tooltips, drag images) do not
+            // make another application the foreground drop destination.
+            long style = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64();
+            IntPtr owner = GetWindow(hwnd, GW_OWNER);
+            bool hasHiddenOwner = owner != IntPtr.Zero && !IsWindowVisible(owner);
+            if (IsDropOverlayStyle(style, hasHiddenOwner)) return false;
+            StringBuilder className = new StringBuilder(256);
+            GetClassName(hwnd, className, className.Capacity);
+            string name = className.ToString();
+            return name != "Shell_TrayWnd" && name != "Shell_SecondaryTrayWnd" &&
+                   name != "Progman" && name != "WorkerW" && name != "tooltips_class32";
+        }
+        internal static bool IsDropOverlayStyle(long style, bool hasHiddenOwner = false)
+        {
+            const long layeredTopmost = 0x00080008; // WS_EX_LAYERED | WS_EX_TOPMOST
+            return (style & (WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)) != 0 ||
+                   (hasHiddenOwner && (style & layeredTopmost) == layeredTopmost);
+        }
+
         public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
         public delegate void WinEventDelegate(
             IntPtr hWinEventHook, uint eventType, IntPtr hwnd,

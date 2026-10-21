@@ -22,6 +22,27 @@ namespace KjTabBar.Services
             }
         }
 
+        internal async Task<bool> RunAsync(Action action)
+        {
+            if (action == null) throw new ArgumentNullException(nameof(action));
+            IDisposable lease = TryBegin();
+            if (lease == null) return false;
+            try
+            {
+                // Release the lease on the worker, even if the UI dispatcher is closing.
+                await Task.Run(() =>
+                {
+                    using (lease) action();
+                }).ConfigureAwait(false);
+                return true;
+            }
+            catch
+            {
+                lease.Dispose();
+                throw;
+            }
+        }
+
         internal Task StopAndWaitAsync()
         {
             lock (_gate)
