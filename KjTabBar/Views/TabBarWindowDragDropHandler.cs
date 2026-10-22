@@ -84,23 +84,18 @@ namespace KjTabBar.Views
             _dragPaths = null;
             return true;
         }
-        public void HandleDragEnter(DragEventArgs e)
+        internal static DragDropEffects GetBackgroundDropEffect(bool isRightDrag, DragDropEffects allowed)
         {
-            if (RejectBackgroundDrop(e)) return;
-            if (!ReferenceEquals(_dragData, e.Data)) { _dragData = null; _dragPaths = null; }
-            if ((e.AllowedEffects & DragDropEffects.Link) != 0)
-            {
-                e.Effects = DragDropEffects.Link;
-            }
-            else if ((e.AllowedEffects & DragDropEffects.Copy) != 0)
-            {
-                e.Effects = DragDropEffects.Copy;
-            }
-            else
-            {
-                e.Effects = e.AllowedEffects;
-            }
-            e.Handled = true;
+            if (isRightDrag) return DragDropEffects.None;
+            if ((allowed & DragDropEffects.Link) != 0) return DragDropEffects.Link;
+            if ((allowed & DragDropEffects.Copy) != 0) return DragDropEffects.Copy;
+            return allowed;
+        }
+
+        public void HandleDragEnter(ItemsControl tabItemsControl, DragEventArgs e)
+        {
+            _wasRightDrag = (e.KeyStates & DragDropKeyStates.RightMouseButton) != 0;
+            HandleDragOver(tabItemsControl, e);
         }
 
         public void HandleDragOver(ItemsControl tabItemsControl, DragEventArgs e)
@@ -137,18 +132,7 @@ namespace KjTabBar.Views
                 }
                 else
                 {
-                    if ((e.AllowedEffects & DragDropEffects.Link) != 0)
-                    {
-                        e.Effects = DragDropEffects.Link;
-                    }
-                    else if ((e.AllowedEffects & DragDropEffects.Copy) != 0)
-                    {
-                        e.Effects = DragDropEffects.Copy;
-                    }
-                    else
-                    {
-                        e.Effects = e.AllowedEffects;
-                    }
+                    e.Effects = GetBackgroundDropEffect(_wasRightDrag, e.AllowedEffects);
                 }
             }
 
@@ -161,6 +145,7 @@ namespace KjTabBar.Views
             try
             {
                 if (RejectBackgroundDrop(e)) return;
+                _wasRightDrag |= (e.KeyStates & DragDropKeyStates.RightMouseButton) != 0;
                 int dropIndex = GetDropIndex(tabItemsControl, e);
                 if (vm == null) return;
 
@@ -273,7 +258,9 @@ namespace KjTabBar.Views
                         }
                         else
                         {
-                            await TryInsertAsTabsAsync(vm, dropIndex, paths);
+                            e.Effects = GetBackgroundDropEffect(_wasRightDrag, e.AllowedEffects);
+                            if (!_wasRightDrag)
+                                await TryInsertAsTabsAsync(vm, dropIndex, paths);
                             onFinished?.Invoke();
                         }
                     }
@@ -288,7 +275,7 @@ namespace KjTabBar.Views
                 AppLogger.LogError("TabBarWindowDragDropHandler", "Drop failed.", ex);
                 onFinished?.Invoke();
             }
-            finally { _dragData = null; _dragPaths = null; _sourceDragData = null; _dragSourceWindow = IntPtr.Zero; }
+            finally { _wasRightDrag = false; _dragData = null; _dragPaths = null; _sourceDragData = null; _dragSourceWindow = IntPtr.Zero; }
         }
 
         private int GetDropIndex(ItemsControl tabItemsControl, DragEventArgs e)

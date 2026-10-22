@@ -17,6 +17,27 @@ namespace UnitTestProject
     [TestClass]
     public class Release137RegressionTests
     {
+        [TestMethod]
+        public void BackgroundRightDragIsRejectedForAllAllowedEffects()
+        {
+            for (int mask = 0; mask <= 7; mask++)
+            {
+                Assert.AreEqual(DragDropEffects.None,
+                    TabBarWindowDragDropHandler.GetBackgroundDropEffect(true, (DragDropEffects)mask));
+            }
+        }
+
+        [TestMethod]
+        public void BackgroundLeftDragAndTabRightDragKeepExistingEffects()
+        {
+            DragDropEffects all = DragDropEffects.Copy | DragDropEffects.Move | DragDropEffects.Link;
+            Assert.AreEqual(DragDropEffects.Link, TabBarWindowDragDropHandler.GetBackgroundDropEffect(false, all));
+            Assert.AreEqual(DragDropEffects.Copy, TabBarWindowDragDropHandler.GetBackgroundDropEffect(false, DragDropEffects.Copy | DragDropEffects.Move));
+            Assert.AreEqual(DragDropEffects.Move, TabBarWindowDragDropHandler.GetBackgroundDropEffect(false, DragDropEffects.Move));
+            Assert.AreEqual(DragDropEffects.None, TabBarWindowDragDropHandler.GetBackgroundDropEffect(false, DragDropEffects.None));
+            Assert.AreEqual(all, TabBarWindowDragDropHandler.GetFileDropEffect(DragDropKeyStates.RightMouseButton, all));
+        }
+
         private sealed class AsyncExplorer : MockExplorerService, IAsyncExplorerService
         {
             internal string Current = @"C:\A";

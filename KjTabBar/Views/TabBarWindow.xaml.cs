@@ -776,7 +776,7 @@ namespace KjTabBar.Views
         {
             if (_dragDropHandler != null)
             {
-                _dragDropHandler.HandleDragEnter(e);
+                _dragDropHandler.HandleDragEnter(TabItemsControl, e);
             }
         }
 
