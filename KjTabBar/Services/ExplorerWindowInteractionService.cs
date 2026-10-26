@@ -624,6 +624,7 @@ namespace KjTabBar.Services
                 }
             }
 
+            if (reusableTab == null && !targetViewModel.CanAddTab) return false;
             bool createdReusableTab = false;
             if (reusableTab == null)
             {

@@ -12,6 +12,49 @@ namespace UnitTestProject
     public class TabListFileTests
     {
         [TestMethod]
+        public void OversizeImportNotifiesOnceAndImportsFirst255WithValidSelection()
+        {
+            foreach (int activeIndex in new[] { 1, 254, 299 })
+            {
+                MockExplorerService explorer = new MockExplorerService();
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\Original"))
+                {
+                    vm.RememberLocationBeforeExplorerNavigation(@"C:\Other");
+                    TabItemViewModel original = vm.ActiveTab;
+                    ClosedTabInfo[] history = vm.GetHistoryItems().ToArray();
+                    string[] paths = new string[300];
+                    for (int i = 0; i < paths.Length; i++) paths[i] = @"C:\Imported" + i;
+                    paths[10] = paths[1];
+                    int notices = 0;
+                    Assert.IsTrue(vm.ImportTabsAsync(TabListFile.Parse(TabListFile.Serialize(paths, activeIndex)), null, null,
+                        () => { notices++; Assert.AreSame(original, vm.ActiveTab); }).GetAwaiter().GetResult());
+                    Assert.AreEqual(1, notices);
+                    CollectionAssert.AreEqual(System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Take(paths, 255)),
+                        System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(vm.Tabs, tab => tab.Path)));
+                    Assert.AreSame(vm.Tabs[activeIndex < 255 ? activeIndex : 0], vm.ActiveTab);
+                    CollectionAssert.AreEqual(history, vm.GetHistoryItems().ToArray());
+                    Assert.IsFalse(vm.IsTabOperationPending);
+                }
+            }
+        }
+
+        [TestMethod]
+        public void ImportAt255TabsSucceedsWithoutLimitNotification()
+        {
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), new MockExplorerService(), @"C:\Original"))
+            {
+                string[] paths = new string[255];
+                for (int i = 0; i < paths.Length; i++) paths[i] = @"C:\Imported" + i;
+                int notices = 0;
+                Assert.IsTrue(vm.ImportTabsAsync(TabListFile.Parse(TabListFile.Serialize(paths, 254)), null, null,
+                    () => notices++).GetAwaiter().GetResult());
+                Assert.AreEqual(0, notices);
+                CollectionAssert.AreEqual(paths, System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(vm.Tabs, tab => tab.Path)));
+                Assert.AreSame(vm.Tabs[254], vm.ActiveTab);
+            }
+        }
+
+        [TestMethod]
         public void RoundTripPreservesZeroBasedSelectionOrderDuplicatesAndUnicode()
         {
             string[] paths = { @"C:\日本語", @"\\offline\share", "shell:RecycleBinFolder", @"C:\日本語" };
@@ -533,7 +576,7 @@ namespace UnitTestProject
                 Assert.IsTrue(vm.TryBeginExternalTabOperation());
                 try
                 {
-                    Assert.IsFalse(vm.ImportTabsAsync(TabListFile.Parse("active=0\nZ:\\Missing"), null, null).GetAwaiter().GetResult());
+                    Assert.IsFalse(vm.ImportTabsAsync(TabListFile.Parse("active=0\nZ:\\Missing"), null, null, () => Assert.Fail("Busy import must not report a tab limit error.")).GetAwaiter().GetResult());
                     Assert.AreSame(original, vm.ActiveTab);
                     Assert.AreEqual(1, vm.Tabs.Count);
                 }

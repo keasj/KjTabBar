@@ -265,7 +265,7 @@ namespace UnitTestProject
         }
 
         [TestMethod]
-        public void WindowMoveBackground_ExcludesTabControlsAndAbsorptionZone()
+        public void WindowMoveBackground_AllowsAbsorptionZoneAndExcludesTabControls()
         {
             Exception failure = null;
             System.Threading.Thread thread = new System.Threading.Thread(delegate ()
@@ -288,13 +288,14 @@ namespace UnitTestProject
                     grid.Children.Add(zone);
                     grid.Children.Add(button);
                     grid.Children.Add(tab);
-                    Assert.IsTrue(TabBarWindow.IsWindowMoveBackground(background, background, zone));
-                    Assert.IsTrue(TabBarWindow.IsWindowMoveBackground(blank, background, zone));
-                    Assert.IsFalse(TabBarWindow.IsWindowMoveBackground(button, background, zone));
-                    Assert.IsFalse(TabBarWindow.IsWindowMoveBackground(tabLabel, background, zone));
-                    Assert.IsFalse(TabBarWindow.IsWindowMoveBackground(zoneLabel, background, zone));
-                    Assert.IsFalse(TabBarWindow.IsWindowMoveBackground(null, background, zone));
-                    Assert.IsFalse(TabBarWindow.IsWindowMoveBackground(new System.Windows.Controls.Border(), background, zone));
+                    Assert.IsTrue(TabBarWindow.IsWindowMoveBackground(background, background));
+                    Assert.IsTrue(TabBarWindow.IsWindowMoveBackground(blank, background));
+                    Assert.IsFalse(TabBarWindow.IsWindowMoveBackground(button, background));
+                    Assert.IsFalse(TabBarWindow.IsWindowMoveBackground(tabLabel, background));
+                    Assert.IsTrue(TabBarWindow.IsWindowMoveBackground(zone, background));
+                    Assert.IsTrue(TabBarWindow.IsWindowMoveBackground(zoneLabel, background));
+                    Assert.IsFalse(TabBarWindow.IsWindowMoveBackground(null, background));
+                    Assert.IsFalse(TabBarWindow.IsWindowMoveBackground(new System.Windows.Controls.Border(), background));
                 }
                 catch (Exception ex) { failure = ex; }
             });

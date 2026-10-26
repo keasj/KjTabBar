@@ -9,6 +9,34 @@ namespace UnitTestProject
     public class LanguageResourceServiceTests
     {
         [TestMethod]
+        public void ImportLimitMessageUsesJapaneseAndEnglishResources()
+        {
+            System.Exception failure = null;
+            System.Threading.Thread worker = new System.Threading.Thread(() =>
+            {
+                try
+                {
+                    System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(Application).TypeHandle);
+                    foreach (string culture in new[] { "ja-JP", "en-US", "de-DE" })
+                    {
+                        System.Collections.Generic.List<ResourceDictionary> dictionaries = new System.Collections.Generic.List<ResourceDictionary>();
+                        new LanguageResourceService().ApplyLanguageResource(dictionaries, new CultureInfo(culture));
+                        string format = dictionaries[0]["TabListImportLimitExceeded"] as string;
+                        Assert.IsFalse(string.IsNullOrEmpty(format));
+                        string message = string.Format(format, KjTabBar.ViewModels.TabBarViewModel.MaxTabCount);
+                        Assert.AreEqual(culture == "ja-JP" ? "タブ数の上限を超えています。先頭255件をインポートし、超過分はインポートしません。" : "The tab limit has been exceeded. Only the first 255 tabs will be imported.", message);
+                    }
+                }
+                catch (System.Exception ex) { failure = ex; }
+            });
+            worker.IsBackground = true;
+            worker.SetApartmentState(System.Threading.ApartmentState.STA);
+            worker.Start();
+            Assert.IsTrue(worker.Join(10000));
+            if (failure != null) throw failure;
+        }
+
+        [TestMethod]
         public void LinkErrorResourcesPreserveJapaneseAndProvideEnglishOnStaWorker()
         {
             System.Exception failure = null;

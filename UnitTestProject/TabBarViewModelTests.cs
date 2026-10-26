@@ -9,6 +9,273 @@ namespace UnitTestProject
     [TestClass]
     public class TabBarViewModelTests
     {
+
+        [TestMethod]
+        public void CloseRollbackHistory_DoesNotRestoreHistoryAlreadyReopenedByUser()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer))
+            {
+                System.Collections.Generic.List<System.Collections.Generic.List<ClosedTabInfo>> history =
+                    new System.Collections.Generic.List<System.Collections.Generic.List<ClosedTabInfo>>();
+                for (int i = 0; i < 255; i++) history.Add(new System.Collections.Generic.List<ClosedTabInfo> { new ClosedTabInfo(@"C:\Old" + i, i) });
+                vm.RestoreHistory(history);
+                vm.Tabs.Add(new TabItemViewModel(@"C:\Next", "Next", explorer));
+                vm.CloseTabsAsync(0, 1, null, null).GetAwaiter().GetResult();
+                vm.ReopenClosedTabAsync(null, null, history[254][0]).GetAwaiter().GetResult();
+                vm.TimeoutPendingNavigation();
+                System.Collections.Generic.List<ClosedTabInfo> actual = vm.GetHistoryItems();
+                Assert.AreEqual(254, actual.Count);
+                for (int i = 0; i < 254; i++) Assert.AreSame(history[253 - i][0], actual[i]);
+                Assert.AreEqual(3, vm.Tabs.Count);
+                Assert.AreEqual(@"C:\Old254", vm.Tabs[2].Path);
+            }
+        }
+
+        [TestMethod]
+        public void CloseRollbackHistory_ChainedClosesRestoreFullHistory()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer))
+            {
+                System.Collections.Generic.List<System.Collections.Generic.List<ClosedTabInfo>> history =
+                    new System.Collections.Generic.List<System.Collections.Generic.List<ClosedTabInfo>>();
+                for (int i = 0; i < 255; i++) history.Add(new System.Collections.Generic.List<ClosedTabInfo> { new ClosedTabInfo(@"C:\Old" + i, i) });
+                vm.RestoreHistory(history);
+                vm.Tabs.Add(new TabItemViewModel(@"C:\Next", "Next", explorer));
+                vm.Tabs.Add(new TabItemViewModel(@"C:\Last", "Last", explorer));
+                vm.CloseTabsAsync(0, 1, null, null).GetAwaiter().GetResult();
+                vm.CloseTabsAsync(0, 1, null, null).GetAwaiter().GetResult();
+                vm.TimeoutPendingNavigation();
+                System.Collections.Generic.List<ClosedTabInfo> actual = vm.GetHistoryItems();
+                Assert.AreEqual(255, actual.Count);
+                for (int i = 0; i < 255; i++) Assert.AreSame(history[254 - i][0], actual[i]);
+                Assert.AreEqual(3, vm.Tabs.Count);
+            }
+        }
+
+        [TestMethod]
+        public void CloseRollbackLimit_ReservesCapacityAndPreservesSavedTabs()
+        {
+            string directory = Path.Combine(Path.GetTempPath(), "KjTabBar-Rollback-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                MockExplorerService explorer = new MockExplorerService();
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer))
+                using (TabBarViewModel restored = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer))
+                {
+                    for (int i = 1; i < 255; i++) vm.Tabs.Add(new TabItemViewModel(@"C:\Tab" + i, "Tab", explorer));
+                    TabItemViewModel[] original = System.Linq.Enumerable.ToArray(vm.Tabs);
+                    vm.CloseTabsAsync(0, 1, null, null).GetAwaiter().GetResult();
+                    Assert.AreEqual(254, vm.Tabs.Count);
+                    vm.DuplicateTabAsync(vm.ActiveTab, null, null).GetAwaiter().GetResult();
+                    vm.TimeoutPendingNavigation();
+                    CollectionAssert.AreEqual(original, System.Linq.Enumerable.ToArray(vm.Tabs));
+                    Assert.AreSame(original[0], vm.ActiveTab);
+                    string file = Path.Combine(directory, "tabs.txt");
+                    new TabPersistenceService(file).SaveTabsIfChanged(vm, true);
+                    Assert.IsTrue(new TabPersistenceService(file).LoadTabsTo(restored, false, true));
+                    CollectionAssert.AreEqual(System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(original, tab => tab.Path)),
+                        System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(restored.Tabs, tab => tab.Path)));
+                }
+            }
+            finally { Directory.Delete(directory, true); }
+        }
+
+        [TestMethod]
+        public void CloseRollbackLimit_ChainedClosesReserveCapacityUntilArrival()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer))
+            {
+                for (int i = 1; i < 255; i++) vm.Tabs.Add(new TabItemViewModel(@"C:\Tab" + i, "Tab", explorer));
+                vm.CloseTabsAsync(0, 1, null, null).GetAwaiter().GetResult();
+                vm.CloseTabsAsync(0, 1, null, null).GetAwaiter().GetResult();
+                Assert.AreEqual(253, vm.Tabs.Count);
+                Assert.IsFalse(vm.CanAddTab);
+                explorer.GetCurrentPathFunc = h => vm.ActiveTab.Path;
+                vm.NavigationTracker.InvalidateCache();
+                vm.SyncWithExplorerAsync().GetAwaiter().GetResult();
+                Assert.IsNull(vm.PendingClosePaths);
+                Assert.IsTrue(vm.CanAddTab);
+                vm.DuplicateTabAsync(vm.ActiveTab, null, null).GetAwaiter().GetResult();
+                vm.DuplicateTabAsync(vm.ActiveTab, null, null).GetAwaiter().GetResult();
+                Assert.AreEqual(255, vm.Tabs.Count);
+            }
+        }
+
+        [TestMethod]
+        public void CloseRollbackLimit_SpareCapacityAndLastTabReplacementRemainUsable()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer))
+            {
+                vm.CloseTabsAsync(0, 1, null, null).GetAwaiter().GetResult();
+                Assert.IsTrue(vm.CanAddTab);
+                for (int i = 1; i < 255; i++)
+                    vm.DuplicateTabAsync(vm.ActiveTab, null, null).GetAwaiter().GetResult();
+                Assert.AreEqual(255, vm.Tabs.Count);
+                vm.TimeoutPendingNavigation();
+                Assert.AreEqual(255, vm.Tabs.Count);
+                Assert.AreEqual(@"C:\MockPath", vm.ActiveTab.Path);
+            }
+        }
+
+        [TestMethod]
+        public void CloseRollbackHistory_RestoresEvictedItemsAndBatchOrder()
+        {
+            foreach (int closeCount in new[] { 1, 3 })
+            {
+                MockExplorerService explorer = new MockExplorerService();
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer))
+                {
+                    System.Collections.Generic.List<ClosedTabInfo> oldest = new System.Collections.Generic.List<ClosedTabInfo>();
+                    for (int i = 0; i < 3; i++) oldest.Add(new ClosedTabInfo(@"C:\Old" + i, i));
+                    System.Collections.Generic.List<System.Collections.Generic.List<ClosedTabInfo>> history =
+                        new System.Collections.Generic.List<System.Collections.Generic.List<ClosedTabInfo>> { oldest };
+                    for (int i = 3; i < 255; i++) history.Add(new System.Collections.Generic.List<ClosedTabInfo> { new ClosedTabInfo(@"C:\Old" + i, i) });
+                    vm.RestoreHistory(history);
+                    for (int i = 1; i <= closeCount; i++) vm.Tabs.Add(new TabItemViewModel(@"C:\Tab" + i, "Tab", explorer));
+                    vm.CloseTabsAsync(0, closeCount, null, null).GetAwaiter().GetResult();
+                    vm.TimeoutPendingNavigation();
+                    System.Collections.Generic.List<System.Collections.Generic.List<ClosedTabInfo>> actual = vm.GetPersistableHistory();
+                    Assert.AreEqual(history.Count, actual.Count);
+                    for (int i = 0; i < history.Count; i++) CollectionAssert.AreEqual(history[i], actual[i]);
+                }
+            }
+        }
+
+        [TestMethod]
+        public void CloseRollbackHistory_PreservesIndependentCloseDuringPendingNavigation()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer))
+            {
+                System.Collections.Generic.List<System.Collections.Generic.List<ClosedTabInfo>> history =
+                    new System.Collections.Generic.List<System.Collections.Generic.List<ClosedTabInfo>>();
+                for (int i = 0; i < 255; i++) history.Add(new System.Collections.Generic.List<ClosedTabInfo> { new ClosedTabInfo(@"C:\Old" + i, i) });
+                vm.RestoreHistory(history);
+                vm.Tabs.Add(new TabItemViewModel(@"C:\Next", "Next", explorer));
+                vm.Tabs.Add(new TabItemViewModel(@"C:\Independent", "Independent", explorer));
+                vm.CloseTabsAsync(0, 1, null, null).GetAwaiter().GetResult();
+                vm.CloseTabsAsync(1, 1, null, null).GetAwaiter().GetResult();
+                vm.TimeoutPendingNavigation();
+                System.Collections.Generic.List<ClosedTabInfo> actual = vm.GetHistoryItems();
+                Assert.AreEqual(255, actual.Count);
+                Assert.AreEqual(@"C:\Independent", actual[0].Path);
+                for (int i = 1; i < 255; i++) Assert.AreSame(history[255 - i][0], actual[i]);
+                Assert.AreEqual(2, vm.Tabs.Count);
+            }
+        }
+
+        [TestMethod]
+        public void Limits255_HistoryRoundTripPreserves255IndividualBatches()
+        {
+            string directory = Path.Combine(Path.GetTempPath(), "KjTabBar-Limits-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                string file = Path.Combine(directory, "tabs.txt");
+                MockExplorerService explorer = new MockExplorerService();
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\Initial"))
+                using (TabBarViewModel restored = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\Initial"))
+                {
+                    for (int i = 0; i < 256; i++)
+                    {
+                        vm.ActiveTab.Path = @"C:\History" + i;
+                        vm.RememberLocationBeforeExplorerNavigation(@"C:\Other");
+                    }
+                    TabPersistenceService storage = new TabPersistenceService(file);
+                    storage.SaveTabsIfChanged(vm, true);
+                    Assert.IsTrue(new TabPersistenceService(file).LoadTabsTo(restored, false, true));
+                    Assert.AreEqual(255, restored.GetHistoryItems().Count);
+                    Assert.AreEqual(@"C:\History255", restored.GetHistoryItems()[0].Path);
+                    Assert.AreEqual(@"C:\History1", restored.GetHistoryItems()[254].Path);
+                }
+            }
+            finally { Directory.Delete(directory, true); }
+        }
+
+        [TestMethod]
+        public void Limits255_AddDuplicateAndReopenPreserveFullTabList()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\Initial"))
+            {
+                for (int i = 1; i < 254; i++) vm.Tabs.Add(new TabItemViewModel(@"C:\Tab" + i, "Tab", explorer));
+                Assert.IsTrue(vm.TryInsertTabWithPath(@"C:\Last", 254, true));
+                Assert.AreEqual(255, vm.Tabs.Count);
+                TabItemViewModel active = vm.ActiveTab;
+                vm.RememberLocationBeforeExplorerNavigation(@"C:\Other");
+                Assert.IsFalse(vm.TryInsertTabWithPath(@"C:\Overflow", 255, true));
+                vm.AddTab();
+                vm.DuplicateTab(active);
+                vm.ReopenClosedTab();
+                Assert.AreEqual(255, vm.Tabs.Count);
+                Assert.AreSame(active, vm.ActiveTab);
+                Assert.AreEqual(1, vm.GetHistoryItems().Count);
+                bool prepared = false;
+                vm.InsertTabWithPathAsync(@"C:\Overflow", 255, path => { prepared = true; return System.Threading.Tasks.Task.FromResult(true); }, null).GetAwaiter().GetResult();
+                Assert.IsFalse(prepared);
+            }
+        }
+
+        [TestMethod]
+        public void Limits255_HistoryCountsItemsAcrossBatchesAndTrimsOldest()
+        {
+            ClosedTabHistory history = new ClosedTabHistory();
+            history.Record(@"C:\Old", 0);
+            history.StartBatch();
+            for (int i = 0; i < 256; i++) history.Record(@"C:\Batch" + i, i);
+            history.EndBatch();
+            Assert.AreEqual(255, history.GetRecordedItems().Count);
+            Assert.AreEqual(@"C:\Batch1", history.GetRecordedItems()[0].Path);
+            Assert.AreEqual(1, history.GetBatches().Count);
+            history.Record(@"C:\Newest", 0);
+            Assert.AreEqual(255, history.GetRecordedItems().Count);
+            Assert.AreEqual(@"C:\Batch2", history.GetRecordedItems()[0].Path);
+            Assert.AreEqual(2, history.GetBatches().Count);
+            ClosedTabHistory restored = new ClosedTabHistory();
+            restored.RestoreBatches(history.GetBatches());
+            Assert.AreEqual(255, restored.GetRecordedItems().Count);
+        }
+
+        [TestMethod]
+        public void Limits255_RestoreAndImportCapTabs()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\Initial"))
+            {
+                string[] paths = new string[256];
+                for (int i = 0; i < paths.Length; i++) paths[i] = @"C:\Tab" + i;
+                vm.RestoreTabs(paths, null, null, false, true);
+                Assert.AreEqual(255, vm.Tabs.Count);
+                Assert.AreEqual(paths[254], vm.Tabs[254].Path);
+                TabItemViewModel first = vm.Tabs[0];
+                KjTabBar.Services.TabListFile list = KjTabBar.Services.TabListFile.Parse("active=0\n" + string.Join("\n", paths));
+                Assert.IsTrue(vm.ImportTabsAsync(list, null, null).GetAwaiter().GetResult());
+                Assert.AreNotSame(first, vm.Tabs[0]);
+                Assert.AreEqual(255, vm.Tabs.Count);
+                Assert.AreEqual(paths[254], vm.Tabs[254].Path);
+            }
+        }
+
+        [TestMethod]
+        public void Limits255_ObservedNavigationReusesTabAndRetainsOldLocation()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\Initial"))
+            {
+                for (int i = 1; i < 255; i++) vm.Tabs.Add(new TabItemViewModel(@"C:\Tab" + i, "Tab", explorer));
+                TabItemViewModel active = vm.ActiveTab;
+                Assert.AreSame(active, vm.GetOrAddObservedTab(@"C:\Observed"));
+                Assert.AreEqual(255, vm.Tabs.Count);
+                Assert.AreEqual(@"C:\Observed", active.Path);
+                Assert.AreEqual(@"C:\Initial", vm.GetHistoryItems()[0].Path);
+            }
+        }
+
         [TestMethod]
         public void Repair3_HistoryMenuOpensChosenOlderEntry()
         {

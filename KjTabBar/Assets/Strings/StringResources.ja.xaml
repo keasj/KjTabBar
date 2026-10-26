@@ -27,7 +27,7 @@
     <system:String x:Key="AddTabButtonToolTip">新しいタブ (フォルダを選択)</system:String>
     <system:String x:Key="AddTabDialogDescription">タブに追加するフォルダを選択してください</system:String>
     <system:String x:Key="AbsorbZoneLabel">吸収</system:String>
-    <system:String x:Key="AbsorbZoneToolTip">Explorer ウィンドウをここで離すとタブへ吸収します。</system:String>
+    <system:String x:Key="AbsorbZoneToolTip">Explorer ウィンドウをここで離すとタブへ吸収します。ここを左ドラッグするとウィンドウを移動できます。</system:String>
     <system:String x:Key="SaveSettingsErrorTitle">保存エラー</system:String>
     <system:String x:Key="SaveSettingsErrorMessage">設定の保存に失敗しました。</system:String>
     <system:String x:Key="FileOperationErrorTitle">操作エラー</system:String>
@@ -40,6 +40,7 @@
     <system:String x:Key="MenuExportTabs">タブリストのエクスポート...</system:String>
     <system:String x:Key="MenuImportTabs">タブリストのインポート...</system:String>
     <system:String x:Key="TabListFileFilter">テキストファイル (*.txt)|*.txt</system:String>
+    <system:String x:Key="TabListImportLimitExceeded">タブ数の上限を超えています。先頭{0}件をインポートし、超過分はインポートしません。</system:String>
     <system:String x:Key="TabListTransferError">タブリストを読み書きできませんでした。ファイル形式とファイルの読み書き権限を確認してください。</system:String>
     <system:String x:Key="ShortcutCreateUnavailable">ショートカットを作成できませんでした。</system:String>
     <system:String x:Key="ShortcutPlacementFailed">ショートカットの配置に失敗しました。</system:String>

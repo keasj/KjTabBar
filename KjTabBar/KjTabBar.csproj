@@ -24,4 +24,16 @@
     <Reference Include="System.Management" />
     <Reference Include="System.Security" />
   </ItemGroup>
+  <!-- Isolate only markup compilation; setup output discovery needs the normal intermediate path. -->
+  <Target Name="IsolateDesignTimeMarkupOutput" BeforeTargets="MarkupCompilePass1" Condition="'$(DesignTimeBuild)' == 'true'">
+    <PropertyGroup>
+      <_NormalMarkupOutputPath>$(IntermediateOutputPath)</_NormalMarkupOutputPath>
+      <IntermediateOutputPath>$(IntermediateOutputPath)DesignTime\</IntermediateOutputPath>
+    </PropertyGroup>
+  </Target>
+  <Target Name="RestoreDesignTimeMarkupOutput" AfterTargets="MarkupCompilePass1" Condition="'$(DesignTimeBuild)' == 'true'">
+    <PropertyGroup>
+      <IntermediateOutputPath>$(_NormalMarkupOutputPath)</IntermediateOutputPath>
+    </PropertyGroup>
+  </Target>
 </Project>

@@ -104,7 +104,7 @@ If the setup build fails with an unspecified Visual Studio error, check:
 
 - `C:\Users\<UserName>\AppData\Roaming\Microsoft\VisualStudio\<InstanceId>\ActivityLog.xml`
 
-If setup reports missing generated WPF members (for example InitializeComponent) or missing BAML, rebuild the normal solution with Visual Studio MSBuild and confirm the BAML exists before retrying setup. Do not fix application source for a missing generated file.
+Design-time XAML compilation uses a separate intermediate directory only during MarkupCompilePass1, so it cannot delete normal build BAML or generated code. The normal intermediate path is restored afterward for setup output discovery. Validate this isolation in both configurations with tools/Test-XamlBuildIsolation.ps1 -MSBuildPath <MSBuild.exe> -Configuration Release (or Debug).
 
 Example for the English setup on Visual Studio 18:
 

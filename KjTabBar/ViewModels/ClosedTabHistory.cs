@@ -5,7 +5,7 @@ namespace KjTabBar.ViewModels
 {
     internal sealed class ClosedTabHistory
     {
-        private const int MaxHistoryCount = 50;
+        internal const int MaxHistoryCount = 255;
         private readonly List<ClosedTabBatch> _history = new List<ClosedTabBatch>();
         private ClosedTabBatch _currentRecordingBatch;
 
@@ -99,12 +99,32 @@ namespace KjTabBar.ViewModels
             }
         }
 
+        internal void RollbackClose(List<List<ClosedTabInfo>> previousBatches,
+            List<ClosedTabInfo> closeRecords, HashSet<ClosedTabInfo> restoredItems)
+        {
+            // Recover entries evicted by the unconfirmed close without undoing later user operations.
+            HashSet<ClosedTabInfo> previousItems = new HashSet<ClosedTabInfo>();
+            List<List<ClosedTabInfo>> batches = new List<List<ClosedTabInfo>>();
+            foreach (List<ClosedTabInfo> batch in previousBatches)
+            {
+                previousItems.UnionWith(batch);
+                batches.Add(batch.FindAll(item => !restoredItems.Contains(item)));
+            }
+            foreach (ClosedTabBatch batch in _history)
+                batches.Add(batch.Tabs.FindAll(item => !previousItems.Contains(item) && !closeRecords.Contains(item)));
+            RestoreBatches(batches);
+        }
+
         private void AddBatch(ClosedTabBatch batch)
         {
             _history.Add(batch);
-            if (_history.Count > MaxHistoryCount)
+            int excess = GetRecordedItems().Count - MaxHistoryCount;
+            while (excess > 0)
             {
-                _history.RemoveAt(0);
+                int removeCount = Math.Min(excess, _history[0].Tabs.Count);
+                _history[0].Tabs.RemoveRange(0, removeCount);
+                if (_history[0].Tabs.Count == 0) _history.RemoveAt(0);
+                excess -= removeCount;
             }
         }
     }

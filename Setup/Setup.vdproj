@@ -15,6 +15,12 @@
     {
         "Entry"
         {
+        "MsmKey" = "8:_KJTABBAR_APP_ICON"
+        "OwnerKey" = "8:_UNDEFINED"
+        "MsmSig" = "8:_UNDEFINED"
+        }
+        "Entry"
+        {
         "MsmKey" = "8:_54EA63937B224FA4ACD8870A42FD1FA0"
         "OwnerKey" = "8:_UNDEFINED"
         "MsmSig" = "8:_UNDEFINED"
@@ -142,6 +148,26 @@
         }
         "File"
         {
+            "{1FB2D0AE-D3B9-43D4-B9DD-F88EC61E35DE}:_KJTABBAR_APP_ICON"
+            {
+            "SourcePath" = "8:..\\KjTabBar\\Assets\\Icons\\app_icon.ico"
+            "TargetName" = "8:app_icon.ico"
+            "Tag" = "8:"
+            "Folder" = "8:_4C9DB71831834548B4A73BC932818F17"
+            "Condition" = "8:"
+            "Transitive" = "11:FALSE"
+            "Vital" = "11:TRUE"
+            "ReadOnly" = "11:FALSE"
+            "Hidden" = "11:FALSE"
+            "System" = "11:FALSE"
+            "Permanent" = "11:FALSE"
+            "SharedLegacy" = "11:FALSE"
+            "PackageAs" = "3:1"
+            "Register" = "3:1"
+            "Exclude" = "11:FALSE"
+            "IsDependency" = "11:FALSE"
+            "IsolateTo" = "8:"
+            }
             "{1FB2D0AE-D3B9-43D4-B9DD-F88EC61E35DE}:_54EA63937B224FA4ACD8870A42FD1FA0"
             {
             "SourcePath" = "8:..\\LICENSE"
@@ -249,15 +275,15 @@
         {
         "Name" = "8:Microsoft Visual Studio"
         "ProductName" = "8:KjTabBar"
-        "ProductCode" = "8:{CF7DA2A9-80E0-43E9-95A7-FFDE94736CBB}"
-        "PackageCode" = "8:{E4D80D1E-8CE9-4B26-8067-4C1968F2BBE3}"
+        "ProductCode" = "8:{24FB9C65-B975-475C-A947-1AF1562CDDA7}"
+        "PackageCode" = "8:{E17434E1-631C-4619-B241-5E5482076421}"
         "UpgradeCode" = "8:{C3A4D5D7-A7B5-4DBF-8DD4-65050E7326C9}"
         "AspNetVersion" = "8:4.0.30319.0"
         "RestartWWWService" = "11:FALSE"
         "RemovePreviousVersions" = "11:TRUE"
         "DetectNewerInstalledVersion" = "11:FALSE"
         "InstallAllUsers" = "11:FALSE"
-        "ProductVersion" = "8:1.4.7"
+        "ProductVersion" = "8:1.4.8"
         "Manufacturer" = "8:KjTabBar"
         "ARPHELPTELEPHONE" = "8:"
         "ARPHELPLINK" = "8:"
@@ -267,7 +293,7 @@
         "Keywords" = "8:"
         "ARPCOMMENTS" = "8:"
         "ARPURLINFOABOUT" = "8:"
-        "ARPPRODUCTICON" = "8:"
+        "ARPPRODUCTICON" = "8:_KJTABBAR_APP_ICON"
         "ARPIconIndex" = "3:0"
         "SearchPath" = "8:"
         "UseSystemSearchPath" = "11:TRUE"

@@ -75,7 +75,7 @@ namespace KjTabBar.Models
                             Array.Copy(state, cursor, paths, 0, pathCount);
                             cursor += pathCount;
                             int batchCount = ReadCount(state, ref cursor);
-                            if (batchCount > 50) throw new InvalidDataException("Too many history batches.");
+                            if (batchCount > ClosedTabHistory.MaxHistoryCount) throw new InvalidDataException("Too many history batches.");
                             for (int batch = 0; batch < batchCount; batch++)
                             {
                                 int count = ReadCount(state, ref cursor);

@@ -65,8 +65,7 @@ namespace KjTabBar.Services
                     if (cancelledTab == null)
                     {
                         // A rolled-back last-tab close may have removed its temporary Home tab.
-                        cancelledTab = new ViewModels.TabItemViewModel(currentPath, _explorerService.GetFolderName(currentPath), _explorerService);
-                        _viewModel.Tabs.Add(cancelledTab);
+                        cancelledTab = _viewModel.GetOrAddObservedTab(currentPath);
                     }
                     if (cancelledTab != null)
                     {

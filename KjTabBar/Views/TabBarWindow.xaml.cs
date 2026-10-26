@@ -488,7 +488,10 @@ namespace KjTabBar.Views
                     ExplorerHostSwitchCoordinator coordinator = ExplorerHostSwitchCoordinator;
                     bool imported = await vm.ImportTabsAsync(list,
                         coordinator != null ? new Func<string, Task<bool>>(path => coordinator.PrepareForPathAsync(vm, path, vm.IsPreparedTabOperationCurrent)) : null,
-                        coordinator != null ? new Action(coordinator.CompletePendingReveal) : null);
+                        coordinator != null ? new Action(coordinator.CompletePendingReveal) : null,
+                        () => MessageBox.Show(this,
+                            string.Format(TryFindResource("TabListImportLimitExceeded") as string ?? "The tab limit has been exceeded. Only the first {0} tabs will be imported.", TabBarViewModel.MaxTabCount),
+                            title ?? "KjTabBar", MessageBoxButton.OK, MessageBoxImage.Warning));
                     if (imported && PersistTabState != null) PersistTabState(vm);
                 }
                 else
@@ -615,13 +618,13 @@ namespace KjTabBar.Views
 
         // ====== ドラッグ&ドロップ（WPF） ======
 
-        internal static bool IsWindowMoveBackground(DependencyObject source, DependencyObject background, DependencyObject absorbZone)
+        internal static bool IsWindowMoveBackground(DependencyObject source, DependencyObject background)
         {
             DependencyObject current = source;
             while (current != null && current != background)
             {
                 FrameworkElement element = current as FrameworkElement;
-                if (current == absorbZone || current is System.Windows.Controls.Primitives.ButtonBase ||
+                if (current is System.Windows.Controls.Primitives.ButtonBase ||
                     (element != null && element.DataContext is TabItemViewModel))
                 {
                     return false;
@@ -636,7 +639,7 @@ namespace KjTabBar.Views
         private void Background_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (e.ChangedButton != MouseButton.Left || e.ClickCount != 1 ||
-                !IsWindowMoveBackground(e.OriginalSource as DependencyObject, sender as DependencyObject, AbsorbDropZone))
+                !IsWindowMoveBackground(e.OriginalSource as DependencyObject, sender as DependencyObject))
             {
                 return;
             }

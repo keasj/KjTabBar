@@ -576,8 +576,7 @@ namespace KjTabBar.Services
                     TabItemViewModel source = viewModel.FindTabByPath(originalPath);
                     if (source == null)
                     {
-                        source = new TabItemViewModel(originalPath, _explorerService.GetFolderName(originalPath), _explorerService);
-                        viewModel.Tabs.Add(source);
+                        source = viewModel.GetOrAddObservedTab(originalPath);
                     }
                     viewModel.SetActiveTabOnly(source);
                 }
