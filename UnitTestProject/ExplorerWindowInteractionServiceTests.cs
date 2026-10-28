@@ -102,6 +102,7 @@ namespace UnitTestProject
                     delegate { }, h => foreground++, delegate { }, () => null, delegate { });
                 using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, current))
                 {
+                    service.GetForegroundWindow = () => vm.ExplorerHwnd;
                     vm.InsertTabWithPath(path, vm.Tabs.Count, true);
                     TabItemViewModel first = vm.ActiveTab;
                     vm.DuplicateTab(first);
@@ -213,6 +214,29 @@ namespace UnitTestProject
             VerifyControlPanelRestoreState(1, 2, 1);
         }
 
+        [TestMethod]
+        public void ControlPanelAbsorption_DoesNotActivateAfterSwitchingToAnotherApp()
+        {
+            foreach (int foreground in new[] { 0, 100, 200, 999 })
+            {
+                PowerOptionsExplorerService explorer = new PowerOptionsExplorerService();
+                int activations = 0;
+                ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                    explorer, new ExplorerWindowTrackingState(), TestTabPersistenceFactory.Create(), h => "",
+                    delegate { }, h => activations++, delegate { },
+                    (vm, hwnd) => { vm.SetExplorerHwnd(hwnd); return true; },
+                    delegate { }, () => null, delegate { }, null);
+                service.GetForegroundWindow = () => (IntPtr)foreground;
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.AllControlPanelPath))
+                {
+                    Assert.IsTrue(service.AbsorbExplorerWindow((IntPtr)200, vm, explorer.PowerOptionsPath, true, true, delegate { }));
+                    Assert.AreEqual(foreground == 100 || foreground == 200 ? 1 : 0, activations);
+                    Assert.AreEqual((IntPtr)200, vm.ExplorerHwnd);
+                    Assert.AreEqual(explorer.PowerOptionsPath, vm.ActiveTab.Path);
+                }
+            }
+        }
+
         private static void VerifyControlPanelRestoreState(uint showCommand, uint flags, uint expectedShowCommand)
         {
             PowerOptionsExplorerService explorer = new PowerOptionsExplorerService();
@@ -238,6 +262,7 @@ namespace UnitTestProject
                 delegate { }, delegate { Assert.AreEqual(1, writes, "Restore state before foreground activation."); },
                 delegate { }, (vm, hwnd) => { vm.SetExplorerHwnd(hwnd); rebound = true; return true; },
                 delegate { }, delegate { return null; }, delegate { }, null);
+            service.GetForegroundWindow = () => (IntPtr)100;
             TabBarViewModel viewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.AllControlPanelPath);
             Assert.IsTrue(service.AbsorbExplorerWindow((IntPtr)200, viewModel, explorer.PowerOptionsPath, true, true, delegate { }));
             Assert.AreEqual(1, writes);
@@ -668,6 +693,39 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public async System.Threading.Tasks.Task AbsorptionCompletion_UsesCurrentForegroundAfterNavigation()
+        {
+            foreach (int completionForeground in new[] { 0, 100, 200, 999 })
+            {
+                IntPtr foreground = (IntPtr)200;
+                string current = @"C:\Before";
+                int activations = 0;
+                IntPtr closed = IntPtr.Zero;
+                MockExplorerService explorer = new MockExplorerService();
+                explorer.GetCurrentPathFunc = h => current;
+                explorer.NavigateFunc = (h, path) =>
+                {
+                    current = path;
+                    foreground = (IntPtr)completionForeground;
+                    return true;
+                };
+                ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+                ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                    explorer, tracking, TestTabPersistenceFactory.Create(), h => "",
+                    delegate { }, h => activations++, h => closed = h, () => null, delegate { });
+                service.GetForegroundWindow = () => foreground;
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, current))
+                {
+                    Assert.IsTrue(await service.AbsorbExplorerWindowAsync((IntPtr)200, vm, @"C:\After", false, false, null));
+                    Assert.AreEqual(completionForeground == 100 || completionForeground == 200 ? 1 : 0, activations);
+                    Assert.AreEqual((IntPtr)200, closed);
+                    Assert.AreEqual(@"C:\After", vm.ActiveTab.Path);
+                    Assert.IsTrue(tracking.IgnoredWindows.Contains((IntPtr)200));
+                }
+            }
+        }
+
+        [TestMethod]
         public void AbsorbExplorerWindow_InsertsTabAndMarksAbsorbed()
         {
             MockExplorerService explorerService = new MockExplorerService();
@@ -690,6 +748,7 @@ namespace UnitTestProject
 
             TabBarViewModel targetViewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorerService);
 
+            service.GetForegroundWindow = () => (IntPtr)200;
             bool absorbed = service.AbsorbExplorerWindow((IntPtr)200, targetViewModel, @"C:\Work", false, false, delegate (IntPtr hwnd) { });
 
             Assert.IsTrue(absorbed);
@@ -763,6 +822,7 @@ namespace UnitTestProject
             targetViewModel.InsertTabWithPath(explorerService.PowerOptionsPath, 2, true);
             targetViewModel.SelectTab(targetViewModel.Tabs[1]);
 
+            service.GetForegroundWindow = () => (IntPtr)100;
             bool absorbed = service.AbsorbExplorerWindow((IntPtr)201, targetViewModel, explorerService.PowerOptionsPath, true, true, delegate (IntPtr hwnd) { });
 
             Assert.IsTrue(absorbed);
@@ -802,6 +862,7 @@ namespace UnitTestProject
             TabBarViewModel targetViewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorerService);
             targetViewModel.InsertTabWithPath(explorerService.AllControlPanelPath, 1, true);
 
+            service.GetForegroundWindow = () => (IntPtr)100;
             bool absorbed = service.AbsorbExplorerWindow((IntPtr)202, targetViewModel, explorerService.PowerOptionsPath, true, true, delegate (IntPtr hwnd) { });
 
             Assert.IsTrue(absorbed);
@@ -909,6 +970,7 @@ namespace UnitTestProject
             targetViewModel.InsertTabWithPath(@"C:\Work", 2, false);
             targetViewModel.SelectTab(targetViewModel.Tabs[2]);
 
+            service.GetForegroundWindow = () => (IntPtr)100;
             bool absorbed = service.AbsorbExplorerWindow((IntPtr)203, targetViewModel, explorerService.PowerOptionsPath, true, true, delegate (IntPtr hwnd) { });
 
             Assert.IsTrue(absorbed);
@@ -953,6 +1015,7 @@ namespace UnitTestProject
             TabBarViewModel targetViewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorerService);
             targetViewModel.InsertTabWithPath(explorerService.AllControlPanelPath, 1, true);
 
+            service.GetForegroundWindow = () => (IntPtr)100;
             bool absorbed = service.AbsorbExplorerWindow(
                 (IntPtr)204,
                 targetViewModel,
@@ -998,6 +1061,7 @@ namespace UnitTestProject
             TabBarViewModel targetViewModel = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorerService);
             Assert.AreEqual(1, targetViewModel.Tabs.Count);
 
+            service.GetForegroundWindow = () => (IntPtr)100;
             bool absorbed = service.AbsorbExplorerWindow((IntPtr)201, targetViewModel, explorerService.PowerOptionsPath, true, true, delegate (IntPtr hwnd) { });
 
             Assert.IsTrue(absorbed);

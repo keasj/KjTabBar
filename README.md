@@ -37,6 +37,7 @@ Only when a folder, special item, or shortcut to one is opened from the desktop,
 
 - If multiple tabs match, prefer the active matching tab; otherwise select the leftmost match. Keep existing duplicate tabs.
 - Match special folders by identifier or normalized path, not display name. Distinguish Control Panel itself from each of its sub-items.
+- If you switch to another app while an asynchronous absorption or host restoration is pending, completion does not bring Explorer to the foreground.
 - Duplicate Tab, adding tabs by dragging, absorbing windows by dragging, and the + button still create new tabs even for matching locations. Dragging from the desktop is also excluded from reuse.
 - Do not apply reuse to launches from other sources or internal window creation during tab operations.
 
@@ -53,6 +54,8 @@ This behavior is implemented in the source. Launch-origin detection, display, an
    - Right-click a tab to access actions such as `Duplicate Tab`, `Open in New Window`, `Copy Path`, and `Close Tab`.
    - Drag a tab outside the tab bar and drop it outside Explorer to reopen that tab as a separate window and close the original tab.
    - To merge an independent Explorer window, drag it onto the dedicated `Merge` zone at the far right of the tab bar and release it there.
+   - Left-click blank tab bar space or the Merge zone to bring Explorer forward. Hold the left button and drag to move the entire Explorer window; release the button to stop.
+   - A partially covered destination accepts absorption when the drop point remains exposed.
 5. **Settings**
    - Right-click the background area of the tab bar and choose `Settings...` to change options such as the tab font size.
 6. To exit, right-click the task tray icon and choose `Exit`.

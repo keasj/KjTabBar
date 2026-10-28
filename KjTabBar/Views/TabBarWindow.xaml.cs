@@ -30,6 +30,11 @@ namespace KjTabBar.Views
         private Point _dragStartPoint;
         private bool _isDragging = false;
         private Button _addTabButton;
+        private UIElement _explorerMoveCapture;
+        private IntPtr _explorerMoveHwnd;
+        private NativeMethods.POINT _explorerMoveOrigin;
+        private NativeMethods.RECT _explorerMoveRect;
+        private bool _explorerMoveStarted;
 
         // ヘルパークラス
         private TabBarWindowPositioner _positioner;
@@ -209,20 +214,29 @@ namespace KjTabBar.Views
             return screenPoint.X >= topLeft.X &&
                    screenPoint.X < bottomRight.X &&
                    screenPoint.Y >= topLeft.Y &&
-                   screenPoint.Y < bottomRight.Y && IsDropTargetInFront(draggedWindow);
+                   screenPoint.Y < bottomRight.Y && IsDropTargetInFront(draggedWindow, screenPoint);
         }
 
-        internal bool IsDropTargetInFront(IntPtr draggedWindow)
+        internal bool IsDropTargetInFront(IntPtr draggedWindow, NativeMethods.POINT? dropPoint = null)
         {
             if (!IsLoaded || !IsVisible) return false;
+            NativeMethods.POINT point;
+            if (dropPoint.HasValue) point = dropPoint.Value;
+            else if (!NativeMethods.GetCursorPos(out point)) return false;
             IntPtr target = new WindowInteropHelper(this).Handle;
             return IsDropTargetInFront(target, draggedWindow,
                 hwnd => NativeMethods.GetWindow(hwnd, NativeMethods.GW_HWNDPREV),
-                NativeMethods.IsBlockingDropWindow, ExplorerHwnd);
+                NativeMethods.IsBlockingDropWindow, ExplorerHwnd, hwnd =>
+                {
+                    NativeMethods.RECT rect;
+                    return !NativeMethods.GetWindowRect(hwnd, out rect) ||
+                        (point.X >= rect.Left && point.X < rect.Right && point.Y >= rect.Top && point.Y < rect.Bottom);
+                });
         }
 
         internal static bool IsDropTargetInFront(IntPtr target, IntPtr draggedWindow,
-            Func<IntPtr, IntPtr> getPreviousWindow, Func<IntPtr, bool> isBlockingWindow, IntPtr explorerHost = default(IntPtr))
+            Func<IntPtr, IntPtr> getPreviousWindow, Func<IntPtr, bool> isBlockingWindow, IntPtr explorerHost = default(IntPtr),
+            Func<IntPtr, bool> coversDropPoint = null)
         {
             if (target == IntPtr.Zero) return false;
             System.Collections.Generic.HashSet<IntPtr> visited = new System.Collections.Generic.HashSet<IntPtr>();
@@ -231,7 +245,8 @@ namespace KjTabBar.Views
             {
                 // Window order can change during enumeration; reject an inconsistent snapshot.
                 if (!visited.Add(current)) return false;
-                if (current != draggedWindow && current != explorerHost && isBlockingWindow(current)) return false;
+                if (current != draggedWindow && current != explorerHost && isBlockingWindow(current) &&
+                    (coversDropPoint == null || coversDropPoint(current))) return false;
             }
             return true;
         }
@@ -269,6 +284,12 @@ namespace KjTabBar.Views
         }
 
         // ====== 位置とタイマー ======
+
+        internal void HandleExplorerForegroundChanged(IntPtr hwnd)
+        {
+            if (IsLoaded && _runtimeCoordinator != null)
+                _runtimeCoordinator.HandleForegroundChanged(hwnd, NativeMethods.GetForegroundWindow());
+        }
 
         private void UpdatePosition()
         {
@@ -639,21 +660,94 @@ namespace KjTabBar.Views
         private void Background_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (e.ChangedButton != MouseButton.Left || e.ClickCount != 1 ||
-                !IsWindowMoveBackground(e.OriginalSource as DependencyObject, sender as DependencyObject))
+                !IsWindowMoveBackground(e.OriginalSource as DependencyObject, sender as DependencyObject)) return;
+            TabBarViewModel vm = GetVM();
+            UIElement capture = sender as UIElement;
+            NativeMethods.POINT cursor;
+            NativeMethods.RECT rect;
+            if (vm == null || capture == null || !NativeMethods.IsWindow(vm.ExplorerHwnd) ||
+                !NativeMethods.GetCursorPos(out cursor) || !NativeMethods.GetWindowRect(vm.ExplorerHwnd, out rect)) return;
+
+            // Raise the host for this explicit press, then keep drag input on the bar.
+            NativeMethods.ForceSetForegroundWindow(vm.ExplorerHwnd);
+            Activate();
+            if (!capture.CaptureMouse()) return;
+            _explorerMoveCapture = capture;
+            _explorerMoveHwnd = vm.ExplorerHwnd;
+            _explorerMoveOrigin = cursor;
+            _explorerMoveRect = rect;
+            _explorerMoveStarted = false;
+            e.Handled = true;
+        }
+
+        private void Background_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (_explorerMoveCapture == null) return;
+            if (e.LeftButton != MouseButtonState.Pressed || !NativeMethods.IsWindow(_explorerMoveHwnd))
             {
+                EndExplorerMove(false);
                 return;
             }
-
-            TabBarViewModel vm = GetVM();
-            if (vm == null || !NativeMethods.IsWindow(vm.ExplorerHwnd)) return;
             NativeMethods.POINT cursor;
             if (!NativeMethods.GetCursorPos(out cursor)) return;
+            int dx = cursor.X - _explorerMoveOrigin.X;
+            int dy = cursor.Y - _explorerMoveOrigin.Y;
+            if (!_explorerMoveStarted)
+            {
+                System.Windows.DpiScale dpi = System.Windows.Media.VisualTreeHelper.GetDpi(this);
+                if (!ShouldStartExplorerMove(dx, dy, dpi.DpiScaleX, dpi.DpiScaleY)) return;
+                NativeMethods.WINDOWPLACEMENT placement = new NativeMethods.WINDOWPLACEMENT();
+                placement.length = (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.WINDOWPLACEMENT));
+                if (NativeMethods.GetWindowPlacement(_explorerMoveHwnd, ref placement) && placement.showCmd == 3)
+                {
+                    NativeMethods.ShowWindow(_explorerMoveHwnd, 4); // SW_SHOWNOACTIVATE
+                    NativeMethods.RECT restored;
+                    if (!NativeMethods.GetWindowRect(_explorerMoveHwnd, out restored)) { EndExplorerMove(false); return; }
+                    double fraction = Math.Max(0, Math.Min(1, (double)(_explorerMoveOrigin.X - _explorerMoveRect.Left) / Math.Max(1, _explorerMoveRect.Width)));
+                    int offsetY = _explorerMoveOrigin.Y - _explorerMoveRect.Top;
+                    _explorerMoveRect = restored;
+                    _explorerMoveRect.Left = cursor.X - (int)Math.Round(restored.Width * fraction);
+                    _explorerMoveRect.Top = cursor.Y - offsetY;
+                    _explorerMoveOrigin = cursor;
+                    dx = dy = 0;
+                }
+                _explorerMoveStarted = true;
+            }
+            NativeMethods.SetWindowPos(_explorerMoveHwnd, IntPtr.Zero,
+                _explorerMoveRect.Left + dx, _explorerMoveRect.Top + dy, 0, 0,
+                NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
+            UpdatePosition();
+            e.Handled = true;
+        }
 
-            // Let Explorer own the native move loop; the bar follows its existing location hook.
-            NativeMethods.ReleaseCapture();
-            int coordinates = unchecked((cursor.X & 0xffff) | ((cursor.Y & 0xffff) << 16));
-            e.Handled = NativeMethods.PostMessage(vm.ExplorerHwnd, NativeMethods.WM_NCLBUTTONDOWN,
-                new IntPtr(NativeMethods.HTCAPTION), new IntPtr(coordinates));
+        internal static bool ShouldStartExplorerMove(int dx, int dy, double scaleX, double scaleY)
+        {
+            return Math.Abs(dx) >= SystemParameters.MinimumHorizontalDragDistance * scaleX ||
+                Math.Abs(dy) >= SystemParameters.MinimumVerticalDragDistance * scaleY;
+        }
+
+        private void Background_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            if (_explorerMoveCapture == null) return;
+            EndExplorerMove(true);
+            e.Handled = true;
+        }
+
+        private void Background_LostMouseCapture(object sender, MouseEventArgs e)
+        {
+            EndExplorerMove(false);
+        }
+
+        private void EndExplorerMove(bool activateExplorer)
+        {
+            UIElement capture = _explorerMoveCapture;
+            IntPtr hwnd = _explorerMoveHwnd;
+            _explorerMoveCapture = null;
+            _explorerMoveHwnd = IntPtr.Zero;
+            _explorerMoveStarted = false;
+            if (capture != null && capture.IsMouseCaptured) capture.ReleaseMouseCapture();
+            if (activateExplorer && hwnd != IntPtr.Zero && NativeMethods.IsWindow(hwnd))
+                NativeMethods.ForceSetForegroundWindow(hwnd);
         }
 
         private void Tab_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -940,7 +1034,7 @@ namespace KjTabBar.Views
             WindowInteropHelper helper = new WindowInteropHelper(this);
             IntPtr ownerHwnd = GetExplorerOwner(_pendingOwnerExplorerHwnd);
             NativeMethods.SetWindowLongPtr(helper.Handle, NativeMethods.GWL_HWNDPARENT, ownerHwnd);
-            NativeMethods.ShowWindow(_myHwnd, NativeMethods.SW_SHOW);
+            NativeMethods.ShowWindow(_myHwnd, NativeMethods.SW_SHOWNA);
             AppLogger.LogInfo("TabBarWindow", string.Format("ApplyPendingOwnerWindowIfReady applied Win32 owner={0}", ownerHwnd));
             _pendingOwnerExplorerHwnd = IntPtr.Zero;
         }

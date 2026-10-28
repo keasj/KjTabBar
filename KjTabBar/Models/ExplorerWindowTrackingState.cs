@@ -139,7 +139,7 @@ namespace KjTabBar.Models
 
         private static bool SetWindowPlacementCore(IntPtr hwnd, NativeMethods.WINDOWPLACEMENT placement)
         {
-            return NativeMethods.SetWindowPlacement(hwnd, ref placement);
+            return NativeMethods.SetWindowPlacementWithoutActivation(hwnd, placement);
         }
 
         public void AddHiddenPendingWindows(List<IntPtr> explorerWindows)

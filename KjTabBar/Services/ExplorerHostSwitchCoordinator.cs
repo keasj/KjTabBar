@@ -9,6 +9,8 @@ namespace KjTabBar.Services
 {
     internal sealed class ExplorerHostSwitchCoordinator
     {
+        internal Func<IntPtr> GetForegroundWindow { get; set; } = NativeMethods.GetForegroundWindow;
+        internal Action<IntPtr> ActivateExplorer { get; set; } = NativeMethods.ForceSetForegroundWindow;
         internal bool? CurrentHostIsControlPanel { get; private set; }
         private const int NewHostPollingAttempts = 80;
         internal TimeSpan NewHostWaitTimeout { get; set; } = TimeSpan.FromSeconds(8);
@@ -618,6 +620,11 @@ namespace KjTabBar.Services
                 AppLogger.LogDiagnosticPlacement("Reveal.Before", pendingRevealExplorerHwnd);
                 _windowTracking.RestoreNormalPositionBeforeShow(pendingRevealExplorerHwnd);
                 _showExplorerWindow(pendingRevealExplorerHwnd);
+                // Transfer the foreground only while it still belongs to this host switch.
+                IntPtr foreground = GetForegroundWindow();
+                if (foreground != IntPtr.Zero &&
+                    (foreground == _preparedOriginalHwnd || foreground == pendingRevealExplorerHwnd))
+                    ActivateExplorer(pendingRevealExplorerHwnd);
                 AppLogger.LogDiagnosticPlacement("Reveal.After", pendingRevealExplorerHwnd);
             }
         }
@@ -645,7 +652,7 @@ namespace KjTabBar.Services
                     NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER);
             }
 
-            NativeMethods.ShowWindow(explorerHwnd, NativeMethods.SW_SHOW);
+            NativeMethods.ShowWindow(explorerHwnd, NativeMethods.SW_SHOWNA);
         }
 
         private IntPtr FindMatchingNewExplorerWindow(HashSet<IntPtr> previousExplorerWindows, IntPtr currentExplorerHwnd, string targetPath, int retry)

@@ -11,6 +11,36 @@ namespace UnitTestProject
     public class ExplorerHostSwitchCoordinatorTests
     {
         [TestMethod]
+        public void Reveal_TransfersForegroundOnlyWhileSourceOrDestinationStillOwnsIt()
+        {
+            foreach (int foreground in new[] { 0, 100, 200, 999 })
+            {
+                MockExplorerService explorer = new MockExplorerService();
+                explorer.IsControlPanelPathFunc = path => path == explorer.PowerOptionsPath;
+                explorer.GetCurrentPathFunc = hwnd => hwnd == (IntPtr)100 ? explorer.PowerOptionsPath : @"C:\Work";
+                ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+                tracking.RememberParkedExplorerOrigin((IntPtr)100, (IntPtr)200);
+                int shown = 0;
+                int activated = 0;
+                ExplorerHostSwitchCoordinator coordinator = new ExplorerHostSwitchCoordinator(
+                    explorer, tracking, (vm, hwnd) => { vm.SetExplorerHwnd(hwnd); return true; },
+                    hwnd => shown++, delegate { }, delegate { }, hwnd => true,
+                    () => new System.Collections.Generic.List<IntPtr> { (IntPtr)100, (IntPtr)200 },
+                    explorer.GetCurrentPath, hwnd => (NativeMethods.RECT?)null, path => false, delegate { });
+                coordinator.GetForegroundWindow = () => (IntPtr)foreground;
+                coordinator.ActivateExplorer = hwnd => { Assert.AreEqual((IntPtr)200, hwnd); activated++; };
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.PowerOptionsPath))
+                {
+                    Assert.IsTrue(coordinator.PrepareForPath(vm, @"C:\Work"));
+                    coordinator.CompletePendingReveal();
+                    coordinator.CompletePendingReveal();
+                    Assert.AreEqual(1, shown);
+                    Assert.AreEqual(foreground == 100 || foreground == 200 ? 1 : 0, activated);
+                }
+            }
+        }
+
+        [TestMethod]
         public void Overlap_RestoredActiveTabThrowPreservesSavedPath() { VerifyFailedHostNavigation(false, true, false, false, false, true); }
         [TestMethod]
         public void Overlap_RestoredActiveTabRejectionPreservesSavedPath() { VerifyFailedHostNavigation(false, false, false, false, false, true); }

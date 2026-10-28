@@ -408,6 +408,10 @@ namespace KjTabBar
                 if (eventType != NativeMethods.EVENT_SYSTEM_FOREGROUND) return;
                 if (hwnd == IntPtr.Zero) return;
 
+                TabBarWindow foregroundBar;
+                if (_tabBars.TryGetTabBarWindow(hwnd, out foregroundBar))
+                    foregroundBar.HandleExplorerForegroundChanged(hwnd);
+
                 StringBuilder className = new StringBuilder(256);
                 NativeMethods.GetClassName(hwnd, className, className.Capacity);
                 _bootstrapResult.Services.ExplorerLaunchTracker.UpdateForegroundState(hwnd, className.ToString());

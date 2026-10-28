@@ -267,6 +267,28 @@ namespace KjTabBar.Helpers
         public const uint WM_NCLBUTTONDOWN = 0x00A1;
         public const int HTCAPTION = 2;
 
+        internal static bool SetWindowPlacementWithoutActivation(IntPtr hwnd, WINDOWPLACEMENT placement)
+        {
+            if (placement.showCmd == 1 || placement.showCmd == 9) placement.showCmd = 4; // SHOWNOACTIVATE
+            else if (placement.showCmd == 2) placement.showCmd = 7; // SHOWMINNOACTIVE
+            if (placement.showCmd != 3) return SetWindowPlacement(hwnd, ref placement);
+
+            // Maximization has no no-activate show command. Suppress activation for this call only.
+            long original = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64();
+            bool added = (original & WS_EX_NOACTIVATE) == 0;
+            if (added) SetWindowLongPtr(hwnd, GWL_EXSTYLE, new IntPtr(original | WS_EX_NOACTIVATE));
+            try { return SetWindowPlacement(hwnd, ref placement); }
+            finally
+            {
+                if (added && IsWindow(hwnd))
+                {
+                    long current = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64();
+                    SetWindowLongPtr(hwnd, GWL_EXSTYLE, new IntPtr(current & ~WS_EX_NOACTIVATE));
+                }
+            }
+        }
+
+
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool ReleaseCapture();
@@ -300,6 +322,7 @@ namespace KjTabBar.Helpers
 
         public const int SW_HIDE = 0;
         public const int SW_SHOW = 5;
+        public const int SW_SHOWNA = 8;
 
         [StructLayout(LayoutKind.Sequential)]
         public struct RECT

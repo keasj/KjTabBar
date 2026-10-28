@@ -13,6 +13,7 @@ namespace KjTabBar.Views
         private static readonly TimeSpan ImmediateSyncThrottleInterval = TimeSpan.FromMilliseconds(150);
         private const int ExplorerGoneConfirmationCount = 2;
 
+        internal Func<IntPtr> GetForegroundWindow { get; set; } = NativeMethods.GetForegroundWindow;
         private readonly Dispatcher _dispatcher;
         private readonly Func<bool> _isExplorerAlive;
         private readonly Action _updatePosition;
@@ -79,6 +80,23 @@ namespace KjTabBar.Views
             }
 
             _updatePosition();
+        }
+
+        internal void HandleForegroundChanged(IntPtr hwnd, IntPtr currentForeground)
+        {
+            // Ignore stale notifications after a host switch or a switch to another app.
+            // Update the existing non-activating placement immediately, without Shell synchronization.
+            if (hwnd == IntPtr.Zero || hwnd != _trackedExplorerHwnd || hwnd != currentForeground ||
+                _dispatcher.HasShutdownStarted || _dispatcher.HasShutdownFinished) return;
+            _updatePosition();
+            int generation = _explorerGeneration;
+            // Foreground notification can precede the host's final Z-order change.
+            // Recheck once after returning to the message loop, without activating either window.
+            _dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+            {
+                if (_explorerGeneration == generation && _trackedExplorerHwnd == hwnd &&
+                    GetForegroundWindow() == hwnd) _updatePosition();
+            }));
         }
 
         public void HandleDpiChanged()

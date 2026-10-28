@@ -12,6 +12,90 @@ namespace UnitTestProject
     public class TabBarWindowLocationHookTests
     {
         [TestMethod]
+        public void ForegroundChange_RechecksAfterMessageLoop_AndCancelsStaleFollowup()
+        {
+            Exception failure = null;
+            System.Threading.Thread thread = new System.Threading.Thread(() =>
+            {
+                try
+                {
+                    int updates = 0;
+                    IntPtr foreground = (IntPtr)100;
+                    using (TabBarWindowRuntimeCoordinator coordinator = CreateCoordinator(() => true, () => updates++, () => Assert.Fail()))
+                    {
+                        coordinator.GetForegroundWindow = () => foreground;
+                        coordinator.Start(foreground);
+                        updates = 0;
+                        coordinator.HandleForegroundChanged(foreground, foreground);
+                        Assert.AreEqual(1, updates);
+                        DrainForegroundFollowup();
+                        Assert.AreEqual(2, updates, "Recheck Z-order after the foreground callback returns.");
+                        coordinator.HandleForegroundChanged(foreground, foreground);
+                        foreground = (IntPtr)999;
+                        DrainForegroundFollowup();
+                        Assert.AreEqual(3, updates, "Do not follow after the user switches apps.");
+                        foreground = (IntPtr)100;
+                        coordinator.HandleForegroundChanged(foreground, foreground);
+                        coordinator.RebindExplorer((IntPtr)200);
+                        int afterRebind = updates;
+                        DrainForegroundFollowup();
+                        Assert.AreEqual(afterRebind, updates);
+                        foreground = (IntPtr)200;
+                        coordinator.HandleForegroundChanged(foreground, foreground);
+                        coordinator.Stop();
+                        int afterStop = updates;
+                        DrainForegroundFollowup();
+                        Assert.AreEqual(afterStop, updates);
+                    }
+                }
+                catch (Exception ex) { failure = ex; }
+                finally { Dispatcher.CurrentDispatcher.InvokeShutdown(); }
+            });
+            thread.SetApartmentState(System.Threading.ApartmentState.STA);
+            thread.IsBackground = true;
+            thread.Start();
+            Assert.IsTrue(thread.Join(TimeSpan.FromSeconds(10)), "Foreground followup test did not finish.");
+            if (failure != null) throw failure;
+        }
+
+        private static void DrainForegroundFollowup()
+        {
+            DispatcherFrame frame = new DispatcherFrame();
+            Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => frame.Continue = false));
+            Dispatcher.PushFrame(frame);
+        }
+
+        [TestMethod]
+        public void ForegroundChange_UpdatesImmediatelyWithoutTimerOrShellSync()
+        {
+            int updates = 0;
+            int syncs = 0;
+            using (TabBarWindowRuntimeCoordinator coordinator = new TabBarWindowRuntimeCoordinator(
+                Dispatcher.CurrentDispatcher, () => true, () => updates++,
+                () => { syncs++; return Task.FromResult(0); }, () => Assert.Fail("Must not close the bar.")))
+            {
+                coordinator.Start((IntPtr)100);
+                updates = 0;
+                coordinator.HandleForegroundChanged((IntPtr)100, (IntPtr)100);
+                Assert.AreEqual(1, updates, "Must update before returning, without waiting for a timer.");
+                Assert.AreEqual(0, syncs);
+                coordinator.HandleForegroundChanged((IntPtr)100, (IntPtr)999);
+                coordinator.HandleForegroundChanged((IntPtr)999, (IntPtr)999);
+                coordinator.HandleForegroundChanged(IntPtr.Zero, IntPtr.Zero);
+                Assert.AreEqual(1, updates, "Stale and unrelated events must not raise the bar.");
+                coordinator.RebindExplorer((IntPtr)200);
+                updates = 0;
+                coordinator.HandleForegroundChanged((IntPtr)100, (IntPtr)100);
+                Assert.AreEqual(0, updates);
+                coordinator.HandleForegroundChanged((IntPtr)200, (IntPtr)200);
+                Assert.AreEqual(1, updates);
+                coordinator.Stop();
+                coordinator.HandleForegroundChanged((IntPtr)200, (IntPtr)200);
+                Assert.AreEqual(1, updates);
+            }
+        }
+
+        [TestMethod]
         public void ShouldHandleLocationChangeEvent_ReturnsTrue_ForTrackedExplorerWindowMove()
         {
             bool result = TabBarWindowRuntimeCoordinator.ShouldHandleLocationChangeEvent(
@@ -265,6 +349,17 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void WindowMoveThreshold_DoesNotStartForClickOrSmallJitter_UsesBothDpiAxes()
+        {
+            int x = (int)Math.Ceiling(System.Windows.SystemParameters.MinimumHorizontalDragDistance * 2);
+            int y = (int)Math.Ceiling(System.Windows.SystemParameters.MinimumVerticalDragDistance * 3);
+            Assert.IsFalse(TabBarWindow.ShouldStartExplorerMove(0, 0, 2, 3));
+            Assert.IsFalse(TabBarWindow.ShouldStartExplorerMove(x - 1, y - 1, 2, 3));
+            Assert.IsTrue(TabBarWindow.ShouldStartExplorerMove(x, 0, 2, 3));
+            Assert.IsTrue(TabBarWindow.ShouldStartExplorerMove(0, -y, 2, 3));
+        }
+
+        [TestMethod]
         public void WindowMoveBackground_AllowsAbsorptionZoneAndExcludesTabControls()
         {
             Exception failure = null;
@@ -307,14 +402,17 @@ namespace UnitTestProject
         }
 
         [TestMethod]
-        public void DropVisibility_RejectsAppAheadEvenWhenDropPointIsExposed()
+        public void DropVisibility_AllowsExposedPointAndRejectsCoveredPoint()
         {
             IntPtr target = (IntPtr)1;
             IntPtr app = (IntPtr)2;
             IntPtr dragged = (IntPtr)3;
             Assert.IsFalse(TabBarWindow.IsDropTargetInFront(target, dragged,
                 hwnd => hwnd == target ? app : hwnd == app ? dragged : IntPtr.Zero,
-                hwnd => true));
+                hwnd => true, IntPtr.Zero, hwnd => true));
+            Assert.IsTrue(TabBarWindow.IsDropTargetInFront(target, dragged,
+                hwnd => hwnd == target ? app : hwnd == app ? dragged : IntPtr.Zero,
+                hwnd => true, IntPtr.Zero, hwnd => hwnd == dragged));
         }
 
         [TestMethod]

@@ -19,6 +19,7 @@ namespace KjTabBar.Services
         private readonly Action<IntPtr> _showExplorerWindow;
         private readonly Action<IntPtr> _hideExplorerWindow;
         private readonly Action<IntPtr> _forceSetForegroundWindow;
+        internal Func<IntPtr> GetForegroundWindow { get; set; } = NativeMethods.GetForegroundWindow;
         private readonly Action<IntPtr, NativeMethods.RECT> _moveExplorerWindow;
         private readonly Action<IntPtr> _postCloseWindow;
         private readonly Func<TabBarViewModel, IntPtr, bool> _rebindExplorerWindow;
@@ -695,7 +696,9 @@ namespace KjTabBar.Services
 
             _windowTracking.StageRestorePlacement(newExplorerHwnd, previousPlacement);
             _windowTracking.RestoreNormalPositionBeforeShow(newExplorerHwnd);
-            _forceSetForegroundWindow(newExplorerHwnd);
+            IntPtr foreground = GetForegroundWindow();
+            if (foreground != IntPtr.Zero && (foreground == previousExplorerHwnd || foreground == newExplorerHwnd))
+                _forceSetForegroundWindow(newExplorerHwnd);
 
             if (previousExplorerHwnd != IntPtr.Zero && previousExplorerHwnd != newExplorerHwnd)
             {
@@ -808,8 +811,13 @@ namespace KjTabBar.Services
 
         private void FinalizeAbsorbedWindow(IntPtr newExplorerHwnd, IntPtr targetExplorerHwnd)
         {
-            _windowTracking.RestoreNormalPositionBeforeShow(targetExplorerHwnd);
-            _forceSetForegroundWindow(targetExplorerHwnd);
+            IntPtr foreground = GetForegroundWindow();
+            // Completion may arrive after the user has switched to another application.
+            if (foreground != IntPtr.Zero && (foreground == newExplorerHwnd || foreground == targetExplorerHwnd))
+            {
+                _windowTracking.RestoreNormalPositionBeforeShow(targetExplorerHwnd);
+                _forceSetForegroundWindow(targetExplorerHwnd);
+            }
             if (newExplorerHwnd == targetExplorerHwnd)
             {
                 // Windows reused the parked host; it is now the managed window, not disposable.
@@ -866,7 +874,7 @@ namespace KjTabBar.Services
                 return;
             }
 
-            NativeMethods.ShowWindow(explorerHwnd, NativeMethods.SW_SHOW);
+            NativeMethods.ShowWindow(explorerHwnd, NativeMethods.SW_SHOWNA);
             // A restored Explorer can retain missing caption buttons until its frame is recalculated.
             // Post the same size-preserving refresh verified on the affected Explorer window.
             NativeMethods.SetWindowPos(
@@ -917,7 +925,7 @@ namespace KjTabBar.Services
                     NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER);
             }
 
-            NativeMethods.ShowWindow(explorerHwnd, NativeMethods.SW_SHOW);
+            NativeMethods.ShowWindow(explorerHwnd, NativeMethods.SW_SHOWNA);
         }
 
         private static ExplorerHostSwitchCoordinator CreateHostSwitchCoordinator(
