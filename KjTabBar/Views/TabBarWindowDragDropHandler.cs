@@ -278,7 +278,7 @@ namespace KjTabBar.Views
             finally { _wasRightDrag = false; _dragData = null; _dragPaths = null; _sourceDragData = null; _dragSourceWindow = IntPtr.Zero; }
         }
 
-        private int GetDropIndex(ItemsControl tabItemsControl, DragEventArgs e)
+        internal static int GetDropIndex(ItemsControl tabItemsControl, DragEventArgs e)
         {
             if (tabItemsControl == null) return 0;
             Point position = e.GetPosition(tabItemsControl);

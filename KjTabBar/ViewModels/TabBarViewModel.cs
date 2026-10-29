@@ -1302,7 +1302,7 @@ namespace KjTabBar.ViewModels
                             if (!await preparePath(info.Path)) return;
                         }
                         if (!IsPreparedTabOperationCurrent()) return;
-                        bool restored = await InsertTabCoreAsync(info.Path, info.Position, true, true);
+                        bool restored = await InsertTabCoreAsync(info.Path, selectedItem == null ? info.Position : _tabs.Count, true, true);
                         Action insert = delegate { };
                         if (withPendingReveal != null)
                         {

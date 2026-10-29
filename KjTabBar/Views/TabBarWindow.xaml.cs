@@ -49,6 +49,7 @@ namespace KjTabBar.Views
             PreviewDragEnter += TabBarWindow_DragEnter;
             PreviewDragOver += TabBarWindow_DragOver;
             PreviewDrop += TabBarWindow_Drop;
+            PreviewDragLeave += TabBarWindow_DragLeave;
             DataContextChanged += TabBarWindow_DataContextChanged;
         }
 
@@ -339,6 +340,7 @@ namespace KjTabBar.Views
             PreviewDragEnter -= TabBarWindow_DragEnter;
             PreviewDragOver -= TabBarWindow_DragOver;
             PreviewDrop -= TabBarWindow_Drop;
+            PreviewDragLeave -= TabBarWindow_DragLeave;
             ThemeManager.Instance.ThemeChanged -= ThemeManager_ThemeChanged;
             PersistCurrentTabState(GetVM(), PersistTabState);
             AppLogger.LogDiagnosticTiming("Close.Persisted", ExplorerHwnd, closeTimer);
@@ -789,7 +791,19 @@ namespace KjTabBar.Views
                         if (tab != null)
                         {
                             string draggedPath = tab.Path;
-                            DragDropEffects effect = DragDrop.DoDragDrop(element, tab, DragDropEffects.Move);
+                            DragDropEffects effect;
+                            ShowDraggedTabOutline(element);
+                            element.GiveFeedback += Tab_GiveFeedback;
+                            try
+                            {
+                                effect = DragDrop.DoDragDrop(element, tab, DragDropEffects.Move);
+                            }
+                            finally
+                            {
+                                element.GiveFeedback -= Tab_GiveFeedback;
+                                DraggedTabOutline.Visibility = Visibility.Collapsed;
+                                TabInsertionBar.Visibility = Visibility.Collapsed;
+                            }
                             await OpenDraggedTabInNewWindowIfDroppedOutsideAsync(effect, tab, draggedPath);
                         }
                     }
@@ -869,11 +883,58 @@ namespace KjTabBar.Views
             }
         }
 
+        private void ShowDraggedTabOutline(FrameworkElement element)
+        {
+            Point position = element.TranslatePoint(new Point(), TabDragOverlay);
+            Canvas.SetLeft(DraggedTabOutline, position.X);
+            Canvas.SetTop(DraggedTabOutline, position.Y);
+            DraggedTabOutline.Width = element.ActualWidth;
+            DraggedTabOutline.Height = element.ActualHeight;
+            DraggedTabOutline.Visibility = Visibility.Visible;
+        }
+
+        private void Tab_GiveFeedback(object sender, GiveFeedbackEventArgs e)
+        {
+            // An external detach uses None until the OLE loop ends. Its default
+            // cursor would incorrectly imply that releasing the tab is forbidden.
+            e.UseDefaultCursors = false;
+            Mouse.SetCursor(Cursors.Arrow);
+            e.Handled = true;
+        }
+
+        private void TabBarWindow_DragLeave(object sender, DragEventArgs e)
+        {
+            TabInsertionBar.Visibility = Visibility.Collapsed;
+        }
+
+        private void UpdateTabInsertionBar(DragEventArgs e)
+        {
+            TabInsertionBar.Visibility = Visibility.Collapsed;
+            TabBarViewModel vm = GetVM();
+            if (e.Effects != DragDropEffects.Move || vm == null ||
+                !e.Data.GetDataPresent(typeof(TabItemViewModel))) return;
+            TabItemViewModel tab = e.Data.GetData(typeof(TabItemViewModel)) as TabItemViewModel;
+            if (tab == null || !vm.Tabs.Contains(tab)) return;
+
+            int index = TabBarWindowDragDropHandler.GetDropIndex(TabItemsControl, e);
+            int targetIndex = Math.Min(index, vm.Tabs.Count - 1);
+            FrameworkElement target = TabItemsControl.ItemContainerGenerator.ContainerFromIndex(targetIndex) as FrameworkElement;
+            if (target == null) return;
+            Point position = target.TranslatePoint(new Point(), TabDragOverlay);
+            // Use the same insertion index as Drop, including wrapped rows and the end.
+            double x = position.X + (index >= vm.Tabs.Count ? target.ActualWidth : 0);
+            Canvas.SetLeft(TabInsertionBar, x - TabInsertionBar.Width / 2);
+            Canvas.SetTop(TabInsertionBar, position.Y);
+            TabInsertionBar.Height = target.ActualHeight;
+            TabInsertionBar.Visibility = Visibility.Visible;
+        }
+
         private void TabBarWindow_DragEnter(object sender, DragEventArgs e)
         {
             if (_dragDropHandler != null)
             {
                 _dragDropHandler.HandleDragEnter(TabItemsControl, e);
+                UpdateTabInsertionBar(e);
             }
         }
 
@@ -882,11 +943,13 @@ namespace KjTabBar.Views
             if (_dragDropHandler != null)
             {
                 _dragDropHandler.HandleDragOver(TabItemsControl, e);
+                UpdateTabInsertionBar(e);
             }
         }
 
         private void TabBarWindow_Drop(object sender, DragEventArgs e)
         {
+            TabInsertionBar.Visibility = Visibility.Collapsed;
             if (_dragDropHandler != null)
             {
                 TabBarViewModel vm = GetVM();

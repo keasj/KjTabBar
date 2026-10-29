@@ -29,8 +29,8 @@
         </Style>
 
         <Style x:Key="TabCloseBtn" TargetType="Button">
-            <Setter Property="Width" Value="20"/>
-            <Setter Property="Height" Value="20"/>
+            <Setter Property="MinWidth" Value="20"/>
+            <Setter Property="MinHeight" Value="20"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Cursor" Value="Hand"/>
@@ -39,7 +39,7 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="9">
-                            <TextBlock Text="×" FontSize="10" Foreground="{TemplateBinding Foreground}"
+                            <TextBlock Text="×" FontSize="{TemplateBinding FontSize}" Foreground="{TemplateBinding Foreground}"
                                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -54,8 +54,8 @@
         </Style>
 
         <Style x:Key="AddTabBtn" TargetType="Button">
-            <Setter Property="Width" Value="34"/>
-            <Setter Property="Height" Value="28"/>
+            <Setter Property="MinWidth" Value="34"/>
+            <Setter Property="MinHeight" Value="28"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Cursor" Value="Hand"/>
@@ -65,7 +65,7 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="8">
-                            <TextBlock Text="+" FontSize="15" FontWeight="SemiBold" Foreground="{TemplateBinding Foreground}"
+                            <TextBlock Text="+" FontSize="{TemplateBinding FontSize}" FontWeight="SemiBold" Foreground="{TemplateBinding Foreground}"
                                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -80,7 +80,7 @@
         </Style>
 
         <Style x:Key="AbsorbDropZoneStyle" TargetType="Border">
-            <Setter Property="Width" Value="87"/>
+            <Setter Property="MinWidth" Value="87"/>
             <Setter Property="MinHeight" Value="30"/>
             <Setter Property="Margin" Value="8,2,4,0"/>
             <Setter Property="CornerRadius" Value="8"/>
@@ -164,11 +164,16 @@
                     ToolTip="{DynamicResource AbsorbZoneToolTip}">
                 <TextBlock Text="{DynamicResource AbsorbZoneLabel}"
                            Foreground="{DynamicResource ThemeFgSubtle}"
-                           FontSize="11"
                            FontWeight="SemiBold"
                            HorizontalAlignment="Center"
                            VerticalAlignment="Center" />
             </Border>
+            <Canvas x:Name="TabDragOverlay" Grid.ColumnSpan="2" IsHitTestVisible="False">
+                <Border x:Name="DraggedTabOutline" BorderBrush="#FFFF9800" BorderThickness="2"
+                        CornerRadius="10,10,0,0" Visibility="Collapsed" />
+                <Border x:Name="TabInsertionBar" Background="#FF2196F3" Width="3"
+                        Visibility="Collapsed" />
+            </Canvas>
         </Grid>
     </Border>
 </Window>

@@ -169,10 +169,13 @@ namespace KjTabBar.Views
                 foreach (ClosedTabInfo item in vm.GetHistoryItems())
                 {
                     ClosedTabInfo selected = item;
+                    string label = item.Path.StartsWith("::{", StringComparison.OrdinalIgnoreCase) ||
+                        item.Path.StartsWith("shell:", StringComparison.OrdinalIgnoreCase)
+                        ? _explorerService.GetFolderName(item.Path) : item.Path;
                     MenuItem entry = new MenuItem
                     {
                         // TextBlock prevents underscores in paths being interpreted as access keys.
-                        Header = new TextBlock { Text = item.Path, MaxWidth = 600, TextTrimming = TextTrimming.CharacterEllipsis },
+                        Header = new TextBlock { Text = label, MaxWidth = 600, TextTrimming = TextTrimming.CharacterEllipsis },
                         ToolTip = item.Path
                     };
                     entry.Click += async (sender, args) => { await _window.ReopenClosedTabAsync(vm, selected); };

@@ -277,6 +277,48 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void HistoryMenu_UsesDisplayNameForShellPaths()
+        {
+            Exception failure = null;
+            System.Threading.Thread thread = new System.Threading.Thread(delegate ()
+            {
+                KjTabBar.Views.TabBarWindow window = null;
+                try
+                {
+                    MockExplorerService explorer = new MockExplorerService();
+                    using (TabBarViewModel vm = new TabBarViewModel(IntPtr.Zero, new MockUserSettings(), explorer))
+                    {
+                        vm.RestoreHistory(new System.Collections.Generic.List<System.Collections.Generic.List<ClosedTabInfo>>
+                        {
+                            new System.Collections.Generic.List<ClosedTabInfo>
+                            {
+                                new ClosedTabInfo("::{645FF040-5081-101B-9F08-00AA002F954E}", 0),
+                                new ClosedTabInfo("shell:Downloads", 0)
+                            }
+                        });
+                        window = new KjTabBar.Views.TabBarWindow();
+                        KjTabBar.Views.TabBarWindowContextMenuBuilder builder =
+                            new KjTabBar.Views.TabBarWindowContextMenuBuilder(window, explorer);
+                        System.Windows.Controls.ContextMenu menu = new System.Windows.Controls.ContextMenu();
+                        typeof(KjTabBar.Views.TabBarWindowContextMenuBuilder).GetMethod("AddHistoryMenu",
+                            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                            .Invoke(builder, new object[] { menu, vm });
+                        System.Windows.Controls.MenuItem history = (System.Windows.Controls.MenuItem)menu.Items[0];
+                        Assert.AreEqual(2, history.Items.Count);
+                        foreach (System.Windows.Controls.MenuItem entry in history.Items)
+                            Assert.AreEqual("MockFolder", ((System.Windows.Controls.TextBlock)entry.Header).Text);
+                    }
+                }
+                catch (Exception ex) { failure = ex; }
+                finally { if (window != null) window.Close(); }
+            });
+            thread.SetApartmentState(System.Threading.ApartmentState.STA);
+            thread.Start();
+            Assert.IsTrue(thread.Join(10000), "History menu stalled.");
+            if (failure != null) throw failure;
+        }
+
+        [TestMethod]
         public void Repair3_HistoryMenuOpensChosenOlderEntry()
         {
             Exception failure = null;
@@ -314,6 +356,7 @@ namespace UnitTestProject
                                 System.Threading.Tasks.Task.Delay(3000)));
                             Assert.AreEqual(@"C:\Older_Name", vm.ActiveTab.Path);
                             Assert.AreEqual(@"C:\Missing", vm.GetHistoryItems()[0].Path);
+                            Assert.AreSame(vm.ActiveTab, vm.Tabs[vm.Tabs.Count - 1]);
                         }
                     }
                     catch (Exception ex) { failure = ex; }

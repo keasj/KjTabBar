@@ -13,6 +13,7 @@ Instead of hooking into or modifying Explorer itself, it places an independent t
   - Multiple Explorer windows are managed across the system and consolidated into a single tab bar window.
 - **Drag and drop support**
   - Reorder tabs with left-button drag
+  - The dragged tab keeps an orange outline, including outside the bar; a blue bar marks the insertion position. Tab dragging uses an arrow cursor.
   - Drag a tab out of the tab bar and drop it outside the Explorer window to move that tab into a new window and close the source tab
   - Move or copy files and folders onto tabs by dropping items from outside
   - Drag an independent Explorer window onto the dedicated merge zone at the right edge of the tab bar to absorb it as a new tab
@@ -52,12 +53,13 @@ This behavior is implemented in the source. Launch-origin detection, display, an
    - Use the `+` button on the right to open a folder-picker dialog and add a new tab.
    - Each tab shows a per-path icon, including shell-specific icons for special folders and Control Panel sub-items.
    - Right-click a tab to access actions such as `Duplicate Tab`, `Open in New Window`, `Copy Path`, and `Close Tab`.
+   - Drag a tab with the left mouse button to reorder it. The source tab has an orange outline; release at the blue insertion bar. Outside the tab bar, the orange outline remains on the source tab and the cursor stays an arrow.
    - Drag a tab outside the tab bar and drop it outside Explorer to reopen that tab as a separate window and close the original tab.
    - To merge an independent Explorer window, drag it onto the dedicated `Merge` zone at the far right of the tab bar and release it there.
    - Left-click blank tab bar space or the Merge zone to bring Explorer forward. Hold the left button and drag to move the entire Explorer window; release the button to stop.
    - A partially covered destination accepts absorption when the drop point remains exposed.
 5. **Settings**
-   - Right-click the background area of the tab bar and choose `Settings...` to change options such as the tab font size.
+   - Right-click the background area of the tab bar and choose `Settings...` to change options such as the tab font size. The ×, +, and Merge labels also follow this font size.
 6. To exit, right-click the task tray icon and choose `Exit`.
 
 ## Installation and Uninstallation
