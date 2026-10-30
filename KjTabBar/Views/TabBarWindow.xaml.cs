@@ -28,6 +28,7 @@ namespace KjTabBar.Views
 
         // ドラッグ用変数
         private Point _dragStartPoint;
+        private FrameworkElement _dragSourceElement;
         private bool _isDragging = false;
         private Button _addTabButton;
         private UIElement _explorerMoveCapture;
@@ -462,6 +463,7 @@ namespace KjTabBar.Views
 
         private void Tab_Click(object sender, MouseButtonEventArgs e)
         {
+            EndTabDragCapture();
             _ = ObserveEventTaskAsync(Tab_ClickAsync(sender, e), "Tab_Click");
         }
 
@@ -754,8 +756,41 @@ namespace KjTabBar.Views
 
         private void Tab_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            _dragStartPoint = e.GetPosition(null);
-            _isDragging = false;
+            EndTabDragCapture();
+            FrameworkElement element = sender as FrameworkElement;
+            if (element == null || _isDragging) return;
+            DependencyObject source = e.OriginalSource as DependencyObject;
+            while (source != null && source != element)
+            {
+                if (source is System.Windows.Controls.Primitives.ButtonBase) return;
+                source = source is System.Windows.Media.Visual
+                    ? System.Windows.Media.VisualTreeHelper.GetParent(source)
+                    : LogicalTreeHelper.GetParent(source);
+            }
+            if (!element.CaptureMouse()) return;
+            _dragSourceElement = element;
+            _dragStartPoint = e.GetPosition(element);
+        }
+
+        private void EndTabDragCapture()
+        {
+            FrameworkElement source = _dragSourceElement;
+            _dragSourceElement = null;
+            if (source != null && source.IsMouseCaptured) source.ReleaseMouseCapture();
+        }
+
+        private void Tab_LostMouseCapture(object sender, MouseEventArgs e)
+        {
+            if (ReferenceEquals(sender, _dragSourceElement)) EndTabDragCapture();
+        }
+
+        private void Tab_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            FrameworkElement source = _dragSourceElement;
+            if (source == null) return;
+            bool inside = new Rect(new Point(), source.RenderSize).Contains(e.GetPosition(source));
+            EndTabDragCapture();
+            if (!inside) e.Handled = true;
         }
 
         private void Tab_MouseMove(object sender, MouseEventArgs e)
@@ -777,14 +812,19 @@ namespace KjTabBar.Views
 
         private async Task Tab_MouseMoveAsync(object sender, MouseEventArgs e)
         {
-            if (e.LeftButton == MouseButtonState.Pressed && !_isDragging)
+            if (e.LeftButton != MouseButtonState.Pressed)
             {
-                Point position = e.GetPosition(null);
-                if (Math.Abs(position.X - _dragStartPoint.X) > SystemParameters.MinimumHorizontalDragDistance ||
-                    Math.Abs(position.Y - _dragStartPoint.Y) > SystemParameters.MinimumVerticalDragDistance)
+                EndTabDragCapture();
+                return;
+            }
+            if (_dragSourceElement != null && !_isDragging)
+            {
+                FrameworkElement element = _dragSourceElement;
+                Point position = e.GetPosition(element);
+                if (ShouldStartTabDrag(_dragStartPoint, position, element.RenderSize))
                 {
                     _isDragging = true;
-                    FrameworkElement element = (FrameworkElement)sender;
+                    EndTabDragCapture();
                     TabItemViewModel tab = (TabItemViewModel)element.DataContext;
                     try
                     {
@@ -792,11 +832,12 @@ namespace KjTabBar.Views
                         {
                             string draggedPath = tab.Path;
                             DragDropEffects effect;
+                            bool cancelled;
                             ShowDraggedTabOutline(element);
                             element.GiveFeedback += Tab_GiveFeedback;
                             try
                             {
-                                effect = DragDrop.DoDragDrop(element, tab, DragDropEffects.Move);
+                                effect = RunTabDrag(element, () => DragDrop.DoDragDrop(element, tab, DragDropEffects.Move), out cancelled);
                             }
                             finally
                             {
@@ -804,7 +845,7 @@ namespace KjTabBar.Views
                                 DraggedTabOutline.Visibility = Visibility.Collapsed;
                                 TabInsertionBar.Visibility = Visibility.Collapsed;
                             }
-                            await OpenDraggedTabInNewWindowIfDroppedOutsideAsync(effect, tab, draggedPath);
+                            if (!cancelled) await OpenDraggedTabInNewWindowIfDroppedOutsideAsync(effect, tab, draggedPath);
                         }
                     }
                     catch (Exception ex)
@@ -814,6 +855,32 @@ namespace KjTabBar.Views
                     finally { _isDragging = false; }
                 }
             }
+        }
+
+        internal static DragDropEffects RunTabDrag(FrameworkElement element, Func<DragDropEffects> drag, out bool cancelled)
+        {
+            bool cancellationObserved = false;
+            QueryContinueDragEventHandler handler = (sender, e) =>
+            {
+                if (e.EscapePressed || e.Action == DragAction.Cancel) cancellationObserved = true;
+            };
+            element.AddHandler(DragDrop.QueryContinueDragEvent, handler, true);
+            try
+            {
+                return drag();
+            }
+            finally
+            {
+                element.RemoveHandler(DragDrop.QueryContinueDragEvent, handler);
+                cancelled = cancellationObserved;
+            }
+        }
+
+        internal static bool ShouldStartTabDrag(Point start, Point position, Size tabSize)
+        {
+            if (new Rect(new Point(), tabSize).Contains(position)) return false;
+            return Math.Abs(position.X - start.X) > SystemParameters.MinimumHorizontalDragDistance ||
+                Math.Abs(position.Y - start.Y) > SystemParameters.MinimumVerticalDragDistance;
         }
 
         private async Task OpenDraggedTabInNewWindowIfDroppedOutsideAsync(DragDropEffects effect, TabItemViewModel tab, string draggedPath)
@@ -832,6 +899,13 @@ namespace KjTabBar.Views
 
             NativeMethods.RECT windowRect;
             if (!NativeMethods.GetWindowRect(_myHwnd, out windowRect))
+            {
+                return;
+            }
+
+            NativeMethods.RECT explorerRect;
+            if (!NativeMethods.GetWindowRect(ExplorerHwnd, out explorerRect) ||
+                !TabExternalDragOpenDecider.ShouldOpenInNewWindow(effect, draggedPath, cursorPoint, windowRect, explorerRect))
             {
                 return;
             }

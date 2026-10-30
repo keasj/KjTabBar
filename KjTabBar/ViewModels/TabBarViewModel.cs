@@ -37,6 +37,7 @@ namespace KjTabBar.ViewModels
         private bool _isClosingTabs;
         private bool _isPreparingTabOperation;
         private TaskCompletionSource<bool> _availabilityCheckCompletion;
+        private System.Threading.CancellationTokenSource _availabilityCheckCancellation;
         private long _tabClickVersion;
         private int _selectionsInFlight;
         private bool _externalTabOperation;
@@ -375,6 +376,7 @@ namespace KjTabBar.ViewModels
             }
 
             _isDisposed = true;
+            if (_availabilityCheckCancellation != null) _availabilityCheckCancellation.Cancel();
             foreach (TabItemViewModel tab in _tabs) tab.StopIconUpdates();
             ExplorerManager manager = _explorerService as ExplorerManager;
             if (manager != null) manager.FolderTitlesChanged -= FolderTitlesChanged;
@@ -560,6 +562,7 @@ namespace KjTabBar.ViewModels
             TabItemViewModel previous = _activeTab;
             TabItemViewModel newTab = new TabItemViewModel(path, _explorerService.GetFolderName(path), _explorerService);
             _tabs.Insert(Math.Max(0, Math.Min(index, _tabs.Count)), newTab);
+            ActiveTabIndex = GetTabIndex(_activeTab);
             bool selected = false;
             try
             {
@@ -573,6 +576,7 @@ namespace KjTabBar.ViewModels
                 {
                     _tabs.Remove(newTab);
                     if (_activeTab == newTab && _tabs.Contains(previous)) SetActiveTabOnly(previous);
+                    ActiveTabIndex = GetTabIndex(_activeTab);
                 }
                 UpdateTabTitles();
             }
@@ -599,6 +603,7 @@ namespace KjTabBar.ViewModels
             string title = _explorerService.GetFolderName(path);
             TabItemViewModel newTab = new TabItemViewModel(path, title, _explorerService);
             _tabs.Insert(newIndex, newTab);
+            ActiveTabIndex = GetTabIndex(_activeTab);
             await SelectTabCoreAsync(newTab);
             UpdateTabTitles();
         }
@@ -1004,16 +1009,17 @@ namespace KjTabBar.ViewModels
             return string.IsNullOrEmpty(path) ? _explorerService.GetResolvedHomeFolderPath() : path;
         }
 
-        private Task<bool> CheckPathAvailabilityAsync(string path)
+        private Task<bool> CheckPathAvailabilityAsync(string path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
             string probePath = string.IsNullOrEmpty(path) ? _explorerService.GetResolvedHomeFolderPath() : path;
             return ComThreadService.Instance.InvokeAsync(() =>
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 ExplorerManager manager = _explorerService as ExplorerManager;
                 if (manager != null && manager.UsesShellWorker)
-                    return manager.GetPathAvailability(new string[] { probePath })[probePath];
+                    return manager.GetPathAvailability(new string[] { probePath }, cancellationToken)[probePath];
                 return _explorerService.IsTabPathCurrentlyAvailable(probePath);
-            });
+            }, cancellationToken);
         }
 
         private async Task<bool> TryCheckPathAvailabilityAsync(string path)
@@ -1031,6 +1037,24 @@ namespace KjTabBar.ViewModels
             if (_isDisposed || tab == null || !_tabs.Contains(tab) ||
                 (IsTabOperationPending && _availabilityCheckCompletion == null)) return;
             long clickVersion = ++_tabClickVersion;
+            if (_availabilityCheckCancellation != null) _availabilityCheckCancellation.Cancel();
+            List<TabItemViewModel> previewTabs = new List<TabItemViewModel>(_tabs);
+            foreach (TabItemViewModel item in previewTabs) item.SetSelectionPreview(item == tab);
+            try
+            {
+                await SelectClickedTabAsync(tab, preparePath, completePendingReveal, clickVersion);
+            }
+            finally
+            {
+                // An older click must not clear the latest click's preview.
+                if (clickVersion == _tabClickVersion)
+                    foreach (TabItemViewModel item in previewTabs) item.SetSelectionPreview(null);
+            }
+        }
+
+        private async Task SelectClickedTabAsync(TabItemViewModel tab, Func<string, Task<bool>> preparePath,
+            Action completePendingReveal, long clickVersion)
+        {
             string path = tab.Path;
             long pathVersion = tab.PathChangeVersion;
             long selectionVersion = _selectionVersion;
@@ -1038,17 +1062,24 @@ namespace KjTabBar.ViewModels
             Func<bool> isCurrent = () => !_isDisposed && _selectionVersion == selectionVersion &&
                 clickVersion == _tabClickVersion && ExplorerHwnd == host &&
                 _tabs.Contains(tab) && tab.PathChangeVersion == pathVersion;
-            // Coalesce clicks while probing: only the latest request may select or close a tab.
+            // Cancel the previous probe wait, then let its owner release the operation state.
+            // Only the latest click may start another probe or apply its result.
             if (_availabilityCheckCompletion != null) await _availabilityCheckCompletion.Task;
             if (!isCurrent() || IsTabOperationPending) return;
             TaskCompletionSource<bool> completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _availabilityCheckCompletion = completion;
+            System.Threading.CancellationTokenSource cancellation = new System.Threading.CancellationTokenSource();
+            _availabilityCheckCancellation = cancellation;
             bool available;
             _isPreparingTabOperation = true;
             try
             {
-                available = await CheckPathAvailabilityAsync(path);
+                available = await CheckPathAvailabilityAsync(path, cancellation.Token);
                 if (!isCurrent()) return;
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+            {
+                return;
             }
             catch (Exception ex)
             {
@@ -1059,6 +1090,8 @@ namespace KjTabBar.ViewModels
             {
                 _isPreparingTabOperation = false;
                 _availabilityCheckCompletion = null;
+                _availabilityCheckCancellation = null;
+                cancellation.Dispose();
                 completion.TrySetResult(true);
             }
 

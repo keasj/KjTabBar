@@ -78,6 +78,14 @@ namespace KjTabBar.Views
                 ? TabDetachResult.WindowOpenedSourceRetained : TabDetachResult.Completed;
         }
 
+        internal static bool ShouldOpenInNewWindow(
+            DragDropEffects dragEffect, string path, NativeMethods.POINT cursorScreenPoint,
+            NativeMethods.RECT tabBarScreenRect, NativeMethods.RECT explorerScreenRect)
+        {
+            return ShouldOpenInNewWindow(dragEffect, path, cursorScreenPoint, tabBarScreenRect) &&
+                ShouldOpenInNewWindow(dragEffect, path, cursorScreenPoint, explorerScreenRect);
+        }
+
         public static bool ShouldOpenInNewWindow(
             DragDropEffects dragEffect,
             string path,

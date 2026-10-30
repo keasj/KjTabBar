@@ -414,9 +414,9 @@ namespace KjTabBar.Models
                 : Directory.Exists(path);
         }
 
-        internal Dictionary<string, bool> GetPathAvailability(IList<string> paths)
+        internal Dictionary<string, bool> GetPathAvailability(IList<string> paths, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
-            string[] results = _shellWorker.Invoke(Services.ShellOperation.PathsAvailable, new List<string>(paths).ToArray());
+            string[] results = _shellWorker.Invoke(Services.ShellOperation.PathsAvailable, cancellationToken, new List<string>(paths).ToArray());
             if (results.Length != paths.Count) throw new InvalidDataException("Incomplete availability response.");
             Dictionary<string, bool> values = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < paths.Count; i++) values[paths[i]] = results[i] == "1";

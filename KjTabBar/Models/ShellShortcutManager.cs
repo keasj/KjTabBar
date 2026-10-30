@@ -156,7 +156,7 @@ namespace KjTabBar.Models
                         fileName = fileName.Replace(invalidChars[j], '_');
                     }
 
-                    string shortcutPath = BuildUniqueShortcutPath(destinationDirectory, fileName);
+                    string shortcutPath = BuildUniqueShortcutPath(destinationDirectory, fileName, tempDirectory);
                     if (TryCreateShortcutFile(shellType, shell, sourcePath, shortcutPath))
                     {
                         anyShortcutCreated = true;
@@ -354,13 +354,14 @@ namespace KjTabBar.Models
                 System.Windows.MessageBoxImage.Error);
         }
 
-        private string BuildUniqueShortcutPath(string destinationDirectory, string baseFileName)
+        private string BuildUniqueShortcutPath(string destinationDirectory, string baseFileName, string tempDirectory)
         {
             string shortcutName = baseFileName + " - ショートカット.lnk";
             string shortcutPath = Path.Combine(destinationDirectory, shortcutName);
 
             int count = 2;
-            while (File.Exists(shortcutPath))
+            while (File.Exists(shortcutPath) ||
+                (!string.IsNullOrEmpty(tempDirectory) && File.Exists(Path.Combine(tempDirectory, shortcutName))))
             {
                 shortcutName = baseFileName + " - ショートカット (" + count + ").lnk";
                 shortcutPath = Path.Combine(destinationDirectory, shortcutName);

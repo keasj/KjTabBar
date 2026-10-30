@@ -122,7 +122,7 @@
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.Resources>
                     <DataTemplate DataType="{x:Type vm:TabItemViewModel}">
-                        <Border x:Name="TabBorder" CornerRadius="10,10,0,0" Padding="14,8,8,8" MinWidth="96" MaxWidth="500" Cursor="Hand" Background="{DynamicResource ThemeWindowBg}" MouseLeftButtonUp="Tab_Click" PreviewMouseLeftButtonDown="Tab_MouseLeftButtonDown" PreviewMouseMove="Tab_MouseMove" MouseRightButtonUp="TabBd_MouseRightButtonUp">
+                        <Border x:Name="TabBorder" CornerRadius="10,10,0,0" Padding="14,8,8,8" MinWidth="96" MaxWidth="500" Cursor="Hand" Background="{DynamicResource ThemeWindowBg}" MouseLeftButtonUp="Tab_Click" PreviewMouseLeftButtonDown="Tab_MouseLeftButtonDown" PreviewMouseMove="Tab_MouseMove" PreviewMouseLeftButtonUp="Tab_PreviewMouseLeftButtonUp" LostMouseCapture="Tab_LostMouseCapture" MouseRightButtonUp="TabBd_MouseRightButtonUp">
                             <Border.ToolTip>
                                 <ToolTip Style="{StaticResource TabToolTipStyle}" Content="{Binding Path}" />
                             </Border.ToolTip>
@@ -136,7 +136,7 @@
                                             <Setter Property="Background" Value="{DynamicResource ThemeTabHover}"/>
                                             <Setter Property="BorderBrush" Value="{DynamicResource ThemeAccent}"/>
                                         </Trigger>
-                                        <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                        <DataTrigger Binding="{Binding IsSelectedForDisplay}" Value="True">
                                             <Setter Property="BorderBrush" Value="{DynamicResource ThemeActiveTabBorder}"/>
                                             <Setter Property="BorderThickness" Value="2,2,2,0"/>
                                             <Setter Property="Margin" Value="3,0,3,0"/>

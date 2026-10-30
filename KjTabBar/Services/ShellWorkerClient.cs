@@ -103,6 +103,12 @@ namespace KjTabBar.Services
 
         internal string[] Invoke(ShellOperation operation, params string[] arguments)
         {
+            return Invoke(operation, CancellationToken.None, arguments);
+        }
+
+        internal string[] Invoke(ShellOperation operation, CancellationToken cancellationToken, params string[] arguments)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             Stopwatch diagnosticTimer = Helpers.AppLogger.StartDiagnosticTiming();
             if (!Monitor.TryEnter(_sync, _timeout)) throw new TimeoutException("The Shell worker is busy.");
             try
@@ -114,6 +120,7 @@ namespace KjTabBar.Services
                     long.TryParse(arguments[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out windowValue)
                     ? new IntPtr(windowValue) : IntPtr.Zero;
                 if (targetWindow != IntPtr.Zero && !_isWindow(targetWindow)) return new string[] { null };
+                cancellationToken.ThrowIfCancellationRequested();
                 EnsureStarted();
                 string[] request = new string[arguments.Length + 1];
                 request[0] = ((int)operation).ToString(CultureInfo.InvariantCulture);
@@ -133,9 +140,10 @@ namespace KjTabBar.Services
                     {
                         TimeSpan remaining = _timeout - responseTimer.Elapsed;
                         if (remaining <= TimeSpan.Zero) break;
-                        TimeSpan slice = targetWindow == IntPtr.Zero || remaining.TotalMilliseconds <= 50
+                        TimeSpan slice = (targetWindow == IntPtr.Zero && !cancellationToken.CanBeCanceled) || remaining.TotalMilliseconds <= 50
                             ? remaining : TimeSpan.FromMilliseconds(50);
                         completed = responseReady.WaitOne(slice);
+                        cancellationToken.ThrowIfCancellationRequested();
                         if (completed) break;
                         if (targetWindow != IntPtr.Zero && !_isWindow(targetWindow))
                         {
@@ -163,6 +171,8 @@ namespace KjTabBar.Services
                 }
                 catch
                 {
+                    response.ContinueWith(task => { Exception ignored = task.Exception; },
+                        TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
                     StopWorker();
                     throw;
                 }

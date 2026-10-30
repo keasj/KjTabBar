@@ -50,9 +50,12 @@ This behavior is implemented in the source. Launch-origin detection, display, an
 2. Open Windows Explorer. A tab bar will automatically appear at the top of the window.
 3. Opening a folder, special item, or shortcut to one from the desktop selects an existing tab for the same location. If no tab matches, a new tab is added.
 4. **Tab operations**
+   - `Reopen Closed Tab` restores the last closed tab to its position when it was closed and selects it. Tabs closed together are restored in their original order. If the saved position is beyond the current tabs, the tab is restored at the end.
    - Use the `+` button on the right to open a folder-picker dialog and add a new tab.
    - Each tab shows a per-path icon, including shell-specific icons for special folders and Control Panel sub-items.
    - Right-click a tab to access actions such as `Duplicate Tab`, `Open in New Window`, `Copy Path`, and `Close Tab`.
+   - Selecting another tab during an availability check cancels the previous wait and prioritizes the latest selection. Stale results never select or close a tab.
+   - To avoid accidental dragging when selecting a tab, dragging starts only after the pointer leaves the tab you pressed and moves beyond the system drag threshold. Moving within that tab does not start a drag.
    - Drag a tab with the left mouse button to reorder it. The source tab has an orange outline; release at the blue insertion bar. Outside the tab bar, the orange outline remains on the source tab and the cursor stays an arrow.
    - Drag a tab outside the tab bar and drop it outside Explorer to reopen that tab as a separate window and close the original tab.
    - To merge an independent Explorer window, drag it onto the dedicated `Merge` zone at the far right of the tab bar and release it there.
@@ -65,7 +68,7 @@ This behavior is implemented in the source. Launch-origin detection, display, an
 ## Installation and Uninstallation
 
 - During installation, the setup custom action registers the application for startup (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`).
-- During uninstallation, the dedicated uninstaller cleans up only the matching auto-start registry entry. The settings file (`settings.xml`) and DPAPI-protected tab history file (`tabs.txt`) are kept under `%APPDATA%\KjTabBar` as user data.
+- During uninstallation, the dedicated uninstaller cleans up only the matching auto-start registry entry. The settings file (`settings.xml`) and DPAPI-protected tab state (`tabs.snapshot.txt`, with `tabs.txt` and `tabs.active.txt` compatibility copies) are kept under `%APPDATA%\KjTabBar` as user data.
 
 ## License
 
@@ -93,5 +96,6 @@ shell:RecycleBinFolder
 `active` is zero-based: this example selects the second tab. Import replaces the current window's list,
 preserving order, duplicates, Unicode, UNC paths and Shell paths without checking folder existence or access.
 Navigation to the selected tab is attempted; unavailable entries remain in the list.
+Up to 255 tabs are imported. Larger lists show a warning and replace the current list with the first 255 entries. If the selected index is outside that range, the first tab is selected.
 Invalid files (including empty lists, blank entries and out-of-range indices) leave the current tabs unchanged.
 File read/write errors are displayed. The menu is disabled while a tab operation is in progress.

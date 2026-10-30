@@ -12,6 +12,96 @@ namespace UnitTestProject
     public class TabBarWindowLocationHookTests
     {
         [TestMethod]
+        public void TabDrag_CapturesPointerAndReleasesOnMouseUpOrCaptureLoss()
+        {
+            Exception failure = null;
+            bool dispatcherShutdown = false;
+            System.Threading.Thread thread = new System.Threading.Thread(() =>
+            {
+                TabBarWindow window = null;
+                try
+                {
+                    window = new TabBarWindow();
+                    System.Windows.Controls.Button close = new System.Windows.Controls.Button();
+                    System.Windows.Controls.Border tab = new System.Windows.Controls.Border
+                    {
+                        Width = 120, Height = 40, Child = close
+                    };
+                    System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+                    tab.PreviewMouseLeftButtonDown += (System.Windows.Input.MouseButtonEventHandler)Delegate.CreateDelegate(
+                        typeof(System.Windows.Input.MouseButtonEventHandler), window,
+                        typeof(TabBarWindow).GetMethod("Tab_MouseLeftButtonDown", flags));
+                    tab.PreviewMouseLeftButtonUp += (System.Windows.Input.MouseButtonEventHandler)Delegate.CreateDelegate(
+                        typeof(System.Windows.Input.MouseButtonEventHandler), window,
+                        typeof(TabBarWindow).GetMethod("Tab_PreviewMouseLeftButtonUp", flags));
+                    tab.LostMouseCapture += (System.Windows.Input.MouseEventHandler)Delegate.CreateDelegate(
+                        typeof(System.Windows.Input.MouseEventHandler), window,
+                        typeof(TabBarWindow).GetMethod("Tab_LostMouseCapture", flags));
+                    System.Windows.Interop.HwndSourceParameters parameters = new System.Windows.Interop.HwndSourceParameters("Tab drag regression")
+                    {
+                        Width = 120, Height = 40, PositionX = -10000, PositionY = -10000,
+                        WindowStyle = unchecked((int)0x90000000)
+                    };
+                    using (System.Windows.Interop.HwndSource host = new System.Windows.Interop.HwndSource(parameters))
+                    {
+                        host.RootVisual = tab;
+                        tab.UpdateLayout();
+                        System.Windows.Input.MouseButtonEventArgs down = new System.Windows.Input.MouseButtonEventArgs(
+                            System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left)
+                        { RoutedEvent = System.Windows.UIElement.PreviewMouseLeftButtonDownEvent };
+                        tab.RaiseEvent(down);
+                        Assert.AreSame(tab, System.Windows.Input.Mouse.Captured, "The pressed tab must keep receiving movement outside its bounds.");
+                        System.Windows.Input.MouseButtonEventArgs up = new System.Windows.Input.MouseButtonEventArgs(
+                            System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left)
+                        { RoutedEvent = System.Windows.UIElement.PreviewMouseLeftButtonUpEvent };
+                        tab.RaiseEvent(up);
+                        Assert.IsFalse(tab.IsMouseCaptured);
+                        Assert.IsNull(typeof(TabBarWindow).GetField("_dragSourceElement", flags).GetValue(window));
+
+                        tab.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(
+                            System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left)
+                        { RoutedEvent = System.Windows.UIElement.PreviewMouseLeftButtonDownEvent });
+                        Assert.IsTrue(tab.IsMouseCaptured);
+                        System.Windows.Input.Mouse.Capture(null);
+                        Assert.IsNull(typeof(TabBarWindow).GetField("_dragSourceElement", flags).GetValue(window));
+
+                        close.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(
+                            System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left)
+                        { RoutedEvent = System.Windows.UIElement.PreviewMouseLeftButtonDownEvent });
+                        Assert.IsNull(typeof(TabBarWindow).GetField("_dragSourceElement", flags).GetValue(window),
+                            "The close button must not arm tab dragging.");
+                    }
+                }
+                catch (Exception ex) { failure = ex; }
+                finally
+                {
+                    if (window != null) window.Close();
+                    // Release WPF text-services COM objects while their STA is still alive.
+                    System.Windows.Threading.Dispatcher dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+                    dispatcher.InvokeShutdown();
+                    dispatcherShutdown = dispatcher.HasShutdownFinished;
+                }
+            });
+            thread.SetApartmentState(System.Threading.ApartmentState.STA);
+            thread.Start();
+            thread.Join();
+            if (failure != null) throw failure;
+            Assert.IsTrue(dispatcherShutdown, "The WPF dispatcher must shut down before its STA exits.");
+        }
+
+        [TestMethod]
+        public void TabDrag_RequiresLeavingPressedTabAndExceedingDragDistance()
+        {
+            System.Windows.Size size = new System.Windows.Size(120, 40);
+            System.Windows.Point start = new System.Windows.Point(20, 20);
+            Assert.IsFalse(TabBarWindow.ShouldStartTabDrag(start, new System.Windows.Point(100, 30), size));
+            Assert.IsTrue(TabBarWindow.ShouldStartTabDrag(start, new System.Windows.Point(130, 20), size));
+            Assert.IsTrue(TabBarWindow.ShouldStartTabDrag(start, new System.Windows.Point(20, -10), size));
+            Assert.IsFalse(TabBarWindow.ShouldStartTabDrag(new System.Windows.Point(0, 20),
+                new System.Windows.Point(-0.1, 20), size));
+        }
+
+        [TestMethod]
         public void ForegroundChange_RechecksAfterMessageLoop_AndCancelsStaleFollowup()
         {
             Exception failure = null;

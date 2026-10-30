@@ -77,6 +77,11 @@ namespace KjTabBar.Services
 
         public Task<T> InvokeAsync<T>(Func<T> func)
         {
+            return InvokeAsync(func, CancellationToken.None);
+        }
+
+        internal Task<T> InvokeAsync<T>(Func<T> func, CancellationToken cancellationToken)
+        {
             if (func == null)
             {
                 throw new ArgumentNullException("func");
@@ -84,6 +89,9 @@ namespace KjTabBar.Services
 
             TaskCompletionSource<T> tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
             Timer timeoutTimer = CreateTimeoutTimer(tcs);
+            CancellationTokenRegistration registration = cancellationToken.Register(() => tcs.TrySetCanceled());
+            tcs.Task.ContinueWith(task => { registration.Dispose(); timeoutTimer.Dispose(); },
+                TaskScheduler.Default);
             if (!TryAdd(() =>
             {
                 if (tcs.Task.IsCompleted)

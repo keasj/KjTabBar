@@ -9,6 +9,69 @@ namespace UnitTestProject
     [TestClass]
     public class TabBarViewModelTests
     {
+        [TestMethod]
+        public void InsertReadFailure_WithRollback_RestoresActiveIndex()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            using (TabBarViewModel vm = new TabBarViewModel((System.IntPtr)123, new MockUserSettings(), explorer))
+            {
+                TabItemViewModel active = vm.ActiveTab;
+                explorer.GetCurrentPathFunc = hwnd => { throw new System.TimeoutException("Injected read failure"); };
+                try
+                {
+                    vm.InsertTabCoreAsync(@"C:\Inserted", 0, true, true).GetAwaiter().GetResult();
+                    Assert.Fail("Expected the injected read failure.");
+                }
+                catch (System.TimeoutException) { }
+                Assert.AreSame(active, vm.ActiveTab);
+                Assert.AreEqual(1, vm.Tabs.Count);
+                Assert.AreEqual(0, vm.ActiveTabIndex);
+            }
+        }
+
+        [TestMethod]
+        public void DuplicateReadFailure_PreservesActiveTabAndItsActualIndex()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            using (TabBarViewModel vm = new TabBarViewModel((System.IntPtr)123, new MockUserSettings(), explorer))
+            {
+                vm.InsertTabCoreAsync(@"C:\Second", 1, true).GetAwaiter().GetResult();
+                TabItemViewModel active = vm.ActiveTab;
+                explorer.GetCurrentPathFunc = hwnd => { throw new System.TimeoutException("Injected read failure"); };
+                System.Reflection.MethodInfo duplicate = typeof(TabBarViewModel).GetMethod("DuplicateTabCoreAsync",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                try
+                {
+                    ((System.Threading.Tasks.Task)duplicate.Invoke(vm, new object[] { vm.Tabs[0] })).GetAwaiter().GetResult();
+                    Assert.Fail("Expected the injected read failure.");
+                }
+                catch (System.TimeoutException) { }
+                Assert.AreSame(active, vm.ActiveTab);
+                Assert.AreEqual(3, vm.Tabs.Count);
+                Assert.AreEqual(vm.Tabs.IndexOf(active), vm.ActiveTabIndex);
+            }
+        }
+
+
+        [TestMethod]
+        public void InsertReadFailure_PreservesActiveTabAndItsActualIndex()
+        {
+            MockExplorerService explorer = new MockExplorerService();
+            using (TabBarViewModel vm = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer))
+            {
+                TabItemViewModel active = vm.ActiveTab;
+                explorer.GetCurrentPathFunc = hwnd => { throw new TimeoutException("Injected read failure"); };
+                try
+                {
+                    vm.InsertTabCoreAsync(@"C:\Inserted", 0, true).GetAwaiter().GetResult();
+                    Assert.Fail("Expected the injected read failure.");
+                }
+                catch (TimeoutException) { }
+                Assert.AreSame(active, vm.ActiveTab);
+                Assert.AreEqual(2, vm.Tabs.Count);
+                Assert.AreEqual(vm.Tabs.IndexOf(active), vm.ActiveTabIndex);
+            }
+        }
 
         [TestMethod]
         public void CloseRollbackHistory_DoesNotRestoreHistoryAlreadyReopenedByUser()
@@ -676,12 +739,21 @@ namespace UnitTestProject
                 try
                 {
                     Assert.IsTrue(explorer.Entered.Wait(2000));
+                    Assert.IsTrue(b.IsSelectedForDisplay);
+                    Assert.IsFalse(vm.ActiveTab.IsSelectedForDisplay);
                     second = vm.SelectTabAsync(c, null, null);
+                    Assert.IsTrue(c.IsSelectedForDisplay);
+                    Assert.IsFalse(b.IsSelectedForDisplay);
                     last = vm.SelectTabAsync(d, null, null);
+                    Assert.IsTrue(d.IsSelectedForDisplay);
+                    Assert.IsFalse(c.IsSelectedForDisplay);
+                    Assert.IsTrue(first.Wait(1000), "The previous selection must stop waiting before its probe returns.");
                 }
                 finally { explorer.Release.Set(); }
                 System.Threading.Tasks.Task.WhenAll(first, second, last).GetAwaiter().GetResult();
                 Assert.AreSame(d, vm.ActiveTab);
+                foreach (TabItemViewModel item in vm.Tabs)
+                    Assert.AreEqual(item.IsActive, item.IsSelectedForDisplay);
                 Assert.IsTrue(vm.Tabs.Contains(b));
                 Assert.IsFalse(vm.HasClosedTabs);
                 Assert.AreEqual(0, explorer.CChecks);
@@ -1347,10 +1419,15 @@ namespace UnitTestProject
                 System.Threading.ManualResetEventSlim prepared = new System.Threading.ManualResetEventSlim();
                 System.Threading.Tasks.Task selecting = vm.SelectTabAsync(target, path => { prepared.Set(); return ready.Task; }, () => revealed = true);
                 Assert.IsTrue(prepared.Wait(2000));
+                Assert.AreSame(active, vm.ActiveTab);
+                Assert.IsTrue(target.IsSelectedForDisplay);
+                Assert.IsFalse(active.IsSelectedForDisplay);
                 vm.Tabs.Remove(target);
                 ready.SetResult(true);
                 selecting.GetAwaiter().GetResult();
                 Assert.AreSame(active, vm.ActiveTab);
+                Assert.IsTrue(active.IsSelectedForDisplay);
+                Assert.IsFalse(target.IsSelectedForDisplay);
                 Assert.IsTrue(revealed);
                 Assert.IsFalse(vm.IsTabOperationPending);
             }
@@ -1891,6 +1968,44 @@ namespace UnitTestProject
             Assert.AreEqual(3, vm.Tabs.Count);
             Assert.AreEqual(@"C:\Tab1", vm.Tabs[1].Path);
             Assert.IsFalse(vm.HasClosedTabs);
+        }
+
+        [TestMethod]
+        public void ReopenClosedTab_Restores_First_Position_After_Selection_Changes()
+        {
+            using (TabBarViewModel vm = CreateViewModel())
+            {
+                string closedPath = vm.Tabs[0].Path;
+                vm.InsertTabWithPath(@"C:\Remaining", 1);
+                vm.CloseTab(vm.Tabs[0]);
+                vm.InsertTabWithPath(@"C:\Added", 1);
+
+                vm.ReopenClosedTab();
+
+                Assert.AreEqual(closedPath, vm.Tabs[0].Path);
+                Assert.AreEqual(@"C:\Remaining", vm.Tabs[1].Path);
+                Assert.AreEqual(@"C:\Added", vm.Tabs[2].Path);
+                Assert.AreSame(vm.Tabs[0], vm.ActiveTab);
+            }
+        }
+
+        [TestMethod]
+        public void ReopenClosedTab_Saved_Position_Beyond_Current_Tabs_Restores_At_End()
+        {
+            using (TabBarViewModel vm = CreateViewModel())
+            {
+                vm.RestoreHistory(new System.Collections.Generic.List<System.Collections.Generic.List<ClosedTabInfo>>
+                {
+                    new System.Collections.Generic.List<ClosedTabInfo> { new ClosedTabInfo(@"C:\Closed", 5) }
+                });
+
+                vm.ReopenClosedTab();
+
+                Assert.AreEqual(2, vm.Tabs.Count);
+                Assert.AreEqual(@"C:\Closed", vm.Tabs[1].Path);
+                Assert.AreSame(vm.Tabs[1], vm.ActiveTab);
+                Assert.IsFalse(vm.HasClosedTabs);
+            }
         }
 
         [TestMethod]

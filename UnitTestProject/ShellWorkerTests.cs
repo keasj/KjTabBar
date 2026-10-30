@@ -84,6 +84,39 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void CanceledWorker_IsTerminated_AndNextRequestUsesNewProcess()
+        {
+            string marker = Path.Combine(Path.GetTempPath(), "KjTabBar.CancelProbe." + Guid.NewGuid().ToString("N"));
+            try
+            {
+                WithFakeWorker(delegate(ShellWorkerClient client)
+                {
+                    int oldId = int.Parse(client.Invoke(ShellOperation.Ping)[0]);
+                    using (System.Threading.CancellationTokenSource cancellation = new System.Threading.CancellationTokenSource())
+                    {
+                        System.Threading.Tasks.Task request = System.Threading.Tasks.Task.Run(() =>
+                            client.Invoke(ShellOperation.CurrentPath, cancellation.Token, "123", "blockTarget", marker));
+                        try
+                        {
+                            Assert.IsTrue(System.Threading.SpinWait.SpinUntil(() => File.Exists(marker), 1000));
+                            cancellation.Cancel();
+                            try
+                            {
+                                request.GetAwaiter().GetResult();
+                                Assert.Fail("Expected cancellation, not a timeout.");
+                            }
+                            catch (OperationCanceledException) { }
+                            AssertExited(oldId);
+                            Assert.AreNotEqual(oldId, int.Parse(client.Invoke(ShellOperation.Ping)[0]));
+                        }
+                        finally { cancellation.Cancel(); }
+                    }
+                }, window => true);
+            }
+            finally { if (File.Exists(marker)) File.Delete(marker); }
+        }
+
+        [TestMethod]
         public void CrashedWorker_DoesNotPoisonSubsequentRequests()
         {
             WithFakeWorker(delegate(ShellWorkerClient client)

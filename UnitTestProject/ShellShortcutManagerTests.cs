@@ -7,6 +7,38 @@ namespace UnitTestProject
     [TestClass]
     public class ShellShortcutManagerTests
     {
+
+        [TestMethod]
+        public void ShortcutFallback_ReservesNamesUntilPlacement()
+        {
+            string root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "KjTabBar.ShortcutTest." + Guid.NewGuid().ToString("N"));
+            string destination = System.IO.Path.Combine(root, "destination");
+            string temporary = System.IO.Path.Combine(root, "temporary");
+            System.IO.Directory.CreateDirectory(destination);
+            System.IO.Directory.CreateDirectory(temporary);
+            try
+            {
+                using (ExplorerManager explorer = new ExplorerManager())
+                {
+                    System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+                    object manager = typeof(ExplorerManager).GetField("_shellShortcutManager", flags).GetValue(explorer);
+                    System.Reflection.MethodInfo build = manager.GetType().GetMethod("BuildUniqueShortcutPath", flags);
+                    Func<string> next = () => (string)build.Invoke(manager, new object[] { destination, "same.txt", temporary });
+                    string first = next();
+                    string staged = System.IO.Path.Combine(temporary, System.IO.Path.GetFileName(first));
+                    System.IO.File.WriteAllText(staged, "first target");
+                    string second = next();
+                    Assert.AreNotEqual(first, second, "A staged shortcut must reserve its final name.");
+                    System.IO.File.WriteAllText(second, "existing destination");
+                    string third = next();
+                    Assert.AreNotEqual(first, third);
+                    Assert.AreNotEqual(second, third);
+                    Assert.AreEqual("first target", System.IO.File.ReadAllText(staged));
+                    Assert.AreEqual("existing destination", System.IO.File.ReadAllText(second));
+                }
+            }
+            finally { System.IO.Directory.Delete(root, true); }
+        }
         [TestMethod]
         public void ElevatedLinks_PreservePathsAndFileTypes_AndReportPartialFailure()
         {

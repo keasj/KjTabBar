@@ -70,7 +70,17 @@ namespace KjTabBar.ViewModels
         public bool IsActive
         {
             get { return _isActive; }
-            set { if (_isActive == value) return; _isActive = value; OnPropertyChanged("IsActive"); }
+            set { if (_isActive == value) return; _isActive = value; OnPropertyChanged("IsActive"); OnPropertyChanged("IsSelectedForDisplay"); }
+        }
+
+        private bool? _selectionPreview;
+        public bool IsSelectedForDisplay => _selectionPreview ?? IsActive;
+
+        internal void SetSelectionPreview(bool? selected)
+        {
+            if (_selectionPreview == selected) return;
+            _selectionPreview = selected;
+            OnPropertyChanged("IsSelectedForDisplay");
         }
 
         public ImageSource IconSource
