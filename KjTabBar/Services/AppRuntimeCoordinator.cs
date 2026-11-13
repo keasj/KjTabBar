@@ -99,9 +99,9 @@ namespace KjTabBar.Services
                 }
                 if (context.TabPersistence != null) context.TabPersistence.FlushPendingSave();
             }
-            catch
+            catch (Exception ex)
             {
-                AppLogger.LogInfo("App", "Failed to save tabs during application exit.");
+                AppLogger.LogError("App", "Failed to save tabs during application exit.", ex);
             }
 
             if (context.MonitorTimer != null)

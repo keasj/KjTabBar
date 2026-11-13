@@ -12,15 +12,35 @@ namespace KjTabBar.Helpers
     internal static class AppLogger
     {
         private static readonly object SyncRoot = new object();
+        private static readonly object PendingLogSync = new object();
+        private static long _droppedLogEntries;
+        internal const int MaxPendingLogEntries = 256;
+        internal const int MaxPendingLogEntryChars = 8192;
         private static readonly Dictionary<string, DateTime> ThrottledLogTimes = new Dictionary<string, DateTime>(StringComparer.Ordinal);
         private static readonly Regex WindowsPathRegex = new Regex("(?i)(?:[a-z]:\\\\|\\\\\\\\)[^\\r\\n\\\"'<>|]+", RegexOptions.Compiled | RegexOptions.CultureInvariant);
         private static readonly Regex SidRegex = new Regex(@"\bS-\d-(?:\d+-){1,14}\d+\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
-        private static readonly ConcurrentQueue<string> PendingLogEntries = new ConcurrentQueue<string>();
+        private sealed class PendingLogEntry
+        {
+            internal string Text;
+            internal string Directory;
+        }
+
+        private static readonly ConcurrentQueue<PendingLogEntry> PendingLogEntries = new ConcurrentQueue<PendingLogEntry>();
+        private static string _logDirectoryOverrideForTests;
         private static readonly AutoResetEvent PendingLogSignal = new AutoResetEvent(false);
         private static readonly Thread LogWriterThread = new Thread(ProcessPendingLogEntries);
         private const int MaxLoggedTextLength = 2048;
         private const long MaxLogFileBytes = 1024L * 1024L;
         private const int MaxLogArchiveFiles = 3;
+        internal static void SetLogDirectoryOverrideForTests(string directory)
+        {
+            lock (SyncRoot) _logDirectoryOverrideForTests = directory;
+        }
+
+        internal static void ResetThrottledLogTimesForTests()
+        {
+            lock (SyncRoot) ThrottledLogTimes.Clear();
+        }
 
         static AppLogger()
         {
@@ -191,6 +211,14 @@ namespace KjTabBar.Helpers
                 return;
             }
 
+            string testLogDirectory;
+            lock (SyncRoot) testLogDirectory = _logDirectoryOverrideForTests;
+            if (!string.IsNullOrEmpty(testLogDirectory))
+            {
+                Write(level, source, message, exception);
+                return;
+            }
+
             lock (SyncRoot)
             {
                 DateTime lastLoggedUtc;
@@ -207,7 +235,6 @@ namespace KjTabBar.Helpers
 
             Write(level, source, message, exception);
         }
-
         private static void Write(string level, string source, string message, Exception exception)
         {
             try
@@ -223,21 +250,58 @@ namespace KjTabBar.Helpers
 
                 if (exception != null)
                 {
-                    builder.Append(" | ");
-                    builder.Append(exception.GetType().FullName);
-                    builder.Append(": ");
-                    builder.Append(SanitizeForLog(exception.Message));
-
-                    string stackTrace = SanitizeForLog(exception.StackTrace ?? string.Empty);
-                    if (!string.IsNullOrEmpty(stackTrace))
+                    Queue<Exception> causes = new Queue<Exception>();
+                    causes.Enqueue(exception);
+                    while (causes.Count > 0 && builder.Length < MaxPendingLogEntryChars)
                     {
-                        builder.AppendLine();
-                        builder.Append(stackTrace);
+                        Exception cause = causes.Dequeue();
+                        builder.Append(" | ");
+                        builder.Append(cause.GetType().FullName);
+                        builder.Append(": ");
+                        builder.Append(SanitizeForLog(cause.Message));
+
+                        string stackTrace = SanitizeForLog(cause.StackTrace ?? string.Empty);
+                        if (!string.IsNullOrEmpty(stackTrace))
+                        {
+                            builder.AppendLine();
+                            builder.Append(stackTrace);
+                        }
+                        AggregateException aggregate = cause as AggregateException;
+                        if (aggregate != null)
+                        {
+                            foreach (Exception inner in aggregate.InnerExceptions) causes.Enqueue(inner);
+                        }
+                        else if (cause.InnerException != null) causes.Enqueue(cause.InnerException);
                     }
                 }
 
-                PendingLogEntries.Enqueue(builder.ToString() + Environment.NewLine);
-                PendingLogSignal.Set();
+                string testLogDirectory;
+                lock (SyncRoot) testLogDirectory = _logDirectoryOverrideForTests;
+                if (!string.IsNullOrEmpty(testLogDirectory))
+                {
+                    lock (SyncRoot)
+                    {
+                        Directory.CreateDirectory(testLogDirectory);
+                        File.AppendAllText(Path.Combine(testLogDirectory, "KjTabBar.log"), builder.ToString() + Environment.NewLine, Encoding.UTF8);
+                    }
+                    return;
+                }
+                lock (PendingLogSync)
+                {
+                    if (PendingLogEntries.Count < MaxPendingLogEntries)
+                    {
+                        PendingLogEntries.Enqueue(new PendingLogEntry
+                        {
+                            Text = builder.ToString() + Environment.NewLine,
+                            Directory = testLogDirectory
+                        });
+                        PendingLogSignal.Set();
+                    }
+                    else if (_droppedLogEntries < long.MaxValue)
+                    {
+                        _droppedLogEntries++;
+                    }
+                }
             }
             catch
             {
@@ -261,7 +325,7 @@ namespace KjTabBar.Helpers
             {
                 try
                 {
-                    PendingLogSignal.WaitOne();
+                    PendingLogSignal.WaitOne(TimeSpan.FromSeconds(5));
                     FlushPendingLogEntries();
                 }
                 catch
@@ -270,33 +334,91 @@ namespace KjTabBar.Helpers
             }
         }
 
+        internal static bool EnqueueLogEntry(ConcurrentQueue<string> entries, string entry, ref long dropped)
+        {
+            if (entry.Length > MaxPendingLogEntryChars)
+                entry = entry.Substring(0, MaxPendingLogEntryChars - 5) + "...\r\n";
+            lock (PendingLogSync)
+            {
+                if (entries.Count >= MaxPendingLogEntries)
+                {
+                    if (dropped < long.MaxValue) dropped++;
+                    return false;
+                }
+                entries.Enqueue(entry);
+                return true;
+            }
+        }
+
         private static void FlushPendingLogEntries()
         {
-            string logDirectory = GetLogDirectory();
-            if (string.IsNullOrEmpty(logDirectory))
-            {
-                return;
-            }
-
-            Directory.CreateDirectory(logDirectory);
-            string logPath = Path.Combine(logDirectory, "KjTabBar.log");
-            StringBuilder batchBuilder = new StringBuilder();
-            string entry;
-            while (PendingLogEntries.TryDequeue(out entry))
-            {
-                batchBuilder.Append(entry);
-            }
-
-            if (batchBuilder.Length <= 0)
-            {
-                return;
-            }
-
-            string batchText = batchBuilder.ToString();
+            if (PendingLogEntries.IsEmpty && Interlocked.Read(ref _droppedLogEntries) == 0) return;
             lock (SyncRoot)
             {
+                PendingLogEntry[] batch;
+                long droppedBatch;
+                lock (PendingLogSync)
+                {
+                    batch = PendingLogEntries.ToArray();
+                    droppedBatch = _droppedLogEntries;
+                    if (batch.Length == 0 && droppedBatch == 0) return;
+                    string defaultDirectory = GetDefaultLogDirectory();
+                    Dictionary<string, StringBuilder> grouped = new Dictionary<string, StringBuilder>(StringComparer.OrdinalIgnoreCase);
+                    foreach (PendingLogEntry entry in batch)
+                    {
+                        string directory = string.IsNullOrEmpty(entry.Directory) ? defaultDirectory : entry.Directory;
+                        if (string.IsNullOrEmpty(directory)) continue;
+                        StringBuilder text;
+                        if (!grouped.TryGetValue(directory, out text)) grouped[directory] = text = new StringBuilder();
+                        text.Append(entry.Text);
+                    }
+                    if (grouped.Count == 0) return;
+                    foreach (KeyValuePair<string, StringBuilder> group in grouped)
+                    {
+                        string text = group.Value.ToString();
+                        if (droppedBatch > 0) text += DateTime.UtcNow.ToString("o") + " [WARN] AppLogger: Dropped " + droppedBatch.ToString(CultureInfo.InvariantCulture) + " log entries because the pending log limit was reached." + Environment.NewLine;
+                        RotateLogFileIfNeeded(Path.Combine(group.Key, "KjTabBar.log"), Encoding.UTF8.GetByteCount(text));
+                        Directory.CreateDirectory(group.Key);
+                        File.AppendAllText(Path.Combine(group.Key, "KjTabBar.log"), text, Encoding.UTF8);
+                    }
+                    for (int i = 0; i < batch.Length; i++) { PendingLogEntry ignored; PendingLogEntries.TryDequeue(out ignored); }
+                    _droppedLogEntries = 0;
+                }
+            }
+        }
+
+        internal static void FlushPendingLogEntries(ConcurrentQueue<string> entries, string logPath)
+        {
+            long dropped = 0;
+            FlushPendingLogEntries(entries, logPath, ref dropped);
+        }
+
+        internal static void FlushPendingLogEntries(ConcurrentQueue<string> entries, string logPath, ref long dropped)
+        {
+            lock (SyncRoot)
+            {
+                string[] batch;
+                long droppedBatch;
+                lock (PendingLogSync)
+                {
+                    batch = entries.ToArray();
+                    droppedBatch = dropped;
+                }
+                if (batch.Length == 0 && droppedBatch == 0) return;
+                Directory.CreateDirectory(Path.GetDirectoryName(logPath));
+                string batchText = string.Concat(batch);
+                if (droppedBatch > 0)
+                    batchText += DateTime.UtcNow.ToString("o") + " [WARN] AppLogger: Dropped " +
+                        droppedBatch.ToString(CultureInfo.InvariantCulture) + " log entries because the pending log limit was reached." + Environment.NewLine;
                 RotateLogFileIfNeeded(logPath, Encoding.UTF8.GetByteCount(batchText));
                 File.AppendAllText(logPath, batchText, Encoding.UTF8);
+                // Commit removal only after the write succeeds. A failure leaves the batch for retry.
+                lock (PendingLogSync)
+                {
+                    string entry;
+                    for (int i = 0; i < batch.Length; i++) entries.TryDequeue(out entry);
+                    dropped -= droppedBatch;
+                }
             }
         }
 
@@ -358,6 +480,15 @@ namespace KjTabBar.Helpers
 
         private static string GetLogDirectory()
         {
+            string testLogDirectory;
+            lock (SyncRoot) testLogDirectory = _logDirectoryOverrideForTests;
+            if (!string.IsNullOrEmpty(testLogDirectory)) return testLogDirectory;
+            return GetDefaultLogDirectory();
+        }
+
+        private static string GetDefaultLogDirectory()
+        {
+
             try
             {
                 string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);

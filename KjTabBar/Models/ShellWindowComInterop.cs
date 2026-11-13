@@ -58,14 +58,22 @@ namespace KjTabBar.Models
         {
             if (obj == null) return null;
             try { return obj.GetType().InvokeMember(propertyName, System.Reflection.BindingFlags.GetProperty, null, obj, null); }
-            catch { return null; }
+            catch (Exception ex)
+            {
+                AppLogger.LogErrorThrottled("ShellWindowComInterop", "GetComProperty:" + propertyName, "Failed to read a COM property: " + propertyName + ".", ex, TimeSpan.FromMinutes(5));
+                return null;
+            }
         }
 
         internal static object InvokeComMethod(object obj, string methodName, params object[] args)
         {
             if (obj == null) return null;
             try { return obj.GetType().InvokeMember(methodName, System.Reflection.BindingFlags.InvokeMethod, null, obj, args); }
-            catch { return null; }
+            catch (Exception ex)
+            {
+                AppLogger.LogErrorThrottled("ShellWindowComInterop", "InvokeComMethod:" + methodName, "Failed to invoke a COM method: " + methodName + ".", ex, TimeSpan.FromMinutes(5));
+                return null;
+            }
         }
 
         internal static void ReleaseComObjectSafe(object comObject)
@@ -339,18 +347,26 @@ namespace KjTabBar.Models
         {
             if (itemPaths == null || itemPaths.Count == 0) return;
             object windowsObject = null;
-            if (!_cacheManager.TryCreateShellWindows(out windowsObject))
-            {
-                return;
-            }
-
-            object windows = windowsObject;
+            Exception selectionFailure = null;
+            Exception enumerationFailure = null;
+            bool targetFound = false;
+            Action<Exception> reportFailure = ex => { if (selectionFailure == null) selectionFailure = ex; };
+            Func<object, string, object> getProperty = (target, name) => target == null ? null :
+                target.GetType().InvokeMember(name, System.Reflection.BindingFlags.GetProperty, null, target, null);
+            Func<object, string, object[], object> invokeMethod = (target, name, args) => target == null ? null :
+                target.GetType().InvokeMember(name, System.Reflection.BindingFlags.InvokeMethod, null, target, args);
+            ShellFolderItemSelectionHelper selectionHelper = _shellFolderItemSelectionHelper.WithComAccess(getProperty, invokeMethod, reportFailure);
             try
             {
-                object countObj = GetComProperty(windows, "Count");
+                object shell;
+                if (!ShellWindowCacheManager.TryGetShellApplication(out shell))
+                    throw new InvalidOperationException("Could not access Shell.Application for item selection.");
+                windowsObject = invokeMethod(shell, "Windows", null);
+                object windows = windowsObject;
+                object countObj = getProperty(windows, "Count");
                 if (countObj == null)
                 {
-                    return;
+                    throw new InvalidOperationException("Shell window registration count is unavailable.");
                 }
 
                 int count = 0;
@@ -361,39 +377,40 @@ namespace KjTabBar.Models
                 catch (Exception ex)
                 {
                     AppLogger.LogErrorThrottled("ShellWindowComInterop", "SelectItemsCountConvert", "Failed to convert Shell Windows count while selecting items.", ex, TimeSpan.FromMinutes(5));
-                    return;
+                    throw;
                 }
                 for (int i = 0; i < count; i++)
                 {
                     object window = null;
                     try
                     {
-                        window = InvokeComMethod(windows, "Item", i);
+                        window = invokeMethod(windows, "Item", new object[] { i });
                         if (window == null) continue;
-                        string fullName = "";
-                        try { fullName = (string)GetComProperty(window, "FullName"); }
-                        catch (Exception ex) { AppLogger.LogErrorThrottled("ShellWindowComInterop", "SelectItemsFullName", "Failed to read FullName while selecting items.", ex, TimeSpan.FromMinutes(5)); }
-                        if (!_shellExplorerWindowMatcher.IsExplorerWindow(window, fullName)) continue;
-
-                        IntPtr hwnd;
-                        if (!_shellExplorerWindowMatcher.TryGetWindowHwnd(window, out hwnd))
-                        {
-                            AppLogger.LogErrorThrottled("ShellWindowComInterop", "SelectItemsHwndConvert", "Failed to convert HWND while selecting items.", new InvalidOperationException("Failed to convert Shell window HWND."), TimeSpan.FromMinutes(5));
-                            continue;
-                        }
+                        string fullName = (string)getProperty(window, "FullName");
+                        if (string.IsNullOrEmpty(fullName) || !fullName.EndsWith("explorer.exe", StringComparison.OrdinalIgnoreCase)) continue;
+                        object hwndValue = getProperty(window, "HWND");
+                        if (hwndValue == null) continue;
+                        IntPtr hwnd = (IntPtr)Convert.ToInt64(hwndValue);
                         if (!_shellExplorerWindowMatcher.MatchesTargetWindow(hwnd, explorerHwnd)) continue;
+                        targetFound = true;
 
                         object document = null;
                         object folder = null;
                         object folderItems = null;
                         try
                         {
-                            document = GetComProperty(window, "Document");
-                            folder = GetComProperty(document, "Folder");
-                            folderItems = InvokeComMethod(folder, "Items");
-                            int itemCount = _shellFolderItemSelectionHelper.GetComCollectionCount(folderItems);
+                            document = getProperty(window, "Document");
+                            if (document == null)
+                                throw new InvalidOperationException("Explorer document is unavailable while restoring item selection.");
+                            folder = getProperty(document, "Folder");
+                            if (folder == null)
+                                throw new InvalidOperationException("Explorer folder is unavailable while restoring item selection.");
+                            folderItems = invokeMethod(folder, "Items", null);
+                            if (folderItems == null)
+                                throw new InvalidOperationException("Explorer folder items are unavailable while restoring item selection.");
+                            int itemCount = selectionHelper.GetComCollectionCount(folderItems);
                             bool hasSelectedItem = false;
-                            object[] matchedItems = _shellFolderItemSelectionHelper.FindFolderItemsByPaths(folder, folderItems, itemCount, itemPaths);
+                            object[] matchedItems = selectionHelper.FindFolderItemsByPaths(folder, folderItems, itemCount, itemPaths);
                             for (int j = 0; j < matchedItems.Length; j++)
                             {
                                 object item = matchedItems[j];
@@ -402,12 +419,14 @@ namespace KjTabBar.Models
                                     if (item != null)
                                     {
                                         int flags = hasSelectedItem ? 1 : 29;
-                                        InvokeComMethod(document, "SelectItem", item, flags);
+                                        document.GetType().InvokeMember("SelectItem", System.Reflection.BindingFlags.InvokeMethod,
+                                            null, document, new object[] { item, flags });
                                         hasSelectedItem = true;
                                     }
                                 }
                                 catch (Exception ex)
                                 {
+                                    if (selectionFailure == null) selectionFailure = ex;
                                     AppLogger.LogErrorThrottled("ShellWindowComInterop", "SelectItemsInvoke", "Failed to select an individual explorer item.", ex, TimeSpan.FromMinutes(5));
                                 }
                                 finally
@@ -418,6 +437,7 @@ namespace KjTabBar.Models
                         }
                         catch (Exception ex)
                         {
+                            reportFailure(ex);
                             AppLogger.LogErrorThrottled("ShellWindowComInterop", "SelectItemsDocument", "Failed while preparing explorer item selection.", ex, TimeSpan.FromMinutes(5));
                         }
                         finally
@@ -430,6 +450,7 @@ namespace KjTabBar.Models
                     }
                     catch (Exception ex)
                     {
+                        if (enumerationFailure == null) enumerationFailure = ex;
                         AppLogger.LogErrorThrottled("ShellWindowComInterop", "SelectItemsWindowEnumerate", "Failed while enumerating a Shell window for selection.", ex, TimeSpan.FromMinutes(5));
                     }
                     finally
@@ -440,6 +461,7 @@ namespace KjTabBar.Models
             }
             catch (Exception ex)
             {
+                reportFailure(ex);
                 AppLogger.LogError("ShellWindowComInterop", "SelectItems failed and Shell.Application cache will be reset.", ex);
                 ShellWindowCacheManager.ResetShellApplication();
             }
@@ -448,11 +470,17 @@ namespace KjTabBar.Models
                 ReleaseComObjectSafe(windowsObject);
                 _cacheManager.RunPeriodicComCleanup();
             }
+            if (!targetFound && selectionFailure == null)
+            {
+                selectionFailure = enumerationFailure ?? new InvalidOperationException("Target Explorer window was not found while restoring item selection.");
+            }
+            if (selectionFailure != null)
+                throw new InvalidOperationException("Failed to restore Explorer item selection.", selectionFailure);
         }
 
         public bool IsExplorerWindowRegistered(IntPtr explorerHwnd)
         {
-            if (explorerHwnd == IntPtr.Zero) return false;
+            if (explorerHwnd == IntPtr.Zero || explorerHwnd.ToInt64() < 0) return false;
 
             // A surviving window can lose its registration when the desktop shell restarts.
             // Retry with a fresh COM object before treating an absent registration as final.

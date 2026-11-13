@@ -25,6 +25,17 @@ namespace KjTabBar.Models
             _logErrorThrottled = logErrorThrottled;
         }
 
+        internal ShellFolderItemSelectionHelper WithComAccess(Func<object, string, object> getProperty,
+            Func<object, string, object[], object> invokeMethod, Action<Exception> reportFailure)
+        {
+            return new ShellFolderItemSelectionHelper(getProperty, invokeMethod, _releaseComObject, _shellItemPathResolver,
+                (source, key, message, exception, interval) =>
+                {
+                    reportFailure(exception);
+                    _logErrorThrottled(source, key, message, exception, interval);
+                });
+        }
+
         public int GetComCollectionCount(object comCollection)
         {
             if (comCollection == null)
@@ -95,6 +106,16 @@ namespace KjTabBar.Models
                 catch (Exception ex)
                 {
                     _logErrorThrottled("ExplorerManager", "FindFolderItemParseName", "Failed to resolve a folder item.", ex, TimeSpan.FromMinutes(5));
+                }
+                if (matches[j] != null && _shellItemPathResolver.TryNormalizeFileSystemPath(targetPaths[j], out string normalizedTargetPath))
+                {
+                    string resolvedPath = _getComProperty(matches[j], "Path") as string;
+                    if (!string.IsNullOrEmpty(resolvedPath) &&
+                        !_shellItemPathResolver.AreEquivalentItemPaths(resolvedPath, normalizedTargetPath))
+                    {
+                        _releaseComObject(matches[j]);
+                        matches[j] = null;
+                    }
                 }
             }
             return matches;

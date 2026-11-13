@@ -70,6 +70,7 @@
     <Compile Include="DesktopRepeatedLaunchServiceTests.cs" />
     <Compile Include="UnitTest1.cs" />
     <Compile Include="AuditRegressionTests.cs" />
+    <Compile Include="ExceptionLoggingTests.cs" />
     <Compile Include="Release130RegressionTests.cs" />
     <Compile Include="Release136RegressionTests.cs" />
     <Compile Include="Release137RegressionTests.cs" />
@@ -118,6 +119,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="app.config" />
+    <None Include="UnitTestProject.runsettings" />
   </ItemGroup>
   <Import Project="$(VSToolsPath)\TeamTest\Microsoft.TestTools.targets" Condition="Exists('$(VSToolsPath)\TeamTest\Microsoft.TestTools.targets')" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

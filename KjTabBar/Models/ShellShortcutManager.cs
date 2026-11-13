@@ -400,7 +400,7 @@ namespace KjTabBar.Models
             }
             catch (Exception ex)
             {
-                AppLogger.LogError("ShellShortcutManager", "Failed to delete partially created shortcut file.", ex);
+                AppLogger.LogError("ShellShortcutManager", "Failed to create shortcut file.", ex);
             }
             finally
             {
@@ -414,8 +414,9 @@ namespace KjTabBar.Models
                     File.Delete(shortcutPath);
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.LogError("ShellShortcutManager", "Failed to delete partially created shortcut file.", ex);
             }
 
             return false;
