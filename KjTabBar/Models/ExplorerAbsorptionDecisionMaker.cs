@@ -63,6 +63,16 @@ namespace KjTabBar.Models
                 }
             }
 
+            // A title-only Home placeholder is not the external launch destination.
+            // Wait for Shell registration before creating or absorbing the window.
+            if ((!context.HasValidTarget || !explorerService.IsControlPanelPath(resolvedPath)) &&
+                string.IsNullOrEmpty(context.CurrentPath) &&
+                explorerService.IsTransientShellPlaceholderPath(resolvedPath) &&
+                context.CurrentRetryCount < MaxAbsorbPathRetryCount - 1)
+            {
+                return AbsorptionAction.WaitAndRetryIncrement;
+            }
+
             string decisionPath = resolvedPath;
             string normalizedDecisionPath = explorerService.NormalizeShellNamespacePath(decisionPath);
 

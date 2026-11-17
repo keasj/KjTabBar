@@ -44,6 +44,12 @@ Only when a folder, special item, or shortcut to one is opened from the desktop,
 
 This behavior is implemented in the source. Launch-origin detection, display, and window switching still require validation through actual desktop interactions.
 
+## Opening folders externally
+
+- With an existing tab bar, Explorer windows launched from the taskbar, other apps, the Start menu, or Explorer's Open in new window command remain independent windows without a tab bar. They are not automatically absorbed.
+- When Explorer is reopened after closing, saved tabs are restored and preserved. Select a restored tab matching the launch folder, or append a new tab if no match exists.
+- If the initial Shell path is unavailable and the title only identifies a temporary Home page, wait for the path using the existing bounded retry before restoring tabs. This prevents the launch destination resolved later from overwriting the previously selected tab.
+
 ## Usage
 
 1. Launch the application (`KjTabBar.exe`). It will stay resident in the system tray.

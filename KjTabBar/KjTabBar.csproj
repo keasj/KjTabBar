@@ -16,6 +16,9 @@
     <IsTestProject>false</IsTestProject>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(KjtbAcceptanceHooks)' == 'true'">
+    <DefineConstants>$(DefineConstants);KJTB_ACCEPTANCE_TESTS</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
     <Resource Include="Assets\Icons\app_icon.png" />
   </ItemGroup>

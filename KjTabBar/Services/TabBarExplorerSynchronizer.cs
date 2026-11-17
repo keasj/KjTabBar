@@ -19,6 +19,11 @@ namespace KjTabBar.Services
 
         public async Task SyncWithExplorerAsync()
         {
+            if (AcceptanceTestHooks.MarkerActive("sync-pause"))
+            {
+                AcceptanceTestHooks.Trace("sync-paused", _viewModel);
+                return;
+            }
             if (_isSyncing || _viewModel.IsRestoringControlPanelHost || _viewModel.IsTabOperationPending) return;
             _isSyncing = true;
             bool shouldUpdateTitles = false;
@@ -49,6 +54,8 @@ namespace KjTabBar.Services
 
                 DateTime syncNowUtc = DateTime.UtcNow;
                 if (_viewModel.ActiveTab == null) return;
+                AcceptanceTestHooks.Trace("sync-observed", _viewModel, currentPath);
+                if (_viewModel.ShouldKeepTabsForUnconfirmedHost(currentPath)) return;
                 if (_viewModel.ShouldKeepImportedSelection(currentPath)) return;
 
                 if (_viewModel.NavigationTracker.NavigatingToPath == null &&

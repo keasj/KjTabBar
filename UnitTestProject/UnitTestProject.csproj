@@ -67,6 +67,7 @@
     <Reference Include="System.Xaml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AcceptanceTestHooksTests.cs" />
     <Compile Include="DesktopRepeatedLaunchServiceTests.cs" />
     <Compile Include="UnitTest1.cs" />
     <Compile Include="AuditRegressionTests.cs" />

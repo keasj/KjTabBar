@@ -105,9 +105,10 @@ namespace KjTabBar.Services
             if (_tabBars.TryGetTabBarWindow(rootHwnd, out registeredWindow))
             {
                 TabBarViewModel registeredViewModel = registeredWindow.DataContext as TabBarViewModel;
-                // Explorer can show Home after we have registered and hidden it.
+                // Rehide pending restoration, not a failed rollback awaiting a user retry.
                 if (registeredViewModel != null && registeredViewModel.ExplorerHwnd == rootHwnd &&
-                    registeredViewModel.IsRestoringControlPanelHost && _isWindowVisible(rootHwnd))
+                    registeredViewModel.IsRestoringControlPanelHost && !registeredViewModel.IsHostLocationUnconfirmed &&
+                    _isWindowVisible(rootHwnd))
                 {
                     AppLogger.LogDiagnosticPlacement("Restore.RehideRegisteredHome.Before", rootHwnd);
                     _hideWindow(rootHwnd);
@@ -208,6 +209,8 @@ namespace KjTabBar.Services
             {
                 _windowTracking.HiddenPendingAbsorb[rootHwnd] = hiddenUtc;
             }
+            if (!_windowTracking.ProcessingExplorerWindows.Contains(rootHwnd))
+                requestImmediateCycle?.Invoke();
         }
 
         public List<ExplorerWindowProcessRequest> PrepareProcessRequests(

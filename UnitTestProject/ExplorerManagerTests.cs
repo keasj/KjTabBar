@@ -7,6 +7,34 @@ namespace UnitTestProject
     [TestClass]
     public class ExplorerManagerTests
     {
+
+        [TestMethod]
+        public void Resolve_FileUrlTakesPrecedenceOverKnownDisplayNames()
+        {
+            foreach (string name in new[] { "Home", "Network", "PC", "ホーム", "ネットワーク" })
+            {
+                ShellCurrentPathResolver resolver = new ShellCurrentPathResolver(
+                    title => "virtual", path => false, path => false, path => null, path => false);
+                string expected = @"C:\Data\" + name;
+                string url = new Uri(expected).AbsoluteUri;
+                Assert.AreEqual(expected, resolver.Resolve(url, name, @"C:\Stale"));
+                Assert.AreEqual(expected, resolver.ResolveWithFolderPathReader(url, name,
+                    delegate { Assert.Fail("A filesystem URL must not query the document."); return null; }));
+            }
+        }
+
+        [TestMethod]
+        public void Resolve_FileUrlPreservesUncAndEscapedCharacters()
+        {
+            ShellCurrentPathResolver resolver = new ShellCurrentPathResolver(
+                title => "virtual", path => false, path => false, path => null, path => false);
+            foreach (string expected in new[] { @"\\server\share\Home", @"C:\Data\日本語 #100%\Home" })
+            {
+                string url = new Uri(expected).AbsoluteUri;
+                Assert.AreEqual(expected, resolver.Resolve(url, "Home", null));
+                Assert.AreEqual(expected, resolver.ResolveWithFolderPathReader(url, "Home", () => null));
+            }
+        }
         [TestMethod]
         public void NormalizeKnownPath_Preserves_Home_As_Special_Path()
         {

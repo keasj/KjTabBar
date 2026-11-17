@@ -21,12 +21,15 @@ namespace KjTabBar.Models
         private readonly Func<string> _getResolvedHomeFolderPath;
         private readonly ShellLocationNameResolver _shellLocationNameResolver;
         private readonly Func<string, string> _getFolderNameInternal;
+        private readonly Func<DateTime> _utcNow;
         private const string AlternateHomeFolderPath = "::{F874310E-B6B7-47DC-BC84-B9E6B38F5903}";
         private const string Win11HomeFolderPath = "::{F87431B7-B615-448F-972C-469618B6A34D}";
 
         private readonly object _controlPanelItemTitleMapSync = new object();
         private Dictionary<string, string> _controlPanelItemPathsByTitle = null;
         private HashSet<string> _controlPanelItemPaths = null;
+        private bool _controlPanelItemTitleMapComplete;
+        private DateTime _controlPanelItemTitleMapRetryUtc;
 
         private static readonly string[] ControlPanelRootGuidTokens = new string[]
         {
@@ -48,7 +51,8 @@ namespace KjTabBar.Models
             Func<string> getLocalizedThisPCTitle,
             Func<string> getResolvedHomeFolderPath,
             ShellLocationNameResolver shellLocationNameResolver,
-            Func<string, string> getFolderNameInternal)
+            Func<string, string> getFolderNameInternal,
+            Func<DateTime> utcNow = null)
         {
             _allControlPanelPath = allControlPanelPath;
             _homeFolderPath = homeFolderPath;
@@ -62,6 +66,7 @@ namespace KjTabBar.Models
             _getResolvedHomeFolderPath = getResolvedHomeFolderPath;
             _shellLocationNameResolver = shellLocationNameResolver;
             _getFolderNameInternal = getFolderNameInternal;
+            _utcNow = utcNow ?? (() => DateTime.UtcNow);
         }
 
         private bool ContainsControlPanelRootGuid(string lowerPath)
@@ -185,7 +190,7 @@ namespace KjTabBar.Models
 
         public bool IsControlPanelItemPath(string path)
         {
-            if (string.IsNullOrEmpty(path))
+            if (string.IsNullOrEmpty(path) || IsFileSystemLocation(path))
             {
                 return false;
             }
@@ -321,9 +326,15 @@ namespace KjTabBar.Models
                 @"^(?:control(?:\.exe)?\s+)?(?:""[^""]*[\\/]" + cpl + @"""|[^\s""]*[\\/]" + cpl + "|" + cpl + @")(?:,\s*\S+)?$", options);
         }
 
+        private static bool IsFileSystemLocation(string path)
+        {
+            Uri uri;
+            return Uri.TryCreate(path, UriKind.Absolute, out uri) && uri.IsFile;
+        }
+
         public string NormalizeKnownPath(string path)
         {
-            if (string.IsNullOrEmpty(path))
+            if (string.IsNullOrEmpty(path) || IsFileSystemLocation(path))
             {
                 return path;
             }
@@ -644,13 +655,20 @@ namespace KjTabBar.Models
         {
             lock (_controlPanelItemTitleMapSync)
             {
-                if (_controlPanelItemPathsByTitle != null)
+                if (_controlPanelItemTitleMapComplete ||
+                    (_controlPanelItemPathsByTitle != null && _utcNow() < _controlPanelItemTitleMapRetryUtc))
                 {
                     return;
                 }
 
                 Dictionary<string, string> titleMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 HashSet<string> itemPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                AddControlPanelItemTitleMapEntry(titleMap, "Programs and Features", _programsAndFeaturesPath);
+                AddControlPanelItemTitleMapEntry(titleMap, "プログラムと機能", _programsAndFeaturesPath);
+                AddControlPanelItemTitleMapEntry(titleMap, "Power Options", _powerOptionsPath);
+                AddControlPanelItemTitleMapEntry(titleMap, "電源オプション", _powerOptionsPath);
+                AddControlPanelItemPathEntry(itemPaths, _programsAndFeaturesPath);
+                AddControlPanelItemPathEntry(itemPaths, _powerOptionsPath);
                 RegistryKey namespaceRootKey = null;
                 try
                 {
@@ -703,15 +721,11 @@ namespace KjTabBar.Models
                         }
                     }
 
-                    AddControlPanelItemTitleMapEntry(titleMap, "Programs and Features", _programsAndFeaturesPath);
-                    AddControlPanelItemTitleMapEntry(titleMap, "プログラムと機能", _programsAndFeaturesPath);
-                    AddControlPanelItemTitleMapEntry(titleMap, "Power Options", _powerOptionsPath);
-                    AddControlPanelItemTitleMapEntry(titleMap, "電源オプション", _powerOptionsPath);
-                    AddControlPanelItemPathEntry(itemPaths, _programsAndFeaturesPath);
-                    AddControlPanelItemPathEntry(itemPaths, _powerOptionsPath);
+                    _controlPanelItemTitleMapComplete = true;
                 }
                 catch (Exception ex)
                 {
+                    _controlPanelItemTitleMapRetryUtc = _utcNow().AddSeconds(30);
                     AppLogger.LogError("ShellPathNormalizer", "Failed to build control panel item title map.", ex);
                 }
                 finally

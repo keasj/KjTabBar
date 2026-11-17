@@ -158,10 +158,12 @@ namespace KjTabBar.Services
             string initialPath,
             bool useInitialPathOnly, bool reuseExistingTab = false)
         {
+            TabBarViewModel viewModel = null;
+            TabBarWindow tabBarWindow = null;
             try
             {
                 System.Diagnostics.Stopwatch createTimer = AppLogger.StartDiagnosticTiming();
-                TabBarViewModel viewModel = new TabBarViewModel(hwnd, userSettings, _explorerService, initialPath);
+                viewModel = new TabBarViewModel(hwnd, userSettings, _explorerService, initialPath);
                 AppLogger.LogDiagnosticTiming("Create.ViewModel", hwnd, createTimer);
                 InitializeTabsForNewWindow(viewModel, initialPath, useInitialPathOnly, reuseExistingTab);
                 AppLogger.LogDiagnosticTiming("Create.SavedTabsLoaded", hwnd, createTimer);
@@ -175,7 +177,7 @@ namespace KjTabBar.Services
                 AppLogger.LogDiagnosticPlacement("Create.AfterPositionPrepared", hwnd);
                 AppLogger.LogDiagnosticTiming("Create.PositionPrepared", hwnd, createTimer);
 
-                TabBarWindow tabBarWindow = _createTabBarWindow();
+                tabBarWindow = _createTabBarWindow();
                 tabBarWindow.ExplorerService = _explorerService;
                 tabBarWindow.PersistTabState = delegate (TabBarViewModel currentViewModel)
                 {
@@ -213,6 +215,25 @@ namespace KjTabBar.Services
             }
             catch
             {
+                try
+                {
+                    if (tabBarWindow != null)
+                    {
+                        // Failed creation must not persist partial state or close parked hosts.
+                        tabBarWindow.PersistTabState = null;
+                        tabBarWindow.WindowTrackingState = null;
+                        tabBarWindow.DataContext = null;
+                        tabBarWindow.Close();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.LogError("ExplorerWindowInteractionService", "Failed to close a partially created tab bar.", ex);
+                }
+                finally
+                {
+                    if (viewModel != null) viewModel.Dispose();
+                }
                 _windowTracking.RestoreHiddenWindow(hwnd);
                 _showExplorerWindow(hwnd);
                 throw;
@@ -272,6 +293,7 @@ namespace KjTabBar.Services
         {
             IntPtr originalHwnd = viewModel.ExplorerHwnd;
             bool hostReady = false;
+            long preparationVersion = coordinator.PreparationVersion;
             long restoreVersion = viewModel.SynchronizationVersion;
             string restorePath = activeTab.Path;
             Func<bool> isCurrent = () => !viewModel.IsDisposed && viewModel.IsRestoringControlPanelHost &&
@@ -280,7 +302,9 @@ namespace KjTabBar.Services
             System.Diagnostics.Stopwatch restoreTimer = AppLogger.StartDiagnosticTiming();
             try
             {
-                if (!await coordinator.PrepareForPathAsync(viewModel, restorePath, isCurrent))
+                System.Threading.Tasks.Task<bool> preparation = coordinator.PrepareForPathAsync(viewModel, restorePath, isCurrent);
+                preparationVersion = coordinator.PreparationVersion;
+                if (!await preparation)
                 {
                     return;
                 }
@@ -288,8 +312,11 @@ namespace KjTabBar.Services
                 if (viewModel.IsDisposed || !viewModel.Tabs.Contains(activeTab) || viewModel.ActiveTab != activeTab) return;
                 hostReady = true;
                 AppLogger.LogDiagnosticTiming("Restore.HostReady", originalHwnd, restoreTimer);
-                try { await viewModel.SelectTabCoreAsync(activeTab); }
-                finally { coordinator.CompletePendingReveal(); }
+                await viewModel.SelectPersistedTabAsync(activeTab, allowRollback =>
+                {
+                    if (coordinator.PreparationVersion == preparationVersion)
+                        coordinator.CompletePendingReveal(allowRollback);
+                });
                 AppLogger.LogDiagnosticTiming("Restore.Revealed", originalHwnd, restoreTimer);
             }
             catch (Exception ex)
@@ -298,7 +325,7 @@ namespace KjTabBar.Services
             }
             finally
             {
-                if (!hostReady && isCurrent())
+                if (!hostReady && coordinator.PreparationVersion == preparationVersion && isCurrent())
                 {
                     string currentPath = null;
                     try
@@ -312,14 +339,17 @@ namespace KjTabBar.Services
                     }
                     viewModel.CancelPersistedHostRestoration(currentPath);
                 }
-                CompletePersistedHostRestoration(viewModel, originalHwnd);
-                if (!viewModel.IsDisposed && showRestoredTabBar != null) showRestoredTabBar();
+                if (coordinator.PreparationVersion == preparationVersion)
+                {
+                    CompletePersistedHostRestoration(viewModel, originalHwnd, coordinator.HostRollbackFailed);
+                    if (!viewModel.IsDisposed && showRestoredTabBar != null) showRestoredTabBar();
+                }
             }
         }
 
-        private void CompletePersistedHostRestoration(TabBarViewModel viewModel, IntPtr originalHwnd)
+        private void CompletePersistedHostRestoration(TabBarViewModel viewModel, IntPtr originalHwnd, bool suspendSynchronization = false)
         {
-            viewModel.IsRestoringControlPanelHost = false;
+            viewModel.IsRestoringControlPanelHost = suspendSynchronization;
             // A failed switch (or an already suitable host) must not leave Explorer hidden.
             if (viewModel.ExplorerHwnd == originalHwnd)
             {
@@ -361,14 +391,7 @@ namespace KjTabBar.Services
             TabItemViewModel targetTab = reuseExistingTab ? viewModel.FindDesktopLaunchTab(initialPath) : viewModel.FindTabByPath(initialPath);
             if (targetTab != null)
             {
-                if (loadedSavedTabs && useInitialPathOnly && !reuseExistingTab)
-                {
-                    viewModel.InsertTabWithPath(initialPath, viewModel.Tabs.Count, allowSpecialPath);
-                }
-                else
-                {
-                    viewModel.SelectTab(targetTab);
-                }
+                viewModel.SelectTab(targetTab);
                 return;
             }
 

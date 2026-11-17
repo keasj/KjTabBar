@@ -38,6 +38,24 @@ namespace KjTabBar.Models
             _desktopPathClassifier = desktopPathClassifier;
         }
 
+
+        private bool IsFileSystemTitleCollision(string path, string titlePath)
+        {
+            Uri uri;
+            if (string.IsNullOrEmpty(titlePath) ||
+                (!_explorerService.IsControlPanelPath(titlePath) && !_explorerService.IsControlPanelRootPath(titlePath)) ||
+                !Uri.TryCreate(path, UriKind.Absolute, out uri) || !uri.IsFile)
+                return false;
+
+            string name = System.IO.Path.GetFileName(uri.LocalPath.TrimEnd('\\', '/'));
+            string mappedName = _explorerService.MapLocationNameToKnownShellPath(name);
+            // Keep title fallback for stale/unavailable paths and real CP transitions.
+            return !string.IsNullOrEmpty(mappedName) &&
+                ((_explorerService.IsControlPanelRootPath(mappedName) && _explorerService.IsControlPanelRootPath(titlePath)) ||
+                 string.Equals(_explorerService.NormalizeKnownPath(mappedName),
+                     _explorerService.NormalizeKnownPath(titlePath), StringComparison.OrdinalIgnoreCase));
+        }
+
         public ExplorerWindowEvaluationResult Evaluate(
             ExplorerWindowEvaluationInput input,
             Func<IntPtr, string> getTitleVirtualPath,
@@ -50,6 +68,7 @@ namespace KjTabBar.Models
             AppLogger.LogDiagnosticTiming("Evaluation.CurrentPath", input.ExplorerHwnd, queryTimer);
             string titlePath = getTitleVirtualPath != null ? getTitleVirtualPath(input.ExplorerHwnd) : null;
             AppLogger.LogDiagnosticTiming("Evaluation.TitlePath", input.ExplorerHwnd, queryTimer);
+            if (IsFileSystemTitleCollision(path, titlePath)) titlePath = null;
 
             bool titleIndicatesControlPanel =
                 !string.IsNullOrEmpty(titlePath) &&
@@ -154,18 +173,7 @@ namespace KjTabBar.Models
                 _explorerService.IsControlPanelPath(resolvedPath) ||
                 (!string.IsNullOrEmpty(titlePath) &&
                  (_explorerService.IsControlPanelRootPath(titlePath) || _explorerService.IsControlPanelPath(titlePath)));
-            bool shouldUseResolvedPathOnCreate =
-                resolvedIsControlPanelPath ||
-                (input.IsDesktopCandidate &&
-                 ExplorerAbsorptionLogic.ShouldAbsorbDesktopOriginPath(
-                     context.IsDesktopFolderPathFunc != null && context.IsDesktopFolderPathFunc(resolvedPath),
-                     context.IsDesktopShortcutTargetFunc != null && context.IsDesktopShortcutTargetFunc(resolvedPath),
-                     context.IsDesktopShellItemPathFunc != null &&
-                         (context.IsDesktopShellItemPathFunc(resolvedPath) ||
-                          (!string.IsNullOrEmpty(titlePath) && context.IsDesktopShellItemPathFunc(titlePath))),
-                     context.IsDesktopSpecialShellPathFunc != null &&
-                         (context.IsDesktopSpecialShellPathFunc(resolvedPath) ||
-                          (!string.IsNullOrEmpty(titlePath) && context.IsDesktopSpecialShellPathFunc(titlePath)))));
+            bool shouldUseResolvedPathOnCreate = !string.IsNullOrEmpty(resolvedPath);
 
             if (resolvedIsControlPanelPath)
             {
@@ -195,13 +203,13 @@ namespace KjTabBar.Models
                 UseResolvedPathOnCreate =
                     action == AbsorptionAction.CreateNewTabBar &&
                     shouldUseResolvedPathOnCreate,
-                // Hidden-pending preserves evidence for delayed desktop Control Panel launches.
                 ReuseExistingTab = !input.WasManagedControlPanelLaunchSource &&
-                    (action == AbsorptionAction.Absorb ||
-                     (action == AbsorptionAction.CreateNewTabBar && shouldUseResolvedPathOnCreate)) &&
-                    (input.IsDesktopCandidate || input.IsControlPanelTabLaunchCandidate ||
-                     (action == AbsorptionAction.Absorb && resolvedIsControlPanelPath && input.IsHiddenPending &&
-                      _desktopPathClassifier.IsDesktopShortcutTargetPath(resolvedPath))),
+                    ((action == AbsorptionAction.Absorb &&
+                      (input.IsDesktopCandidate || input.IsControlPanelTabLaunchCandidate ||
+                       (resolvedIsControlPanelPath && input.IsHiddenPending &&
+                        _desktopPathClassifier.IsDesktopShortcutTargetPath(resolvedPath)))) ||
+                     action == AbsorptionAction.AbsorbWithFallback ||
+                     (action == AbsorptionAction.CreateNewTabBar && shouldUseResolvedPathOnCreate)),
                 WasManagedControlPanelLaunchSource = input.WasManagedControlPanelLaunchSource
             };
         }

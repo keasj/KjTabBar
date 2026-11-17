@@ -88,13 +88,101 @@ namespace KjTabBar.ViewModels
         private readonly TabBarExplorerSynchronizer _synchronizer;
 
         internal bool IsRestoringControlPanelHost { get; set; }
+        internal bool IsHostLocationUnconfirmed { get; private set; }
+
+        internal void SuspendSynchronizationAfterHostRollbackFailure()
+        {
+            IsHostLocationUnconfirmed = true;
+            IsRestoringControlPanelHost = true;
+            AcceptanceTestHooks.Trace("rollback-protected", this);
+        }
+
+        internal bool ShouldKeepTabsForUnconfirmedHost(string currentPath)
+        {
+            if (!IsHostLocationUnconfirmed) return false;
+            // Failed recovery attempts must not make the host's root a saved tab.
+            // Resume only on an observed arrival, including a tracked late arrival.
+            TabItemViewModel arrivedTab = null;
+            if (!string.IsNullOrEmpty(currentPath))
+            {
+                if (_activeTab != null && PathEquals(currentPath, _activeTab.Path)) arrivedTab = _activeTab;
+                else if (_navigationTracker.NavigatingToPath == null && IsCancelledNavigationMatch(currentPath))
+                    arrivedTab = FindTabByPath(currentPath);
+            }
+            if (arrivedTab != null)
+            {
+                // Commit the arrival before releasing protection, even during host-switch grace.
+                if (arrivedTab != _activeTab) SetActiveTabOnly(arrivedTab);
+                IsHostLocationUnconfirmed = false;
+                AcceptanceTestHooks.Trace("sync-arrival-confirmed", this, currentPath);
+                return false;
+            }
+            if (_navigationTracker.NavigatingToPath != null &&
+                (DateTime.UtcNow - _navigationTracker.NavigateStartTime).TotalSeconds > 5)
+                TimeoutPendingNavigation();
+            AcceptanceTestHooks.Trace("sync-protected", this, currentPath);
+            return true;
+        }
+
         private string _persistedRestoreSourcePath;
+
+
+        internal async Task SelectPersistedTabAsync(TabItemViewModel tab, Action<bool> completePendingReveal)
+        {
+            bool preserveSelection = IsRestoringControlPanelHost && _activeTab == tab &&
+                _importSelectionVersion == _selectionVersion;
+            string path = tab.Path;
+            IntPtr host = _explorerHwnd;
+            Task selection = SelectTabCoreAsync(tab);
+            long version = _selectionVersion;
+            long synchronizationVersion = SynchronizationVersion;
+            Func<bool> isCurrent = () => !_isDisposed && _selectionVersion == version &&
+                _activeTab == tab && _tabs.Contains(tab) && PathEquals(tab.Path, path);
+            Action preserve = () =>
+            {
+                _importSelectionVersion = _selectionVersion;
+                _importHost = _explorerHwnd;
+            };
+            try { await selection; }
+            finally
+            {
+                bool operationCurrent = isCurrent() && _explorerHwnd == host &&
+                    SynchronizationVersion == synchronizationVersion;
+                bool restoreProtection = preserveSelection && operationCurrent;
+                if (restoreProtection) preserve();
+                completePendingReveal(operationCurrent);
+                if (restoreProtection && isCurrent())
+                {
+                    // Host preparation and selection are part of the same saved restore.
+                    // Only its own completion/rollback may renew the source protection.
+                    preserve();
+                    Action rollback = PendingHostRollback;
+                    long rollbackVersion = SynchronizationVersion;
+                    if (rollback != null)
+                    {
+                        PendingHostRollback = () =>
+                        {
+                            if (!isCurrent() || _explorerHwnd != host || SynchronizationVersion != rollbackVersion) return;
+                            preserve();
+                            rollback();
+                            if (isCurrent()) preserve();
+                        };
+                    }
+                }
+            }
+        }
 
         internal void CancelPersistedHostRestoration(string currentPath)
         {
             if (_isDisposed || !IsRestoringControlPanelHost) return;
             string path = string.IsNullOrEmpty(currentPath) ? _persistedRestoreSourcePath : currentPath;
             if (string.IsNullOrEmpty(path)) return;
+            if (ShouldKeepImportedSelection(path))
+            {
+                IsRestoringControlPanelHost = false;
+                ClearPendingNavigationTracking();
+                return;
+            }
             TabItemViewModel source = FindTabByPath(path);
             if (source == null)
             {
@@ -677,6 +765,7 @@ namespace KjTabBar.ViewModels
         internal void TimeoutPendingNavigation()
         {
             if (_navigationTracker.NavigatingToPath == null) return;
+            AcceptanceTestHooks.Trace("navigation-timeout", this);
             Action restoreTabs = _pendingCloseRollback;
             Action restoreHost = PendingHostRollback;
             _pendingCloseRollback = null;
@@ -915,7 +1004,9 @@ namespace KjTabBar.ViewModels
 
         private void SelectRestoredTab(TabItemViewModel tab, bool deferControlPanelNavigation, bool deferNavigation)
         {
-            if (deferNavigation)
+            bool restoreAtLimit = deferNavigation && !CanAddTab &&
+                FindDesktopLaunchTab(_persistedRestoreSourcePath) == null;
+            if (deferNavigation && !restoreAtLimit)
             {
                 // A different saved location is not the current Explorer location and
                 // must not become the rollback source if the explicit launch fails.
@@ -923,16 +1014,26 @@ namespace KjTabBar.ViewModels
                     SetActiveTabOnly(tab);
                 return;
             }
+            if (restoreAtLimit)
+            {
+                // There is no room for the launch path. Keep the saved selection even
+                // if navigation fails, using the same source protection as import.
+                SetActiveTabOnly(tab);
+                _importSourcePath = _persistedRestoreSourcePath;
+                _importSelectionVersion = _selectionVersion;
+                _importHost = _explorerHwnd;
+            }
             if (deferControlPanelNavigation && _explorerService.IsControlPanelPath(tab.Path))
             {
                 // The interaction service prepares the Control Panel host before navigation.
                 IsRestoringControlPanelHost = true;
                 ClearPendingNavigationTracking();
-                SetActiveTabOnly(tab);
+                if (!restoreAtLimit) SetActiveTabOnly(tab);
                 return;
             }
 
             SelectTab(tab);
+            if (restoreAtLimit) _importSelectionVersion = _selectionVersion;
         }
 
         private bool IsPersistedTabPathRestorable(string path)
@@ -1512,8 +1613,10 @@ namespace KjTabBar.ViewModels
                     previousActiveTab != null ? previousActiveTab.Path ?? string.Empty : string.Empty));
             TabItemViewModel failureSource = restorePendingNavigation == null
                 ? confirmedSource ?? previousActiveTab : previousActiveTab;
+            AcceptanceTestHooks.Trace("click-read", this, currentPath);
             if (PathEquals(currentPath, path))
             {
+                IsHostLocationUnconfirmed = false;
                 _navigationTracker.ForgetCancelled(currentPath, PathEquals);
                 _navigationTracker.RememberPendingAsCancelled();
                 if (tab != _activeTab)
@@ -1527,6 +1630,7 @@ namespace KjTabBar.ViewModels
                     if (_isDisposed || _selectionVersion != itemsVersion || _explorerHwnd != selectionHost || _activeTab != tab) return;
                 }
                 ClearPendingNavigationTracking();
+                AcceptanceTestHooks.Trace("click-arrival-confirmed", this, currentPath);
                 if (shouldUpdateTitles)
                 {
                     UpdateTabTitles();
@@ -1541,9 +1645,13 @@ namespace KjTabBar.ViewModels
 
             long navigationVersion = _selectionVersion;
             bool navigationStarted;
+            long hostGeneration = _navigationTracker.HostGeneration;
             try
             {
-                navigationStarted = await _explorerService.NavigatePathAsync(selectionHost, path);
+                navigationStarted = await AcceptanceTestHooks.NavigateAsync(
+                    () => _explorerService.NavigatePathAsync(selectionHost, path),
+                    () => !_isDisposed && _explorerHwnd == selectionHost && _navigationTracker.HostGeneration == hostGeneration &&
+                        _tabs.Contains(tab) && PathEquals(tab.Path, path));
                 if (_isDisposed || _selectionVersion != navigationVersion || _explorerHwnd != selectionHost || !_tabs.Contains(tab))
                 {
                     if (navigationStarted && !_isDisposed && _explorerHwnd == selectionHost)

@@ -12,6 +12,583 @@ namespace UnitTestProject
     public class ExplorerWindowInteractionServiceTests
     {
         [TestMethod]
+        public void CreateNewTabBar_FailureReleasesViewModelAndPartialWindow()
+        {
+            Exception failure = null;
+            System.Threading.Thread thread = new System.Threading.Thread(() =>
+            {
+                try
+                {
+                    for (int stage = 0; stage < 3; stage++)
+                    {
+                        MockUserSettings settings = new MockUserSettings();
+                        System.Reflection.FieldInfo subscribers = typeof(MockUserSettings).GetField("SettingsChanged",
+                            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                        for (int attempt = 0; attempt < 3; attempt++)
+                        {
+                            KjTabBar.Views.TabBarWindow window = null;
+                            bool closed = false;
+                            bool restored = false;
+                            InvalidOperationException expected = new InvalidOperationException("Injected creation failure");
+                            ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                                new MockExplorerService(), new ExplorerWindowTrackingState(h => false),
+                                TestTabPersistenceFactory.Create(), h => string.Empty, h => restored = true,
+                                h => { }, h => { },
+                                () =>
+                                {
+                                    if (stage == 0) throw expected;
+                                    window = new KjTabBar.Views.TabBarWindow();
+                                    window.Closed += (sender, args) => closed = true;
+                                    return window;
+                                }, w => { if (stage == 1) throw expected; });
+                            try
+                            {
+                                try
+                                {
+                                    service.CreateNewTabBar(IntPtr.Zero, settings,
+                                        (h, w) => { throw expected; }, @"C:\MockPath", true);
+                                    Assert.Fail("Creation should fail.");
+                                }
+                                catch (InvalidOperationException ex) { Assert.AreSame(expected, ex); }
+                                Assert.IsTrue(restored);
+                                Assert.IsNull(subscribers.GetValue(settings), "Failed creation must release settings subscriptions.");
+                                if (stage != 0) Assert.IsTrue(closed, "Close the partially initialized window.");
+                            }
+                            finally
+                            {
+                                if (window != null && !closed)
+                                {
+                                    window.PersistTabState = null;
+                                    window.WindowTrackingState = null;
+                                    window.Close();
+                                }
+                                EventHandler remaining = subscribers.GetValue(settings) as EventHandler;
+                                if (remaining != null)
+                                    foreach (Delegate handler in remaining.GetInvocationList())
+                                        ((TabBarViewModel)handler.Target).Dispose();
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex) { failure = ex; }
+            });
+            thread.SetApartmentState(System.Threading.ApartmentState.STA);
+            thread.Start();
+            Assert.IsTrue(thread.Join(10000), "Creation cleanup did not complete.");
+            if (failure != null) throw failure;
+        }
+
+        [TestMethod]
+        public async System.Threading.Tasks.Task RecoveryClick_RejectionKeepsSavedPaths()
+        {
+            await VerifyRecoveryClick(0);
+        }
+
+        [TestMethod]
+        public async System.Threading.Tasks.Task RecoveryClick_ExceptionKeepsSavedPaths()
+        {
+            await VerifyRecoveryClick(1);
+        }
+
+        [TestMethod]
+        public async System.Threading.Tasks.Task RecoveryClick_ArrivalResumesNormalSynchronization()
+        {
+            await VerifyRecoveryClick(2);
+        }
+
+        [TestMethod]
+        public async System.Threading.Tasks.Task RecoveryClick_TimeoutKeepsSavedPathsAndAcceptsLateArrival()
+        {
+            await VerifyRecoveryClick(3);
+        }
+
+        [TestMethod]
+        public async System.Threading.Tasks.Task RecoveryClick_LateArrivalDuringGraceCommitsSelectionBeforeUnprotecting()
+        {
+            await VerifyRecoveryClick(4);
+        }
+
+        [TestMethod]
+        public async System.Threading.Tasks.Task RecoveryClick_ConfirmedArrivalAllowsNavigationBeforeNextSync()
+        {
+            await VerifyRecoveryClick(5);
+        }
+
+        private static async System.Threading.Tasks.Task VerifyRecoveryClick(int outcome)
+        {
+            foreach (int origin in new[] { 0, 1 })
+            {
+                bool opened = false, attempted = false, recovering = false, retrySucceeds = false;
+                string actual = "AllControlPanelPath";
+                int retryCalls = 0;
+                MockExplorerService explorer = new MockExplorerService {
+                    GetCurrentPathFunc = h => h == (IntPtr)200 ? actual : @"C:\Initial",
+                    IsControlPanelPathFunc = p => p == "AllControlPanelPath" || p == "ProgramsAndFeaturesPath" || p == "PowerOptionsPath",
+                    NavigateFunc = (h, p) => {
+                        attempted = true;
+                        if (!recovering) return false;
+                        retryCalls++;
+                        if (retrySucceeds) { actual = p; return true; }
+                        if (outcome == 1 || outcome == 4) throw new TimeoutException("Recovery navigation failed");
+                        return outcome >= 2;
+                    }
+                };
+                ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, @"C:\Initial"))
+                {
+                    string[] paths = BoundarySavedPaths();
+                    vm.RestoreTabs(paths, paths[42], 42, true, true);
+                    ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                        explorer, tracking, TestTabPersistenceFactory.Create(), h => "", h => {}, h => {}, h => {}, () => null, w => {});
+                    ExplorerHostSwitchCoordinator host = new ExplorerHostSwitchCoordinator(explorer, tracking,
+                        (target, h) => { if (origin == 1 && attempted && h == (IntPtr)100) return false; target.SetExplorerHwnd(h); return true; },
+                        h => {}, (h, r) => {}, h => {}, h => !(origin == 0 && attempted && h == (IntPtr)100),
+                        () => opened ? new System.Collections.Generic.List<IntPtr> { (IntPtr)100, (IntPtr)200 }
+                                     : new System.Collections.Generic.List<IntPtr> { (IntPtr)100 },
+                        explorer.GetCurrentPath, p => { opened = true; return true; }, ms => {});
+                    await service.RestorePersistedSpecialActiveTabHostAsync(host, vm, vm.ActiveTab);
+                    Assert.IsTrue(vm.IsRestoringControlPanelHost);
+                    recovering = true;
+                    if (outcome == 5) actual = paths[43];
+                    await vm.SelectTabAsync(vm.Tabs[43],
+                        p => host.PrepareForPathAsync(vm, p, vm.IsPreparedTabOperationCurrent), host.CompletePendingReveal);
+                    if (outcome >= 4)
+                    {
+                        Assert.AreEqual(outcome == 4 ? 1 : 0, retryCalls);
+                        if (outcome == 4)
+                        {
+                            Assert.IsTrue(vm.LastNavigationFailed);
+                            actual = paths[43];
+                            // Keep the arrival inside the host-switch grace period deterministically.
+                            typeof(TabNavigationStateTracker).GetField("_lastExplorerHostSwitchUtc",
+                                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                                .SetValue(vm.NavigationTracker, DateTime.UtcNow.AddMinutes(1));
+                            vm.NavigationTracker.InvalidateCache();
+                            await vm.SyncWithExplorerAsync();
+                        }
+                        else Assert.IsFalse(vm.LastNavigationFailed);
+                        Assert.AreEqual(43, vm.ActiveTabIndex);
+                        Assert.IsFalse(vm.IsHostLocationUnconfirmed);
+                        Assert.IsNull(vm.NavigationTracker.NavigatingToPath);
+                        Assert.AreEqual(255, vm.Tabs.Count);
+                        for (int i = 0; i < paths.Length; i++) Assert.AreEqual(paths[i], vm.Tabs[i].Path);
+
+                        // No synchronization between the confirmed click and this manual move.
+                        actual = @"C:\UserNavigated";
+                        typeof(TabNavigationStateTracker).GetField("_lastExplorerHostSwitchUtc",
+                            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                            .SetValue(vm.NavigationTracker, DateTime.MinValue);
+                        vm.NavigationTracker.InvalidateCache();
+                        await vm.SyncWithExplorerAsync();
+                        Assert.AreEqual(43, vm.ActiveTabIndex);
+                        Assert.AreEqual(actual, vm.ActiveTab.Path);
+                        for (int i = 0; i < paths.Length; i++)
+                            if (i != 43) Assert.AreEqual(paths[i], vm.Tabs[i].Path);
+                        continue;
+                    }
+                    Assert.AreEqual(1, retryCalls, "Use the complete click/availability/host/navigation path.");
+                    typeof(TabNavigationStateTracker).GetField("_lastExplorerHostSwitchUtc",
+                        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                        .SetValue(vm.NavigationTracker, DateTime.MinValue);
+                    vm.NavigationTracker.InvalidateCache();
+                    await vm.SyncWithExplorerAsync();
+                    if (outcome == 3)
+                    {
+                        Assert.AreEqual(paths[43], vm.NavigationTracker.NavigatingToPath);
+                        for (int i = 0; i < paths.Length; i++) Assert.AreEqual(paths[i], vm.Tabs[i].Path);
+                        typeof(TabNavigationStateTracker).GetField("_navigateStartTime",
+                            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                            .SetValue(vm.NavigationTracker, DateTime.UtcNow.AddSeconds(-6));
+                    }
+                    else if (outcome == 2)
+                    {
+                        Assert.AreEqual(paths[43], vm.NavigationTracker.NavigatingToPath);
+                        actual = paths[43];
+                    }
+                    vm.NavigationTracker.InvalidateCache();
+                    await vm.SyncWithExplorerAsync();
+                    vm.NavigationTracker.InvalidateCache();
+                    await vm.SyncWithExplorerAsync();
+                    Assert.AreEqual(255, vm.Tabs.Count);
+                    Assert.AreEqual(outcome == 2 ? 43 : 42, vm.ActiveTabIndex);
+                    Assert.IsNull(vm.NavigationTracker.NavigatingToPath);
+                    for (int i = 0; i < paths.Length; i++) Assert.AreEqual(paths[i], vm.Tabs[i].Path,
+                        "origin=" + origin + ", outcome=" + outcome + ", index=" + i);
+
+                    if (outcome == 3)
+                    {
+                        // The timed-out request can still arrive; select its own tab.
+                        actual = paths[43];
+                    }
+                    else if (outcome != 2)
+                    {
+                        retrySucceeds = true;
+                        await vm.SelectTabAsync(vm.Tabs[43],
+                            p => host.PrepareForPathAsync(vm, p, vm.IsPreparedTabOperationCurrent), host.CompletePendingReveal);
+                    }
+                    vm.NavigationTracker.InvalidateCache();
+                    await vm.SyncWithExplorerAsync();
+                    Assert.AreEqual(43, vm.ActiveTabIndex);
+                    Assert.AreEqual(paths[42], vm.Tabs[42].Path);
+                    Assert.AreEqual(paths[43], vm.Tabs[43].Path);
+
+                    // Once arrival is confirmed, manual Explorer navigation must work normally.
+                    actual = @"C:\UserNavigated";
+                    vm.NavigationTracker.InvalidateCache();
+                    await vm.SyncWithExplorerAsync();
+                    Assert.AreEqual(actual, vm.ActiveTab.Path);
+                }
+            }
+        }
+
+        [TestMethod]
+        public async System.Threading.Tasks.Task RestoreBoundary_UnavailableOriginKeepsSavedTabsAndRevealsRemainingHost()
+        {
+            foreach (int mode in new[] { 0, 1, 2 })
+            {
+                bool opened = false, attempted = false, recovering = false;
+                string newPath = "AllControlPanelPath";
+                System.Collections.Generic.List<IntPtr> shown = new System.Collections.Generic.List<IntPtr>();
+                MockExplorerService explorer = new MockExplorerService {
+                    GetCurrentPathFunc = h => h == (IntPtr)200 ? newPath : @"C:\Initial",
+                    IsControlPanelPathFunc = p => p == "AllControlPanelPath" || p == "ProgramsAndFeaturesPath" || p == "PowerOptionsPath",
+                    NavigateFunc = (h, p) => { attempted = true; if (recovering) newPath = p; return recovering; }
+                };
+                ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, @"C:\Initial"))
+                {
+                    string[] paths = BoundarySavedPaths();
+                    vm.RestoreTabs(paths, paths[42], 42, true, true);
+                    ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                        explorer, tracking, TestTabPersistenceFactory.Create(), h => "", h => shown.Add(h), h => {}, h => {}, () => null, w => {});
+                    ExplorerHostSwitchCoordinator host = new ExplorerHostSwitchCoordinator(explorer, tracking,
+                        (target, h) => { if (mode == 1 && attempted && h == (IntPtr)100) return false; target.SetExplorerHwnd(h); return true; },
+                        h => shown.Add(h), (h, r) => {}, h => {}, h => !(mode == 0 && attempted && h == (IntPtr)100),
+                        () => opened ? new System.Collections.Generic.List<IntPtr> { (IntPtr)100, (IntPtr)200 }
+                                     : new System.Collections.Generic.List<IntPtr> { (IntPtr)100 },
+                        explorer.GetCurrentPath, p => { opened = true; return true; }, ms => {});
+                    await service.RestorePersistedSpecialActiveTabHostAsync(host, vm, vm.ActiveTab);
+                    Assert.AreEqual(mode == 2 ? (IntPtr)100 : (IntPtr)200, vm.ExplorerHwnd);
+                    CollectionAssert.Contains(shown, vm.ExplorerHwnd, "The remaining host must be revealed even when rollback fails.");
+                    Assert.AreEqual(mode != 2, vm.IsRestoringControlPanelHost);
+                    typeof(TabNavigationStateTracker).GetField("_lastExplorerHostSwitchUtc",
+                        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                        .SetValue(vm.NavigationTracker, DateTime.MinValue);
+                    vm.NavigationTracker.InvalidateCache();
+                    await vm.SyncWithExplorerAsync();
+                    for (int i = 0; i < paths.Length; i++) Assert.AreEqual(paths[i], vm.Tabs[i].Path, "mode=" + mode + ", index=" + i);
+                    Assert.AreEqual(42, vm.ActiveTabIndex);
+                    if (mode != 2)
+                    {
+                        recovering = true;
+                        await vm.SelectTabCoreAsync(vm.Tabs[43]);
+                        vm.NavigationTracker.InvalidateCache();
+                        await vm.SyncWithExplorerAsync();
+                        Assert.IsFalse(vm.IsRestoringControlPanelHost, "A new user selection must release suspension.");
+                        Assert.AreEqual(43, vm.ActiveTabIndex);
+                    }
+                }
+            }
+        }
+
+        [TestMethod]
+        public async System.Threading.Tasks.Task RestoreBoundary_OldCompletionCannotUndoLaterSuccessfulNavigation()
+        {
+            foreach (bool newerPreparation in new[] { false, true })
+            foreach (int completion in new[] { 0, 1, 2 })
+            {
+                bool opened = false;
+                string currentNewHost = "AllControlPanelPath";
+                BoundaryAsyncExplorer explorer = new BoundaryAsyncExplorer();
+                explorer.GetCurrentPathFunc = h => h == (IntPtr)200 ? currentNewHost : @"C:\Initial";
+                explorer.IsControlPanelPathFunc = p => p == "AllControlPanelPath" || p == "ProgramsAndFeaturesPath" || p == "PowerOptionsPath";
+                explorer.Move = p => {
+                    if (p == "ProgramsAndFeaturesPath") return explorer.Gate.Task;
+                    if (p == "PowerOptionsPath") { currentNewHost = p; return System.Threading.Tasks.Task.FromResult(true); }
+                    return System.Threading.Tasks.Task.FromResult(false);
+                };
+                System.Collections.Generic.List<IntPtr> shown = new System.Collections.Generic.List<IntPtr>();
+                ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, @"C:\Initial"))
+                {
+                    string[] paths = BoundarySavedPaths();
+                    vm.RestoreTabs(paths, paths[42], 42, true, true);
+                    ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                        explorer, tracking, TestTabPersistenceFactory.Create(), h => "", h => shown.Add(h), h => {}, h => {}, () => null, w => {});
+                    ExplorerHostSwitchCoordinator host = new ExplorerHostSwitchCoordinator(explorer, tracking,
+                        (target, h) => { target.SetExplorerHwnd(h); return true; },
+                        h => shown.Add(h), (h, r) => {}, h => {}, h => true,
+                        () => opened ? new System.Collections.Generic.List<IntPtr> { (IntPtr)100, (IntPtr)200 }
+                                     : new System.Collections.Generic.List<IntPtr> { (IntPtr)100 },
+                        explorer.GetCurrentPath, p => { opened = true; return true; }, ms => {});
+                    int tabBarShows = 0;
+                    System.Threading.Tasks.Task restoring = service.RestorePersistedSpecialActiveTabHostAsync(
+                        host, vm, vm.ActiveTab, () => tabBarShows++);
+                    await explorer.Entered.Task;
+                    await vm.SelectTabCoreAsync(vm.Tabs[0]);
+                    Assert.IsTrue(vm.LastNavigationFailed);
+                    await vm.SelectTabCoreAsync(vm.Tabs[43]);
+                    Assert.IsFalse(vm.LastNavigationFailed);
+                    vm.NavigationTracker.InvalidateCache();
+                    await vm.SyncWithExplorerAsync();
+                    Assert.AreEqual("PowerOptionsPath", vm.ActiveTab.Path);
+                    if (newerPreparation)
+                        Assert.IsTrue(await host.PrepareForPathAsync(vm, @"C:\Initial"));
+                    int shownBeforeCompletion = shown.Count;
+                    if (completion == 2) explorer.Gate.SetException(new TimeoutException("Late failure"));
+                    else explorer.Gate.SetResult(completion == 1);
+                    await restoring;
+                    Assert.AreEqual(newerPreparation ? 0 : 1, tabBarShows, "A newer preparation owns the tab bar reveal.");
+                    Assert.AreEqual(newerPreparation ? (IntPtr)100 : (IntPtr)200, vm.ExplorerHwnd);
+                    Assert.AreEqual(43, vm.ActiveTabIndex);
+                    Assert.IsNull(vm.PendingHostRollback, "Old completion must not install rollback for a newer operation.");
+                    if (newerPreparation)
+                    {
+                        Assert.AreEqual(shownBeforeCompletion, shown.Count, "Old completion must not consume a newer preparation's reveal.");
+                        host.CompletePendingReveal();
+                        CollectionAssert.Contains(shown, (IntPtr)100);
+                    }
+                    else CollectionAssert.Contains(shown, (IntPtr)200);
+                    for (int i = 0; i < paths.Length; i++) Assert.AreEqual(paths[i], vm.Tabs[i].Path, "completion=" + completion + ", index=" + i);
+                }
+            }
+        }
+
+        private static string[] BoundarySavedPaths()
+        {
+            string[] paths = new string[255];
+            for (int i = 0; i < paths.Length; i++) paths[i] = @"C:\Saved" + i;
+            paths[42] = "ProgramsAndFeaturesPath";
+            paths[43] = "PowerOptionsPath";
+            return paths;
+        }
+
+        private sealed class BoundaryAsyncExplorer : MockExplorerService, IAsyncExplorerService
+        {
+            internal readonly System.Threading.Tasks.TaskCompletionSource<bool> Gate = new System.Threading.Tasks.TaskCompletionSource<bool>();
+            internal readonly System.Threading.Tasks.TaskCompletionSource<bool> Entered = new System.Threading.Tasks.TaskCompletionSource<bool>();
+            internal Func<string, System.Threading.Tasks.Task<bool>> Move;
+            public System.Threading.Tasks.Task<string> GetCurrentPathAsync(IntPtr hwnd) { return System.Threading.Tasks.Task.FromResult(GetCurrentPath(hwnd)); }
+            public System.Threading.Tasks.Task<bool> NavigateAsync(IntPtr hwnd, string path)
+            {
+                System.Threading.Tasks.Task<bool> result = Move(path);
+                Entered.TrySetResult(true);
+                return result;
+            }
+            public System.Threading.Tasks.Task SelectItemsAsync(IntPtr hwnd, System.Collections.Generic.List<string> items)
+            {
+                return System.Threading.Tasks.Task.CompletedTask;
+            }
+        }
+
+        [TestMethod]
+        public async System.Threading.Tasks.Task FullRestore_ControlPanelNavigationFailureKeepsAllSavedPaths()
+        {
+            foreach (bool rebind in new[] { false, true })
+            foreach (int mode in new[] { 0, 1, 2, 3 })
+            {
+                string directory = Path.Combine(Path.GetTempPath(), "KjTabBar-FullRestore-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(directory);
+                try
+                {
+                    string initial = rebind ? @"C:\Initial" : "PowerOptionsPath";
+                    string currentNewHost = "AllControlPanelPath";
+                    string currentOriginal = initial;
+                    bool opened = false;
+                    int navigations = 0;
+                    MockExplorerService explorer = new MockExplorerService {
+                        GetCurrentPathFunc = h => h == (IntPtr)200 ? currentNewHost : currentOriginal,
+                        IsControlPanelPathFunc = p => p == "AllControlPanelPath" || p == "PowerOptionsPath" || p == "ProgramsAndFeaturesPath",
+                        NavigateFunc = (h, p) => {
+                            navigations++;
+                            if (mode == 1) throw new TimeoutException("Injected failure");
+                            if (mode == 3) { if (h == (IntPtr)200) currentNewHost = p; else currentOriginal = p; }
+                            return mode >= 2;
+                        }
+                    };
+                    string[] snapshot = new string[258];
+                    snapshot[0] = "kjtb-tabs-v1"; snapshot[1] = "42"; snapshot[2] = "ProgramsAndFeaturesPath";
+                    for (int i = 0; i < 255; i++) snapshot[i + 3] = @"C:\Saved" + i;
+                    snapshot[45] = snapshot[2];
+                    ProtectedTextStorage.SaveLines(Path.Combine(directory, "tabs.snapshot.txt"), snapshot);
+                    ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+                    using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, initial))
+                    {
+                        ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                            explorer, tracking, new TabPersistenceService(Path.Combine(directory, "tabs.txt")),
+                            h => "", h => {}, h => {}, h => {}, () => null, w => {});
+                        service.InitializeTabsForNewWindow(vm, initial, true, true);
+                        ExplorerHostSwitchCoordinator host = new ExplorerHostSwitchCoordinator(
+                            explorer, tracking, (target, h) => { target.SetExplorerHwnd(h); return true; },
+                            h => {}, (h, r) => {}, h => {}, h => true,
+                            () => opened ? new System.Collections.Generic.List<IntPtr> { (IntPtr)100, (IntPtr)200 }
+                                         : new System.Collections.Generic.List<IntPtr> { (IntPtr)100 },
+                            explorer.GetCurrentPath, p => { opened = true; return true; }, ms => {});
+                        await service.RestorePersistedSpecialActiveTabHostAsync(host, vm, vm.ActiveTab);
+                        Assert.AreEqual(1, navigations);
+                        if (mode == 2)
+                            typeof(TabNavigationStateTracker).GetField("_navigateStartTime",
+                                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                                .SetValue(vm.NavigationTracker, DateTime.UtcNow.AddSeconds(-6));
+                        vm.NavigationTracker.InvalidateCache();
+                        await vm.SyncWithExplorerAsync();
+                        vm.NavigationTracker.InvalidateCache();
+                        await vm.SyncWithExplorerAsync();
+                        Assert.IsNull(vm.NavigationTracker.NavigatingToPath);
+                        Assert.AreEqual(255, vm.Tabs.Count);
+                        Assert.AreEqual(42, vm.ActiveTabIndex);
+                        for (int i = 0; i < 255; i++) Assert.AreEqual(snapshot[i + 3], vm.Tabs[i].Path,
+                            "rebind=" + rebind + ", mode=" + mode + ", index=" + i);
+                    }
+                }
+                finally { Directory.Delete(directory, true); }
+            }
+        }
+
+
+        [TestMethod]
+        public void InitialLaunch_AtTabLimitRestoresSavedSelectionWithoutLosingPaths()
+        {
+            foreach (int count in new[] { 254, 255 })
+            foreach (bool existing in new[] { false, true })
+            foreach (bool reuse in new[] { false, true })
+            {
+                VerifyInitialLaunchTabLimit(count, existing, reuse, 0);
+            }
+        }
+
+        [TestMethod]
+        public void InitialLaunch_AtTabLimitPreservesSavedPathsAfterNavigationFailure()
+        {
+            foreach (int failure in new[] { 1, 2, 3 })
+                VerifyInitialLaunchTabLimit(255, false, true, failure);
+        }
+
+        [TestMethod]
+        public void InitialLaunch_AtTabLimitPreservesControlPanelSelectionWhenHostRestoreFails()
+        {
+            VerifyInitialLaunchTabLimit(255, false, true, 0, true);
+        }
+
+
+        [TestMethod]
+        public async System.Threading.Tasks.Task FullRestore_LateCompletionProtectsOnlyCurrentRestore()
+        {
+            foreach (int change in new[] { 0, 1, 2 })
+            {
+                System.Threading.Tasks.TaskCompletionSource<bool> pending = new System.Threading.Tasks.TaskCompletionSource<bool>();
+                DeferredRestoreExplorer explorer = new DeferredRestoreExplorer();
+                explorer.Current = "PowerOptionsPath";
+                explorer.IsControlPanelPathFunc = p => p == "PowerOptionsPath" || p == "ProgramsAndFeaturesPath";
+                explorer.Move = p => {
+                    if (p == "ProgramsAndFeaturesPath") return pending.Task;
+                    explorer.Current = p;
+                    return System.Threading.Tasks.Task.FromResult(true);
+                };
+                ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, explorer.Current))
+                {
+                    string[] paths = new string[255];
+                    for (int i = 0; i < paths.Length; i++) paths[i] = @"C:\Saved" + i;
+                    paths[42] = "ProgramsAndFeaturesPath";
+                    vm.RestoreTabs(paths, paths[42], 42, true, true);
+                    ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                        explorer, tracking, TestTabPersistenceFactory.Create(), h => "", h => {}, h => {}, h => {}, () => null, w => {});
+                    ExplorerHostSwitchCoordinator host = new ExplorerHostSwitchCoordinator(
+                        explorer, tracking, (target, h) => { target.SetExplorerHwnd(h); return true; },
+                        h => {}, (h, r) => {}, h => {}, h => true,
+                        () => new System.Collections.Generic.List<IntPtr>(), explorer.GetCurrentPath, p => false, ms => {});
+                    System.Threading.Tasks.Task restoring = service.RestorePersistedSpecialActiveTabHostAsync(host, vm, vm.ActiveTab);
+                    await explorer.NavigationEntered.Task;
+                    if (change == 2) vm.SetExplorerHwnd((IntPtr)300);
+                    else if (change == 1) await vm.SelectTabCoreAsync(vm.Tabs[0]);
+                    pending.SetResult(false);
+                    await restoring;
+                    Assert.AreEqual(change == 0, vm.ShouldKeepImportedSelection("PowerOptionsPath"), "Protect only the current restore.");
+                    Assert.AreEqual(change == 1 ? 0 : 42, vm.ActiveTabIndex);
+                    Assert.AreEqual(change == 2 ? (IntPtr)300 : (IntPtr)100, vm.ExplorerHwnd);
+                }
+            }
+        }
+
+        private sealed class DeferredRestoreExplorer : MockExplorerService, IAsyncExplorerService
+        {
+            internal string Current;
+            internal Func<string, System.Threading.Tasks.Task<bool>> Move;
+            internal readonly System.Threading.Tasks.TaskCompletionSource<bool> NavigationEntered = new System.Threading.Tasks.TaskCompletionSource<bool>();
+            public override string GetCurrentPath(IntPtr hwnd) { return Current; }
+            public System.Threading.Tasks.Task<string> GetCurrentPathAsync(IntPtr hwnd) { return System.Threading.Tasks.Task.FromResult(Current); }
+            public System.Threading.Tasks.Task<bool> NavigateAsync(IntPtr hwnd, string path)
+            {
+                System.Threading.Tasks.Task<bool> result = Move(path);
+                NavigationEntered.TrySetResult(true);
+                return result;
+            }
+            public System.Threading.Tasks.Task SelectItemsAsync(IntPtr hwnd, System.Collections.Generic.List<string> items)
+            {
+                return System.Threading.Tasks.Task.CompletedTask;
+            }
+        }
+
+        private static void VerifyInitialLaunchTabLimit(int count, bool existing, bool reuse, int failure, bool controlPanel = false)
+        {
+            string directory = Path.Combine(Path.GetTempPath(), "KjTabBar-Limit-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                string file = Path.Combine(directory, "tabs.txt");
+                string[] snapshot = new string[count + 3];
+                snapshot[0] = "kjtb-tabs-v1";
+                snapshot[1] = "42";
+                snapshot[2] = controlPanel ? "AllControlPanelPath" : @"C:\Saved42";
+                for (int i = 0; i < count; i++) snapshot[i + 3] = @"C:\Saved" + i;
+                snapshot[45] = snapshot[2];
+                ProtectedTextStorage.SaveLines(Path.Combine(directory, "tabs.snapshot.txt"), snapshot);
+                string initial = existing ? @"C:\Saved17" : @"C:\NewDestination";
+                string current = initial;
+                string requested = null;
+                MockExplorerService explorer = new MockExplorerService {
+                    GetCurrentPathFunc = h => current,
+                    IsControlPanelPathFunc = p => p == "AllControlPanelPath",
+                    NavigateFunc = (h, p) => {
+                        requested = p;
+                        if (failure == 2) throw new TimeoutException("Injected navigation failure");
+                        if (failure == 1) return false;
+                        if (failure == 0) current = p;
+                        return true;
+                    }
+                };
+                using (TabBarViewModel target = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, initial))
+                {
+                    ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                        explorer, new ExplorerWindowTrackingState(), new TabPersistenceService(file));
+                    service.InitializeTabsForNewWindow(target, initial, true, reuse);
+                    int selected = existing ? 17 : count == 255 ? 42 : count;
+                    Assert.AreEqual(existing || count == 255 ? count : count + 1, target.Tabs.Count);
+                    Assert.AreEqual(selected, target.ActiveTabIndex);
+                    Assert.IsNotNull(target.ActiveTab);
+                    Assert.AreEqual(count == 255 && !existing && !controlPanel ? snapshot[2] : null, requested);
+                    if (controlPanel)
+                    {
+                        Assert.IsTrue(target.IsRestoringControlPanelHost);
+                        target.CancelPersistedHostRestoration(current);
+                        Assert.IsFalse(target.IsRestoringControlPanelHost);
+                    }
+                    target.NavigationTracker.InvalidateCache();
+                    target.SyncWithExplorerAsync().GetAwaiter().GetResult();
+                    if (failure == 3)
+                    {
+                        target.TimeoutPendingNavigation();
+                        target.NavigationTracker.InvalidateCache();
+                        target.SyncWithExplorerAsync().GetAwaiter().GetResult();
+                    }
+                    Assert.AreEqual(selected, target.ActiveTabIndex);
+                    for (int i = 0; i < count; i++) Assert.AreEqual(snapshot[i + 3], target.Tabs[i].Path);
+                }
+            }
+            finally { Directory.Delete(directory, true); }
+        }
+        [TestMethod]
         public void FailedInitialNavigation_DoesNotOverwriteSavedTabOnNextSync()
         {
             string file = Path.Combine(Path.GetTempPath(), "KjTabBar-Rejected-" + Guid.NewGuid().ToString("N") + ".txt");
@@ -1170,7 +1747,7 @@ namespace UnitTestProject
         }
 
         [TestMethod]
-        public void InitializeTabsForNewWindow_AddsExplicitInitialPathAsNewTab_WhenItAlreadyExistsInSavedTabs()
+        public void InitializeTabsForNewWindow_SelectsExistingInitialPath_WhenItAlreadyExistsInSavedTabs()
         {
             string tabsFilePath = Path.Combine(
                 Path.GetTempPath(),
@@ -1196,10 +1773,10 @@ namespace UnitTestProject
 
                 service.InitializeTabsForNewWindow(viewModel, @"C:\DesktopLaunch", true);
 
-                Assert.AreEqual(3, viewModel.Tabs.Count);
+                Assert.AreEqual(2, viewModel.Tabs.Count);
+                Assert.AreEqual(@"C:\SavedA", viewModel.Tabs[0].Path);
                 Assert.AreEqual(@"C:\DesktopLaunch", viewModel.Tabs[1].Path);
-                Assert.AreEqual(@"C:\DesktopLaunch", viewModel.Tabs[2].Path);
-                Assert.AreSame(viewModel.Tabs[2], viewModel.ActiveTab);
+                Assert.AreSame(viewModel.Tabs[1], viewModel.ActiveTab);
                 Assert.AreEqual(@"C:\DesktopLaunch", viewModel.ActiveTab.Path);
             }
             finally

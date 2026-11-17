@@ -21,6 +21,130 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void Evaluate_TaskbarLaunch_RemainsIndependent()
+        {
+            AssertNonDesktopFolderRemainsIndependent();
+        }
+
+        [TestMethod]
+        public void Evaluate_OtherApplicationLaunch_RemainsIndependent()
+        {
+            AssertNonDesktopFolderRemainsIndependent();
+        }
+
+        [TestMethod]
+        public void Evaluate_ExplorerOpenInNewWindow_RemainsIndependent()
+        {
+            AssertNonDesktopFolderRemainsIndependent();
+        }
+
+        private void AssertNonDesktopFolderRemainsIndependent()
+        {
+            // All three sources arrive without desktop-origin evidence.
+            // A matching desktop shortcut must not override that evidence.
+            foreach (bool hasShortcut in new[] { false, true })
+            {
+                ExplorerWindowContext context = new ExplorerWindowContext
+                {
+                    CurrentPath = @"C:\ExternalFolder",
+                    HasValidTarget = true,
+                    IsDesktopCandidate = false,
+                    IsDesktopShortcutTargetFunc = path => hasShortcut
+                };
+                string resolvedPath;
+                bool allowSpecialPath;
+                Assert.AreEqual(AbsorptionAction.Ignore,
+                    ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath));
+                Assert.AreEqual(context.CurrentPath, resolvedPath);
+                Assert.IsFalse(allowSpecialPath);
+            }
+        }
+
+        [TestMethod]
+        public void Evaluate_ReopenedExternalWindow_WaitsForPathInsteadOfHomeTitle()
+        {
+            _explorerService.IsTransientShellPlaceholderPathFunc = path => path == _explorerService.HomeFolderPath;
+            ExplorerWindowContext context = new ExplorerWindowContext
+            {
+                CurrentPath = null,
+                TitleVirtualPath = _explorerService.HomeFolderPath,
+                HasValidTarget = false,
+                IsDesktopCandidate = false
+            };
+
+            string resolvedPath;
+            bool allowSpecialPath;
+            Assert.AreEqual(AbsorptionAction.WaitAndRetryIncrement,
+                ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath));
+
+            context.CurrentRetryCount = 1;
+            context.CurrentPath = @"C:\ExternalFolder";
+            Assert.AreEqual(AbsorptionAction.CreateNewTabBar,
+                ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath));
+            Assert.AreEqual(context.CurrentPath, resolvedPath);
+        }
+
+        [TestMethod]
+        public void Evaluate_ExistingTarget_WaitsForShortcutPathInsteadOfHomeTitle()
+        {
+            _explorerService.IsTransientShellPlaceholderPathFunc = path => path == _explorerService.HomeFolderPath;
+            ExplorerWindowContext context = new ExplorerWindowContext
+            {
+                CurrentPath = null,
+                TitleVirtualPath = _explorerService.HomeFolderPath,
+                HasValidTarget = true,
+                IsDesktopInteractiveCandidate = false
+            };
+
+            string resolvedPath;
+            bool allowSpecialPath;
+            for (int retry = 0; retry < ExplorerAbsorptionDecisionMaker.MaxAbsorbPathRetryCount - 1; retry++)
+            {
+                context.CurrentRetryCount = retry;
+                Assert.AreEqual(AbsorptionAction.WaitAndRetryIncrement,
+                    ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath));
+            }
+
+            context.CurrentPath = @"C:\ExternalFolder\Assets";
+            Assert.AreEqual(AbsorptionAction.Ignore,
+                ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath));
+            Assert.AreEqual(context.CurrentPath, resolvedPath);
+
+            context.CurrentPath = _explorerService.HomeFolderPath;
+            context.CurrentRetryCount = 0;
+            Assert.AreEqual(AbsorptionAction.Ignore,
+                ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath));
+
+            context.CurrentPath = null;
+            context.CurrentRetryCount = ExplorerAbsorptionDecisionMaker.MaxAbsorbPathRetryCount - 1;
+            Assert.AreEqual(AbsorptionAction.Ignore,
+                ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath));
+            Assert.AreEqual(_explorerService.HomeFolderPath, resolvedPath);
+        }
+
+        [TestMethod]
+        public void Evaluate_ReopenedHome_UsesConfirmedPathOrBoundedTitleFallback()
+        {
+            _explorerService.IsTransientShellPlaceholderPathFunc = path => path == _explorerService.HomeFolderPath;
+            ExplorerWindowContext context = new ExplorerWindowContext
+            {
+                CurrentPath = _explorerService.HomeFolderPath,
+                TitleVirtualPath = _explorerService.HomeFolderPath,
+                HasValidTarget = false
+            };
+
+            string resolvedPath;
+            bool allowSpecialPath;
+            Assert.AreEqual(AbsorptionAction.CreateNewTabBar,
+                ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath));
+
+            context.CurrentPath = null;
+            context.CurrentRetryCount = ExplorerAbsorptionDecisionMaker.MaxAbsorbPathRetryCount - 1;
+            Assert.AreEqual(AbsorptionAction.CreateNewTabBar,
+                ExplorerAbsorptionDecisionMaker.Evaluate(context, _explorerService, out resolvedPath, out allowSpecialPath));
+        }
+
+        [TestMethod]
         public void Evaluate_WaitAndRetry_For_UnresolvedControlPanel()
         {
             ExplorerWindowContext context = new ExplorerWindowContext

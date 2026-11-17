@@ -13,7 +13,7 @@ namespace UnitTestProject
         private const string ProgramsAndFeaturesPath = "::{26EE0668-A00A-44D7-9371-BEB064C98683}\\0\\::{7B81BE6A-CE2B-4676-A29E-EB907A5126C5}";
         private const string PowerOptionsPath = "::{26EE0668-A00A-44D7-9371-BEB064C98683}\\0\\::{025A5937-A6BE-4686-A844-36FE4BEC8B6D}";
 
-        private ShellPathNormalizer CreateNormalizer(Func<string, string> getFolderNameInternal = null)
+        private ShellPathNormalizer CreateNormalizer(Func<string, string> getFolderNameInternal = null, Func<DateTime> utcNow = null)
         {
             ShellLocationNameResolver locationResolver = new ShellLocationNameResolver(
                 AllControlPanelPath,
@@ -35,8 +35,64 @@ namespace UnitTestProject
                 () => "PC",
                 () => @"C:\Users\TestUser",
                 locationResolver,
-                getFolderNameInternal ?? (path => null)
+                getFolderNameInternal ?? (path => null),
+                utcNow
             );
+        }
+
+        [TestMethod]
+        public void ControlPanelCache_RetriesTransientFailureWithoutLosingKnownItems()
+        {
+            DateTime now = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            bool fail = true;
+            int calls = 0;
+            string recoveredPath = null;
+            ShellPathNormalizer normalizer = CreateNormalizer(path =>
+            {
+                calls++;
+                if (fail) throw new TimeoutException("Transient Shell failure");
+                recoveredPath = path;
+                return "Recovered item " + path;
+            }, () => now);
+
+            Assert.IsTrue(normalizer.IsControlPanelItemPath(PowerOptionsPath));
+            Assert.IsTrue(calls > 0, "The Windows Control Panel namespace must contain an item.");
+            int failedCalls = calls;
+            fail = false;
+            Assert.IsTrue(normalizer.IsControlPanelItemPath(ProgramsAndFeaturesPath));
+            Assert.AreEqual(failedCalls, calls, "Do not retry on every lookup.");
+            now = now.AddMinutes(1);
+            normalizer.EnsureControlPanelItemTitleMap();
+            Assert.IsTrue(calls > failedCalls);
+            Assert.AreEqual(recoveredPath, normalizer.FindControlPanelItemPathByTitle("Recovered item " + recoveredPath));
+            int successfulCalls = calls;
+            now = now.AddMinutes(1);
+            normalizer.EnsureControlPanelItemTitleMap();
+            Assert.AreEqual(successfulCalls, calls, "A complete map remains cached.");
+        }
+
+        [TestMethod]
+        public void KnownPaths_PreserveFoldersNamedLikeCplCommands()
+        {
+            ShellPathNormalizer normalizer = CreateNormalizer();
+            string root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "KjtbCplFolders-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                foreach (string name in new[] { "appwiz.cpl", "powercfg.cpl" })
+                {
+                    string path = System.IO.Path.Combine(root, name);
+                    System.IO.Directory.CreateDirectory(path);
+                    Assert.AreEqual(path, normalizer.NormalizeKnownPath(path));
+                    Assert.AreEqual(path, normalizer.GetNavigableShellPath(path));
+                    Assert.IsFalse(normalizer.IsControlPanelPath(path));
+                    string remote = @"\\server\share\" + name;
+                    Assert.AreEqual(remote, normalizer.NormalizeKnownPath(remote));
+                    Assert.IsFalse(normalizer.IsControlPanelPath(remote));
+                }
+                Assert.AreEqual(PowerOptionsPath, normalizer.NormalizeShellPath(@"C:\Windows\System32\powercfg.cpl"));
+                Assert.AreEqual(ProgramsAndFeaturesPath, normalizer.NormalizeShellPath("control.exe /name Microsoft.ProgramsAndFeatures"));
+            }
+            finally { System.IO.Directory.Delete(root, true); }
         }
 
         [TestMethod]

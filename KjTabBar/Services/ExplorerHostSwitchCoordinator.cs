@@ -20,6 +20,8 @@ namespace KjTabBar.Services
         private string _preparedOriginalPath;
         private long _preparedFailureVersion;
         private bool _isPreparing;
+        internal bool HostRollbackFailed { get; private set; }
+        internal long PreparationVersion { get; private set; }
         private Func<bool> _isOperationCurrent;
 
         private bool CanApplyOperation() => _isOperationCurrent == null || _isOperationCurrent();
@@ -133,6 +135,8 @@ namespace KjTabBar.Services
         {
             if (_isPreparing) return false;
             _isPreparing = true;
+            PreparationVersion++;
+            HostRollbackFailed = false;
             _isOperationCurrent = isOperationCurrent;
             try
             {
@@ -558,9 +562,12 @@ namespace KjTabBar.Services
             viewModel.IsRestoringControlPanelHost = true;
             try
             {
+                if (AcceptanceTestHooks.RejectRollback())
+                    throw new InvalidOperationException("Acceptance test host rollback rejection.");
                 if (original == IntPtr.Zero || (_isWindow != null && !_isWindow(original)))
                     throw new InvalidOperationException("The original explorer host is no longer available.");
                 IntPtr failedHost = viewModel.ExplorerHwnd;
+                bool preserveSelection = viewModel.IsHostLocationUnconfirmed || viewModel.ShouldKeepImportedSelection(originalPath);
                 AlignHostBeforeRebind(original,
                     hasRect ? (NativeMethods.RECT?)rect : null);
                 if (!RebindWithHostType(viewModel, original, originalIsControlPanel))
@@ -572,7 +579,7 @@ namespace KjTabBar.Services
                 _pendingRevealExplorerHwnd = original;
                 _pendingRevealHasOriginalRect = hasRect;
                 _pendingRevealOriginalRect = rect;
-                if (!string.IsNullOrEmpty(originalPath) &&
+                if (!preserveSelection && !string.IsNullOrEmpty(originalPath) &&
                     (viewModel.ActiveTab == null || !viewModel.PathEquals(viewModel.ActiveTab.Path, originalPath)))
                 {
                     TabItemViewModel source = viewModel.FindTabByPath(originalPath);
@@ -587,12 +594,21 @@ namespace KjTabBar.Services
             }
             catch (Exception ex)
             {
+                HostRollbackFailed = true;
+                viewModel.SuspendSynchronizationAfterHostRollbackFailure();
                 AppLogger.LogError("ExplorerHostSwitchCoordinator", "Failed to roll back the explorer host; tab synchronization is suspended.", ex);
             }
         }
         public void CompletePendingReveal()
         {
-            RestoreHostAfterFailedNavigation();
+            CompletePendingReveal(true);
+        }
+
+        internal void CompletePendingReveal(bool allowRollback)
+        {
+            // Stale completion still releases its hidden window, but owns no rollback.
+            if (allowRollback) RestoreHostAfterFailedNavigation();
+            else _preparedViewModel = null;
             if (_pendingRevealExplorerHwnd == IntPtr.Zero)
             {
                 return;

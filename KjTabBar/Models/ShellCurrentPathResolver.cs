@@ -31,6 +31,9 @@ namespace KjTabBar.Models
 
         public string ResolveWithFolderPathReader(string locationUrl, string locationName, Func<string> readFolderPath)
         {
+            string filePath = GetFileUrlPath(locationUrl);
+            if (filePath != null) return filePath;
+
             string mappedVirtualPath = _mapLocationNameToKnownShellPath(locationName);
             if (!string.IsNullOrEmpty(mappedVirtualPath) && !_isControlPanelRootPath(mappedVirtualPath))
             {
@@ -40,8 +43,17 @@ namespace KjTabBar.Models
             return ResolveCore(locationUrl, mappedVirtualPath, readFolderPath());
         }
 
+        private static string GetFileUrlPath(string locationUrl)
+        {
+            Uri uri;
+            return Uri.TryCreate(locationUrl, UriKind.Absolute, out uri) && uri.IsFile ? uri.LocalPath : null;
+        }
+
         private string ResolveCore(string locationUrl, string mappedVirtualPath, string folderPath)
         {
+            string filePath = GetFileUrlPath(locationUrl);
+            if (filePath != null) return filePath;
+
             if (!string.IsNullOrEmpty(mappedVirtualPath) && !_isControlPanelRootPath(mappedVirtualPath))
             {
                 return mappedVirtualPath;

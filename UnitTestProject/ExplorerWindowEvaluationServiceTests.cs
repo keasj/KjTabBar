@@ -8,6 +8,77 @@ namespace UnitTestProject
     public class ExplorerWindowEvaluationServiceTests
     {
         [TestMethod]
+        public void Evaluate_FileUrlControlPanelNamesKeepFilesystemDestination()
+        {
+            using (ExplorerManager manager = new ExplorerManager())
+            {
+                foreach (string name in new[] { "Control Panel", manager.GetLocalizedControlPanelTitle(), "Power Options" })
+                foreach (string prefix in new[] { @"C:\Data\", @"\\server\share\" })
+                foreach (bool hasTarget in new[] { false, true })
+                {
+                    string expected = prefix + name;
+                    string titlePath = manager.MapLocationNameToKnownShellPath(name);
+                    Assert.IsFalse(string.IsNullOrEmpty(titlePath), name);
+                    ShellCurrentPathResolver resolver = new ShellCurrentPathResolver(
+                        manager.MapLocationNameToKnownShellPath, manager.IsControlPanelPath,
+                        manager.IsControlPanelRootPath, manager.NormalizeShellNamespacePath, p => true);
+                    CollisionExplorer explorer = new CollisionExplorer(manager);
+                    explorer.GetCurrentPathFunc = h => resolver.ResolveWithFolderPathReader(
+                        new Uri(expected).AbsoluteUri, name, () => expected);
+                    ExplorerWindowEvaluationService service = new ExplorerWindowEvaluationService(explorer, new DesktopPathClassifier(explorer));
+                    ExplorerWindowEvaluationResult result = service.Evaluate(
+                        new ExplorerWindowEvaluationInput { ExplorerHwnd = (IntPtr)1, HasValidTarget = hasTarget },
+                        h => titlePath, p => { Assert.Fail("A filesystem folder must not search for a CP host."); return false; }, null, null);
+                    Assert.AreEqual(expected, result.ResolvedPath);
+                    Assert.IsFalse(result.IsControlPanelPath);
+                    Assert.IsFalse(result.AllowSpecialPath);
+                    Assert.AreEqual(hasTarget ? AbsorptionAction.Ignore : AbsorptionAction.CreateNewTabBar, result.Action);
+                }
+            }
+        }
+
+
+        [TestMethod]
+        public void Evaluate_ControlPanelTitleFallbackStillHandlesStaleAndVirtualPaths()
+        {
+            using (ExplorerManager manager = new ExplorerManager())
+            {
+                foreach (string name in new[] { "Control Panel", "Power Options" })
+                foreach (string current in new[] { null, @"C:\OldItem", manager.HomeFolderPath, manager.AllControlPanelPath })
+                {
+                    CollisionExplorer explorer = new CollisionExplorer(manager);
+                    explorer.GetCurrentPathFunc = h => current;
+                    string titlePath = manager.MapLocationNameToKnownShellPath(name);
+                    ExplorerWindowEvaluationResult result = new ExplorerWindowEvaluationService(explorer, new DesktopPathClassifier(explorer))
+                        .Evaluate(new ExplorerWindowEvaluationInput { ExplorerHwnd = (IntPtr)1, HasValidTarget = true, IsControlPanelTabLaunchCandidate = true },
+                            h => titlePath, p => true, null, null);
+                    Assert.AreEqual(titlePath, result.ResolvedPath, name + ": " + current);
+                    Assert.IsTrue(result.IsControlPanelPath);
+                    Assert.IsTrue(result.AllowSpecialPath);
+                }
+            }
+        }
+
+        private sealed class CollisionExplorer : MockExplorerService, IExplorerService
+        {
+            private readonly ExplorerManager _manager;
+            public CollisionExplorer(ExplorerManager manager)
+            {
+                _manager = manager;
+                AllControlPanelPath = manager.AllControlPanelPath;
+                IsControlPanelPathFunc = manager.IsControlPanelPath;
+                IsControlPanelRootPathFunc = manager.IsControlPanelRootPath;
+                IsTransientShellPlaceholderPathFunc = manager.IsTransientShellPlaceholderPath;
+                NormalizeShellNamespacePathFunc = manager.NormalizeShellNamespacePath;
+                NormalizeKnownPathFunc = manager.NormalizeKnownPath;
+            }
+            string IExplorerService.MapLocationNameToKnownShellPath(string name)
+            {
+                return _manager.MapLocationNameToKnownShellPath(name);
+            }
+        }
+
+        [TestMethod]
         public void Evaluate_ReuseIsLimitedToDesktopLaunches()
         {
             MockExplorerService explorer = new MockExplorerService();
@@ -28,7 +99,7 @@ namespace UnitTestProject
             input.HasValidTarget = false;
             Assert.IsTrue(service.Evaluate(input, null, null, null, null).ReuseExistingTab, "Desktop startup must reuse restored tabs.");
             input.IsDesktopCandidate = false;
-            Assert.IsFalse(service.Evaluate(input, null, null, null, null).ReuseExistingTab);
+            Assert.IsTrue(service.Evaluate(input, null, null, null, null).ReuseExistingTab, "Reopening without a target preserves restored tabs.");
         }
 
         [TestMethod]

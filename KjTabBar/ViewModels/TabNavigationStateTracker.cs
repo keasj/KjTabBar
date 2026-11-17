@@ -18,6 +18,9 @@ namespace KjTabBar.ViewModels
         private string _cachedExplorerPath;
         private DateTime _lastExplorerHostSwitchUtc = DateTime.MinValue;
 
+        internal long HostGeneration { get; private set; }
+        internal double HostSwitchAgeMilliseconds => _lastExplorerHostSwitchUtc == DateTime.MinValue
+            ? -1 : (DateTime.UtcNow - _lastExplorerHostSwitchUtc).TotalMilliseconds;
         public string NavigatingToPath => _navigatingToPath;
         internal TabItemViewModel NavigationSourceTab => _navigationSourceTab;
         public DateTime NavigateStartTime => _navigateStartTime;
@@ -138,6 +141,7 @@ namespace KjTabBar.ViewModels
 
         public void NotifyExplorerHostChanged()
         {
+            HostGeneration++;
             // Requests belong to the old host. Time alone does not prove completion.
             ClearCancelled();
             _lastExplorerHostSwitchUtc = DateTime.UtcNow;
@@ -147,6 +151,7 @@ namespace KjTabBar.ViewModels
 
         public bool IsExplorerHostSwitchGraceActive(DateTime nowUtc)
         {
+            if (KjTabBar.Services.AcceptanceTestHooks.MarkerActive("grace")) return true;
             if (_lastExplorerHostSwitchUtc == DateTime.MinValue)
             {
                 return false;

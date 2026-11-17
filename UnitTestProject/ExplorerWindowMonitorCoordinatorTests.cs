@@ -13,6 +13,48 @@ namespace UnitTestProject
     public class ExplorerWindowMonitorCoordinatorTests
     {
         [TestMethod]
+        public void ExternalLaunch_WithExistingTarget_RemainsVisibleWithoutDesktopEvidence()
+        {
+            foreach (bool receivesCreate in new[] { true, false })
+            {
+                ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
+                int moves = 0;
+                int requests = 0;
+                IntPtr source = (IntPtr)123;
+                using (TabBarViewModel target = new TabBarViewModel(
+                    (IntPtr)200, new MockUserSettings(), new MockExplorerService()))
+                {
+                    ExplorerWindowMonitorCoordinator coordinator = new ExplorerWindowMonitorCoordinator(
+                        new TabBarRegistry(), tracking, new DesktopForegroundTracker(), CreateLaunchTracker(tracking),
+                        hwnd => "CabinetWClass", (hwnd, flags) => hwnd,
+                        hwnd => new NativeMethods.RECT { Left = 100, Top = 100, Right = 900, Bottom = 700 },
+                        hwnd => moves++, null, () => DateTime.UtcNow, hwnd => false);
+                    if (receivesCreate)
+                    {
+                        coordinator.HandleCreateEvent(source, () => target);
+                        Assert.AreEqual(0, moves);
+                        Assert.AreEqual(1, coordinator.PrepareProcessRequests(new List<IntPtr> { source }, () => target).Count);
+                    }
+                    coordinator.HandleShowEvent(source, () => target, null, () => requests++);
+                    Assert.AreEqual(0, moves);
+                    Assert.AreEqual(0, requests, "Independent windows must not schedule absorption.");
+                    Assert.IsFalse(tracking.HiddenPendingAbsorb.ContainsKey(source));
+                    Assert.IsFalse(tracking.DesktopLaunchCandidates.Contains(source));
+                    Assert.IsFalse(tracking.HiddenOriginalRects.ContainsKey(source));
+                    coordinator.HandleShowEvent(source, () => target, null, () => requests++);
+                    Assert.AreEqual(0, requests, "Duplicate notifications must coalesce.");
+
+                    tracking.RegisterExplicitIndependentLaunchRequest();
+                    coordinator.HandleCreateEvent((IntPtr)456, () => target);
+                    coordinator.HandleShowEvent((IntPtr)456, () => target, null, () => requests++);
+                    Assert.IsTrue(tracking.ExplicitIndependentLaunchWindows.Contains((IntPtr)456));
+                    Assert.AreEqual(0, moves);
+                    Assert.AreEqual(0, requests);
+                }
+            }
+        }
+
+        [TestMethod]
         public void PrepareProcessRequests_EvaluatesParkedHostReshownFromDesktop()
         {
             ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState();
@@ -29,7 +71,103 @@ namespace UnitTestProject
                 new List<IntPtr> { (IntPtr)10, (IntPtr)20 }, () => target);
 
             Assert.IsTrue(requests.Exists(request => request.ExplorerHwnd == (IntPtr)10),
-                "A desktop-reshown parked host must not remain hidden and excluded from processing.");
+                "An externally reshown parked host must not remain hidden and excluded from processing.");
+        }
+
+        [TestMethod]
+        public void FailedHostRollback_MissingOriginal_RemainsVisibleOnShow()
+        {
+            VerifyFailedRollbackShow(true);
+        }
+
+        [TestMethod]
+        public void FailedHostRollback_RejectedRebind_RemainsVisibleOnShow()
+        {
+            VerifyFailedRollbackShow(false);
+        }
+
+        private void VerifyFailedRollbackShow(bool missingOriginal)
+        {
+            IntPtr original = (IntPtr)100, replacement = (IntPtr)200;
+            bool launched = false, navigationFailed = false, allowNavigate = false, visible = false;
+            int rollbackAttempts = 0, reveals = 0, hides = 0;
+            MockExplorerService explorer = new MockExplorerService();
+            string current = explorer.AllControlPanelPath;
+            explorer.GetCurrentPathFunc = h => h == original ? @"C:\A" : current;
+            explorer.IsControlPanelPathFunc = p => p == explorer.AllControlPanelPath || p == explorer.PowerOptionsPath;
+            explorer.IsControlPanelRootPathFunc = p => p == explorer.AllControlPanelPath;
+            explorer.NavigateFunc = (h, p) =>
+            {
+                if (!allowNavigate) { navigationFailed = true; return false; }
+                current = p;
+                return true;
+            };
+            ExplorerWindowTrackingState tracking = new ExplorerWindowTrackingState(
+                h => true, h => { }, h => { }, h => null);
+            ExplorerHostSwitchCoordinator host = new ExplorerHostSwitchCoordinator(
+                explorer, tracking, (vm, h) =>
+                {
+                    if (h == original) { rollbackAttempts++; return false; }
+                    vm.SetExplorerHwnd(h);
+                    return true;
+                },
+                h => { Assert.AreEqual(replacement, h); reveals++; visible = true; },
+                (h, r) => { }, h => { }, h => !(missingOriginal && navigationFailed && h == original),
+                () => launched ? new List<IntPtr> { original, replacement } : new List<IntPtr> { original },
+                explorer.GetCurrentPath, h => (NativeMethods.RECT?)null,
+                p => { launched = true; return true; }, ms => { });
+            using (TabBarViewModel vm = new TabBarViewModel(original, new MockUserSettings(), explorer, @"C:\A"))
+            {
+                TabItemViewModel source = vm.ActiveTab;
+                TabItemViewModel target = new TabItemViewModel(explorer.PowerOptionsPath, "Power", explorer);
+                vm.Tabs.Add(target);
+                vm.SelectTabAsync(target, p => host.PrepareForPathAsync(vm, p, vm.IsPreparedTabOperationCurrent),
+                    host.CompletePendingReveal).GetAwaiter().GetResult();
+                Assert.IsTrue(navigationFailed);
+                Assert.IsTrue(host.HostRollbackFailed);
+                Assert.AreEqual(missingOriginal ? 0 : 1, rollbackAttempts);
+                Assert.AreEqual(replacement, vm.ExplorerHwnd);
+                Assert.AreEqual(1, reveals);
+                Assert.IsTrue(visible);
+                Assert.IsTrue(vm.IsRestoringControlPanelHost);
+                Assert.IsTrue(vm.IsHostLocationUnconfirmed);
+
+                TabBarRegistry registry = new TabBarRegistry();
+                TabBarWindow window = new TabBarWindow { DataContext = vm };
+                registry.Add(replacement, window);
+                ExplorerWindowMonitorCoordinator monitor = new ExplorerWindowMonitorCoordinator(
+                    registry, tracking, new DesktopForegroundTracker(), CreateLaunchTracker(tracking),
+                    h => "CabinetWClass", (h, flags) => replacement, h => null,
+                    h => Assert.Fail("The registered replacement must not be absorbed."), null, () => DateTime.UtcNow,
+                    h => visible, h => { hides++; visible = false; });
+                try
+                {
+                    // The out-of-context SHOW callback arrives after CompletePendingReveal returns.
+                    monitor.HandleShowEvent(replacement, () => vm, null);
+                    monitor.HandleShowEvent((IntPtr)201, () => vm, null);
+                    Assert.IsTrue(visible, "Failed rollback must leave the replacement available for a retry.");
+                    Assert.AreEqual(0, hides);
+                    vm.SyncWithExplorerAsync().GetAwaiter().GetResult();
+                    Assert.AreSame(source, vm.ActiveTab);
+                    Assert.AreEqual(@"C:\A", source.Path);
+                    Assert.AreEqual(explorer.PowerOptionsPath, target.Path);
+                    Assert.IsTrue(vm.IsHostLocationUnconfirmed, "SHOW must not release synchronization protection.");
+
+                    allowNavigate = true;
+                    vm.SelectTabAsync(target, p => host.PrepareForPathAsync(vm, p, vm.IsPreparedTabOperationCurrent),
+                        host.CompletePendingReveal).GetAwaiter().GetResult();
+                    vm.NavigationTracker.InvalidateCache();
+                    vm.SyncWithExplorerAsync().GetAwaiter().GetResult();
+                    monitor.HandleShowEvent(replacement, () => vm, null);
+                    Assert.IsTrue(visible);
+                    Assert.AreEqual(0, hides);
+                    Assert.AreSame(target, vm.ActiveTab);
+                    Assert.IsFalse(vm.IsHostLocationUnconfirmed);
+                    Assert.IsFalse(vm.IsRestoringControlPanelHost);
+                    Assert.AreEqual(@"C:\A", source.Path);
+                }
+                finally { registry.ClearAndCloseAll(); }
+            }
         }
 
         [TestMethod]
@@ -244,7 +382,7 @@ namespace UnitTestProject
             TabBarViewModel existing = new TabBarViewModel(
                 (IntPtr)30, new MockUserSettings(), new MockExplorerService());
             coordinator.HandleShowEvent((IntPtr)31, delegate { return existing; }, null, request);
-            Assert.AreEqual(1, requested, "Existing host absorption must retain its timing.");
+            Assert.AreEqual(1, requested, "Independent windows must not schedule absorption.");
         }
 
         [TestMethod]

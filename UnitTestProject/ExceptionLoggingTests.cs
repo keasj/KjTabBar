@@ -31,6 +31,14 @@ namespace UnitTestProject
             EnsureTestLogDirectory();
         }
 
+        [TestCleanup]
+        public void ResetTestLogDirectory()
+        {
+            // ClassCleanup can run after other test classes have finished.
+            try { AppLogger.Flush(); }
+            finally { AppLogger.SetLogDirectoryOverrideForTests(null); }
+        }
+
         [ClassCleanup]
         public static void CleanupTestLogDirectory()
         {
