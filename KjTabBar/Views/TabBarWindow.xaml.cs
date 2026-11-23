@@ -17,6 +17,7 @@ namespace KjTabBar.Views
     public partial class TabBarWindow : Window
     {
         public IExplorerService ExplorerService { get; set; }
+        internal Action<TabBarViewModel> CloseLastTab { get; set; }
         internal Action<TabBarViewModel> PersistTabState { get; set; }
         internal ExplorerWindowTrackingState WindowTrackingState { get; set; }
         internal ExplorerHostSwitchCoordinator ExplorerHostSwitchCoordinator { get; set; }
@@ -570,6 +571,11 @@ namespace KjTabBar.Views
             try
             {
                 ExplorerHostSwitchCoordinator coordinator = ExplorerHostSwitchCoordinator;
+                if (direction == 0 && vm.Tabs.Count == 1)
+                {
+                    CloseLastTab(vm);
+                    return;
+                }
                 await vm.CloseTabsAsync(startIndex, count,
                     coordinator != null ? new Func<string, Task<bool>>(path => coordinator.PrepareForPathAsync(vm, path, vm.IsPreparedTabOperationCurrent)) : null,
                     coordinator != null ? new Action(coordinator.CompletePendingReveal) : null);

@@ -194,6 +194,23 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void NewWindowTargetUsesOnlyOneRecentExplicitDesktopInvocation()
+        {
+            DateTime now = DateTime.UtcNow;
+            using (DesktopRepeatedLaunchService service = CreateService(null, clock: () => now))
+            {
+                Func<IntPtr, int, string> resolve = (source, child) => source == (IntPtr)10 && child == 20 ? Assets : null;
+                Assert.IsNull(service.TakeNewWindowTarget(resolve));
+                service.CaptureInvocation((IntPtr)10, -4, 20);
+                Assert.AreEqual(Assets, service.TakeNewWindowTarget(resolve)());
+                Assert.IsNull(service.TakeNewWindowTarget(resolve));
+                service.CaptureInvocation((IntPtr)10, -4, 20);
+                now = now.AddSeconds(3);
+                Assert.IsNull(service.TakeNewWindowTarget(resolve));
+            }
+        }
+
+        [TestMethod]
         public void PcInvocationFromDifferentFolder_RestoresMaximizedAndAddsDestination()
         {
             VerifyPcRestore(false, false, 1);

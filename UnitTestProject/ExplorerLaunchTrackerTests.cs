@@ -107,6 +107,21 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void TaskbarForegroundClearsRecentDesktopLaunch()
+        {
+            foreach (string taskbar in new string[] { "Shell_TrayWnd", "Shell_SecondaryTrayWnd" })
+            {
+                DesktopForegroundTracker tracker = new DesktopForegroundTracker();
+                tracker.Update((IntPtr)1, "SHELLDLL_DefView");
+                tracker.Update((IntPtr)2, "CabinetWClass");
+                tracker.Update((IntPtr)3, taskbar);
+                tracker.Update((IntPtr)4, "CabinetWClass");
+                Assert.IsFalse(tracker.WasDesktopForegroundRecently());
+                Assert.IsFalse(tracker.WasDesktopInteractiveForegroundRecently());
+            }
+        }
+
+        [TestMethod]
         public void TryRegisterDesktopLaunchCandidate_AddsInteractiveCandidate_AfterDesktopTransition()
         {
             ExplorerWindowTrackingState windowTracking = new ExplorerWindowTrackingState();

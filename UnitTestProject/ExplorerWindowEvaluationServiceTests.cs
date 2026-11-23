@@ -100,6 +100,17 @@ namespace UnitTestProject
             Assert.IsTrue(service.Evaluate(input, null, null, null, null).ReuseExistingTab, "Desktop startup must reuse restored tabs.");
             input.IsDesktopCandidate = false;
             Assert.IsTrue(service.Evaluate(input, null, null, null, null).ReuseExistingTab, "Reopening without a target preserves restored tabs.");
+
+            explorer.GetCurrentPathFunc = h => explorer.HomeFolderPath;
+            Assert.IsFalse(service.Evaluate(input, null, null, null, null).ReuseExistingTab,
+                "A normal Home launch must not force Home to be appended.");
+            input.IsDesktopCandidate = true;
+            Assert.IsFalse(service.Evaluate(input, null, null, null, null).ReuseExistingTab);
+            input.ResolveDesktopInvocation = () => @"C:\Windows\explorer.exe";
+            Assert.IsFalse(service.Evaluate(input, null, null, null, null).ReuseExistingTab);
+            input.ResolveDesktopInvocation = () => explorer.HomeFolderPath;
+            Assert.IsTrue(service.Evaluate(input, null, null, null, null).ReuseExistingTab,
+                "A desktop launch targeting Home must select or append Home.");
         }
 
         [TestMethod]

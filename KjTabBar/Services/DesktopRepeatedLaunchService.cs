@@ -27,6 +27,9 @@ namespace KjTabBar.Services
         private readonly ExplorerManager _explorer;
         private readonly WinEventHookRegistration _hook;
         private Request _pending;
+        private IntPtr _startupSource;
+        private int _startupChild;
+        private DateTime _startupInvocationUtc;
         private int _generation;
         private bool _disposed;
 
@@ -87,7 +90,14 @@ namespace KjTabBar.Services
             if (_disposed || objectId != -4 || child <= 0 || !_isDesktopItemView(source)) return;
             CancelForNewWindow();
             TabBarViewModel target = _findTarget();
-            if (target == null || target.IsDisposed || target.IsTabOperationPending || target.ActiveTab == null || target.IsRestoringControlPanelHost ||
+            if (target == null)
+            {
+                _startupSource = source;
+                _startupChild = child;
+                _startupInvocationUtc = _utcNow();
+                return;
+            }
+            if (target.IsDisposed || target.IsTabOperationPending || target.ActiveTab == null || target.IsRestoringControlPanelHost ||
                 !_isVisible(target.ExplorerHwnd) || string.IsNullOrEmpty(target.ActiveTab.Path)) return;
             _pending = new Request
             {
@@ -102,8 +112,19 @@ namespace KjTabBar.Services
             AppLogger.LogDiagnostic("DesktopRepeat", "Captured explicit invocation host=" + target.ExplorerHwnd + " restoreMaximized=" + _pending.RestoreMaximized);
         }
 
+        internal Func<string> TakeNewWindowTarget(Func<IntPtr, int, string> resolve)
+        {
+            IntPtr source = _startupSource;
+            int child = _startupChild;
+            bool recent = source != IntPtr.Zero && _utcNow() - _startupInvocationUtc <= TimeSpan.FromSeconds(2);
+            CancelForNewWindow();
+            if (!recent) return null;
+            return () => resolve(source, child);
+        }
+
         internal void CancelForNewWindow()
         {
+            _startupSource = IntPtr.Zero;
             _generation++;
             _pending = null;
         }

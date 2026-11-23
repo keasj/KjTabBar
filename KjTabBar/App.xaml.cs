@@ -353,7 +353,11 @@ namespace KjTabBar
                 if (eventType == NativeMethods.EVENT_OBJECT_CREATE)
                 {
                     if (_desktopRepeatedLaunch != null && DesktopRepeatedLaunchService.ClassName(hwnd) == "CabinetWClass")
-                        _desktopRepeatedLaunch.CancelForNewWindow();
+                    {
+                        Func<string> resolve = _desktopRepeatedLaunch.TakeNewWindowTarget(((ExplorerManager)_explorerService).ResolveDesktopInvokedShortcut);
+                        if (resolve != null) _windowTracking.DesktopInvocationTargets[hwnd] = resolve;
+                        else _windowTracking.DesktopInvocationTargets.Remove(hwnd);
+                    }
                     _bootstrapResult.Services.ExplorerWindowMonitorCoordinator.HandleCreateEvent(
                         hwnd, _bootstrapResult.Services.AppUiDispatcherAdapter.FindValidTabBarTarget);
                     return;

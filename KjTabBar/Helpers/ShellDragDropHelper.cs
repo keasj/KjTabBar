@@ -1,12 +1,67 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Windows;
+using OleDataObject = System.Runtime.InteropServices.ComTypes.IDataObject;
 using KjTabBar.Models;
 
 namespace KjTabBar.Helpers
 {
     internal static class ShellDragDropHelper
     {
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, PreserveSig = false)]
+        private static extern void SHCreateItemFromParsingName(string path, IntPtr bindContext,
+            ref Guid iid, out NativeMethods.IShellItem item);
+
+        [ComImport, Guid("00000122-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface IDropTarget
+        {
+            void DragEnter(OleDataObject data, DragDropKeyStates keys, NativeMethods.POINT point, ref DragDropEffects effect);
+            void DragOver(DragDropKeyStates keys, NativeMethods.POINT point, ref DragDropEffects effect);
+            void DragLeave();
+            [PreserveSig] int Drop(OleDataObject data, DragDropKeyStates keys, NativeMethods.POINT point, ref DragDropEffects effect);
+        }
+
+        internal static DragDropEffects DropWithShellMenu(string destination, IDataObject data,
+            DragDropKeyStates keys, NativeMethods.POINT point, DragDropEffects allowed)
+        {
+            OleDataObject source = data as OleDataObject;
+            allowed &= DragDropEffects.Copy | DragDropEffects.Move | DragDropEffects.Link;
+            if (source == null || allowed == DragDropEffects.None) return DragDropEffects.None;
+
+            Guid itemId = typeof(NativeMethods.IShellItem).GUID;
+            Guid handlerId = new Guid("3981E225-F559-11D3-8E3A-00C04F6837D5"); // BHID_SFUIObject
+            Guid targetId = typeof(IDropTarget).GUID;
+            NativeMethods.IShellItem item = null;
+            IntPtr pointer = IntPtr.Zero;
+            IDropTarget target = null;
+            try
+            {
+                SHCreateItemFromParsingName(destination, IntPtr.Zero, ref itemId, out item);
+                Marshal.ThrowExceptionForHR(item.BindToHandler(IntPtr.Zero, ref handlerId, ref targetId, out pointer));
+                target = (IDropTarget)Marshal.GetObjectForIUnknown(pointer);
+
+                // WPF receives Drop after the button is released. Tell the Shell how the drag began.
+                DragDropEffects effect = allowed;
+                target.DragEnter(source, keys | DragDropKeyStates.RightMouseButton, point, ref effect);
+                if (effect == DragDropEffects.None)
+                {
+                    target.DragLeave();
+                    return DragDropEffects.None;
+                }
+                effect = allowed;
+                int result = target.Drop(source, keys, point, ref effect);
+                Marshal.ThrowExceptionForHR(result);
+                return result == 0 ? effect : DragDropEffects.None;
+            }
+            finally
+            {
+                if (target != null) Marshal.ReleaseComObject(target);
+                if (pointer != IntPtr.Zero) Marshal.Release(pointer);
+                if (item != null) Marshal.ReleaseComObject(item);
+            }
+        }
+
         /// <summary>
         /// CIDA (Shell IDList Array) 構造体を解析してパスを取得する
         /// CIDA: [cidl:uint] [aoffset[0]:uint (親PIDL)] [aoffset[1..n]:uint (子PIDL)]

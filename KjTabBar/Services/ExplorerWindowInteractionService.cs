@@ -186,6 +186,8 @@ namespace KjTabBar.Services
                         _tabPersistence.SaveTabsIfChanged(currentViewModel, true);
                     }
                 };
+                tabBarWindow.CloseLastTab = vm => CloseLastTab(vm,
+                    host => NativeMethods.PostMessage(host, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero));
                 tabBarWindow.WindowTrackingState = _windowTracking;
                 tabBarWindow.ExplorerHostSwitchCoordinator = _createHostSwitchCoordinator(
                     _explorerService,
@@ -364,6 +366,25 @@ namespace KjTabBar.Services
             }
         }
 
+        internal void CloseLastTab(TabBarViewModel viewModel, Func<IntPtr, bool> requestClose)
+        {
+            if (viewModel.Tabs.Count != 1 || viewModel.ExplorerHwnd == IntPtr.Zero || !viewModel.TryBeginExternalTabOperation()) return;
+            bool closed = false;
+            try
+            {
+                _tabPersistence.SaveLastTabClosed(viewModel);
+                if (!requestClose(viewModel.ExplorerHwnd))
+                    throw new InvalidOperationException("Explorer did not accept the close request.");
+                viewModel.CompleteLastTabClose();
+                closed = true;
+            }
+            finally
+            {
+                viewModel.EndExternalTabOperation();
+                if (!closed) _tabPersistence.SaveTabsIfChanged(viewModel, true);
+            }
+        }
+
         internal void InitializeTabsForNewWindow(TabBarViewModel viewModel, string initialPath, bool useInitialPathOnly, bool reuseExistingTab = false)
         {
             if (viewModel == null)
@@ -372,7 +393,7 @@ namespace KjTabBar.Services
             }
 
             // An explicit launch target must not race a saved-tab navigation.
-            bool preserveInitialPath = !string.IsNullOrEmpty(initialPath) && (reuseExistingTab || !IsHomeInitialPath(initialPath));
+            bool preserveInitialPath = !string.IsNullOrEmpty(initialPath) && (reuseExistingTab || !ShellPathNormalizer.IsHomeInitialPath(_explorerService, initialPath));
             bool loadedSavedTabs = _tabPersistence.LoadTabsTo(viewModel,
                 deferControlPanelNavigation: true, deferNavigation: preserveInitialPath);
 
@@ -408,30 +429,6 @@ namespace KjTabBar.Services
             }
 
             viewModel.RestoreTabs(new string[] { initialPath });
-        }
-
-        private bool IsHomeInitialPath(string path)
-        {
-            if (string.IsNullOrEmpty(path))
-            {
-                return false;
-            }
-
-            string normalizedPath = _explorerService.NormalizeKnownPath(path);
-            string normalizedHomePath = _explorerService.NormalizeKnownPath(_explorerService.HomeFolderPath);
-            if (string.Equals(normalizedPath, normalizedHomePath, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            string resolvedHomePath = _explorerService.GetResolvedHomeFolderPath();
-            if (string.IsNullOrEmpty(resolvedHomePath))
-            {
-                return false;
-            }
-
-            return string.Equals(path.TrimEnd('\\'), resolvedHomePath.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(normalizedPath, resolvedHomePath.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
         }
 
         internal void RestorePreparedExplorerWindowForCreate(IntPtr hwnd, bool deferShow)

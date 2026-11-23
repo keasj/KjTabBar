@@ -8,6 +8,7 @@ namespace KjTabBar.Models
         public IntPtr ExplorerHwnd { get; set; }
         public int RetryCount { get; set; }
         public bool IsDesktopCandidate { get; set; }
+        public Func<string> ResolveDesktopInvocation { get; set; }
         public bool IsDesktopInteractiveCandidate { get; set; }
         public bool IsHiddenPending { get; set; }
         public bool IsControlPanelTabLaunchCandidate { get; set; }
@@ -38,6 +39,20 @@ namespace KjTabBar.Models
             _desktopPathClassifier = desktopPathClassifier;
         }
 
+
+        private bool OpensHomeFromDesktop(Func<string> resolve)
+        {
+            if (resolve == null) return false;
+            try
+            {
+                return ShellPathNormalizer.IsHomeInitialPath(_explorerService, resolve());
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("ExplorerWindowEvaluationService", "Failed to resolve the invoked desktop item.", ex);
+                return false;
+            }
+        }
 
         private bool IsFileSystemTitleCollision(string path, string titlePath)
         {
@@ -209,7 +224,8 @@ namespace KjTabBar.Models
                        (resolvedIsControlPanelPath && input.IsHiddenPending &&
                         _desktopPathClassifier.IsDesktopShortcutTargetPath(resolvedPath)))) ||
                      action == AbsorptionAction.AbsorbWithFallback ||
-                     (action == AbsorptionAction.CreateNewTabBar && shouldUseResolvedPathOnCreate)),
+                     (action == AbsorptionAction.CreateNewTabBar && shouldUseResolvedPathOnCreate &&
+                      (!ShellPathNormalizer.IsHomeInitialPath(_explorerService, resolvedPath) || OpensHomeFromDesktop(input.ResolveDesktopInvocation)))),
                 WasManagedControlPanelLaunchSource = input.WasManagedControlPanelLaunchSource
             };
         }

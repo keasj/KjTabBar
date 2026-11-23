@@ -1377,6 +1377,15 @@ namespace KjTabBar.ViewModels
             UpdateTabTitles();
         }
 
+        internal void CompleteLastTabClose()
+        {
+            ClearPendingNavigationTracking();
+            RecordClosedTab(_tabs[0].Path, 0);
+            ActiveTab = null;
+            ActiveTabIndex = -1;
+            _tabs.Clear();
+        }
+
         private void RecordClosedTab(string path, int position)
         {
             if (_closedTabHistory.Record(path, position))

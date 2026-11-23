@@ -725,6 +725,113 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void ClosingLastTabCommitsEmptySnapshotBeforeClosingOnlyItsHost()
+        {
+            string directory = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"))).FullName;
+            try
+            {
+                string file = Path.Combine(directory, "tabs.txt");
+                MockExplorerService explorer = new MockExplorerService();
+                bool rejectEmptyWrite = false;
+                TabPersistenceService persistence = new TabPersistenceService(file, (path, lines) =>
+                {
+                    if (rejectEmptyWrite && path == file && lines.Count == 0)
+                        throw new IOException("Injected mirror write failure.");
+                    ProtectedTextStorage.SaveLines(path, lines);
+                });
+                ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(explorer, new ExplorerWindowTrackingState(), persistence);
+                using (TabBarViewModel vm = new TabBarViewModel((IntPtr)100, new MockUserSettings(), explorer, @"C:\Work"))
+                using (TabBarViewModel reopened = new TabBarViewModel((IntPtr)200, new MockUserSettings(), explorer, explorer.HomeFolderPath))
+                {
+                    // The window close handler saves the still-open tab.
+                    KjTabBar.Views.TabBarWindow.PersistCurrentTabState(vm, current => persistence.SaveTabsIfChanged(current, true));
+                    Assert.IsTrue(persistence.LoadTabsTo(reopened));
+                    Assert.AreEqual(@"C:\Work", reopened.ActiveTab.Path);
+
+                    try
+                    {
+                        service.CloseLastTab(vm, hwnd => false);
+                        Assert.Fail("The rejected close must be reported.");
+                    }
+                    catch (InvalidOperationException) { }
+                    Assert.AreEqual(1, vm.Tabs.Count);
+                    Assert.IsTrue(persistence.LoadTabsTo(reopened));
+
+                    rejectEmptyWrite = true;
+                    try
+                    {
+                        service.CloseLastTab(vm, hwnd => { Assert.Fail("A failed save must keep Explorer open."); return true; });
+                        Assert.Fail("Expected a save failure.");
+                    }
+                    catch (IOException) { }
+                    rejectEmptyWrite = false;
+                    Assert.AreEqual(1, vm.Tabs.Count);
+                    Assert.IsTrue(persistence.LoadTabsTo(reopened));
+                    Assert.AreEqual(@"C:\Work", reopened.ActiveTab.Path);
+
+                    bool requested = false;
+                    service.CloseLastTab(vm, hwnd =>
+                    {
+                        requested = true;
+                        Assert.AreEqual(vm.ExplorerHwnd, hwnd);
+                        Assert.AreEqual("0", ProtectedTextStorage.LoadLines(Path.Combine(directory, "tabs.snapshot.txt"))[3]);
+                        Assert.AreEqual(0, ProtectedTextStorage.LoadLines(file).Length);
+                        return true;
+                    });
+                    Assert.IsTrue(requested);
+                    Assert.AreEqual(0, vm.Tabs.Count);
+                    KjTabBar.Views.TabBarWindow.PersistCurrentTabState(vm, current => persistence.SaveTabsIfChanged(current, true));
+                    using (TabBarViewModel fresh = new TabBarViewModel((IntPtr)300, new MockUserSettings(), explorer, explorer.HomeFolderPath))
+                    {
+                        service.InitializeTabsForNewWindow(fresh, explorer.HomeFolderPath, true);
+                        Assert.AreEqual(1, fresh.Tabs.Count);
+                        Assert.AreEqual(explorer.HomeFolderPath, fresh.ActiveTab.Path);
+                        Assert.AreEqual(@"C:\Work", fresh.GetHistoryItems()[0].Path);
+                    }
+                }
+            }
+            finally { Directory.Delete(directory, true); }
+        }
+
+        [TestMethod]
+        public void ReopenAtHome_RestoresSavedSelectionOrUsesHomeWhenEmpty()
+        {
+            string directory = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"))).FullName;
+            string file = Path.Combine(directory, "tabs.txt");
+            try
+            {
+                MockExplorerService explorer = new MockExplorerService();
+                string home = explorer.HomeFolderPath = "::{679F85CB-0220-4080-B29B-5540CC05AAB6}";
+                explorer.GetCurrentPathFunc = h => home;
+                ExplorerWindowEvaluationService evaluation = new ExplorerWindowEvaluationService(explorer, new DesktopPathClassifier(explorer));
+                ExplorerWindowInteractionService service = new ExplorerWindowInteractionService(
+                    explorer, new ExplorerWindowTrackingState(), new TabPersistenceService(file));
+                foreach (string[] saved in new string[][] { new string[0], new string[] { @"C:\Work" }, new string[] { @"C:\Work", home }, new string[] { home } })
+                {
+                    string selected = saved.Length == 0 ? string.Empty : saved[0];
+                    System.Collections.Generic.List<string> snapshot = new System.Collections.Generic.List<string> { "kjtb-tabs-v1", "0", selected };
+                    snapshot.AddRange(saved);
+                    ProtectedTextStorage.SaveLines(Path.Combine(directory, "tabs.snapshot.txt"), snapshot.ToArray());
+                    foreach (bool desktop in new bool[] { false, true })
+                    {
+                        // Running explorer.exe directly can still leave a recent desktop foreground candidate.
+                        ExplorerWindowEvaluationInput input = new ExplorerWindowEvaluationInput { ExplorerHwnd = (IntPtr)100, IsDesktopCandidate = true };
+                        if (desktop) input.ResolveDesktopInvocation = () => home;
+                        ExplorerWindowEvaluationResult result = evaluation.Evaluate(input, null, null, null, null);
+                        Assert.AreEqual(AbsorptionAction.CreateNewTabBar, result.Action);
+                        using (TabBarViewModel vm = new TabBarViewModel(input.ExplorerHwnd, new MockUserSettings(), explorer, home))
+                        {
+                            service.InitializeTabsForNewWindow(vm, result.ResolvedPath, result.UseResolvedPathOnCreate, result.ReuseExistingTab);
+                            Assert.AreEqual(saved.Length == 0 ? 1 : saved.Length + (desktop && Array.IndexOf(saved, home) < 0 ? 1 : 0), vm.Tabs.Count);
+                            Assert.AreEqual(desktop || saved.Length == 0 ? home : selected, vm.ActiveTab.Path);
+                        }
+                    }
+                }
+            }
+            finally { Directory.Delete(directory, true); }
+        }
+
+        [TestMethod]
         public void DesktopLaunch_RestoredTabsReuseMatchingFolderOrSpecialItem()
         {
             string[] paths = new string[] { @"C:\Work", "::{679F85CB-0220-4080-B29B-5540CC05AAB6}", "AllControlPanelPath",

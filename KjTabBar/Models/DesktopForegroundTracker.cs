@@ -38,7 +38,13 @@ namespace KjTabBar.Models
         public void Update(IntPtr foregroundWindow, string className)
         {
             bool isDesktopWindowClass = IsDesktopShellWindowClass(className);
-            if (!isDesktopWindowClass && _isDesktopForeground)
+            if (string.Equals(className, "Shell_TrayWnd", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(className, "Shell_SecondaryTrayWnd", StringComparison.OrdinalIgnoreCase))
+            {
+                _lastDesktopLaunchTokenUtc = DateTime.MinValue;
+                _lastDesktopInteractiveLaunchTokenUtc = DateTime.MinValue;
+            }
+            else if (!isDesktopWindowClass && _isDesktopForeground)
             {
                 _lastDesktopLaunchTokenUtc = DateTime.UtcNow;
                 if (IsDesktopItemViewWindowClass(_lastForegroundClassName))

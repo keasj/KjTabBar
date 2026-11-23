@@ -185,6 +185,29 @@ namespace KjTabBar.Views
                     }
                     onFinished?.Invoke();
                 }
+                else if (_wasRightDrag && !string.IsNullOrEmpty(targetTab?.Path))
+                {
+                    e.Effects = DragDropEffects.None;
+                    if ((e.KeyStates & DragDropKeyStates.ShiftKey) != 0)
+                    {
+                        string[] sources = GetDragPaths(e.Data);
+                        if (sources != null && sources.Length > 0)
+                            ShowLegacyDropMenu(targetTabBd, sources, targetTab.Path, e.AllowedEffects, onFinished);
+                        else
+                            onFinished?.Invoke();
+                        return;
+                    }
+
+                    using (IDisposable operation = FileOperationTracker.Shared.TryBegin())
+                    {
+                        if (operation != null && NativeMethods.GetCursorPos(out NativeMethods.POINT cursor))
+                        {
+                            e.Effects = ShellDragDropHelper.DropWithShellMenu(targetTab.Path, e.Data,
+                                e.KeyStates, cursor, e.AllowedEffects);
+                        }
+                    }
+                    onFinished?.Invoke();
+                }
                 else
                 {
                     string[] paths = GetDragPaths(e.Data);
@@ -193,68 +216,13 @@ namespace KjTabBar.Views
                         if (targetTab != null && !string.IsNullOrEmpty(targetTab.Path))
                         {
                             string destination = targetTab.Path;
-                            bool isRightDrag = _wasRightDrag;
-                            _wasRightDrag = false;
-                            if (isRightDrag)
-                            {
-                                int finishState = 0;
-                                Action finishOnce = delegate
-                                {
-                                    if (Interlocked.Exchange(ref finishState, 1) == 0)
-                                    {
-                                        onFinished?.Invoke();
-                                    }
-                                };
-
-                                ContextMenu menu = new ContextMenu();
-                                _contextMenuBuilder.ApplyFluentMenuStyle(menu);
-                                MenuItem copyItem = new MenuItem() { Header = _window.TryFindResource("MenuCopyHere") as string ?? "Copy Here(&C)" };
-                                copyItem.Click += (s, ev) => ExecuteFileOperation(paths, destination, NativeMethods.FO_COPY, finishOnce);
-                                copyItem.IsEnabled = (e.AllowedEffects & DragDropEffects.Copy) != 0;
-                                menu.Items.Add(copyItem);
-
-                                MenuItem moveItem = new MenuItem() { Header = _window.TryFindResource("MenuMoveHere") as string ?? "Move Here(&M)" };
-                                moveItem.Click += (s, ev) => ExecuteFileOperation(paths, destination, NativeMethods.FO_MOVE, finishOnce);
-                                moveItem.IsEnabled = (e.AllowedEffects & DragDropEffects.Move) != 0;
-                                menu.Items.Add(moveItem);
-
-                                MenuItem shortcutItem = new MenuItem() { Header = _window.TryFindResource("MenuShortcutHere") as string ?? "Create Shortcut Here(&S)" };
-                                shortcutItem.Click += (s, ev) =>
-                                {
-                                    ExecuteLinkOperation(paths, destination, false, finishOnce);
-                                };
-                                shortcutItem.IsEnabled = (e.AllowedEffects & DragDropEffects.Link) != 0;
-                                menu.Items.Add(shortcutItem);
-
-                                MenuItem symlinkItem = new MenuItem() { Header = _window.TryFindResource("MenuSymlinkHere") as string ?? "Create Symbolic Link Here(&L)" };
-                                symlinkItem.Click += (s, ev) =>
-                                {
-                                    ExecuteLinkOperation(paths, destination, true, finishOnce);
-                                };
-                                symlinkItem.IsEnabled = (e.AllowedEffects & DragDropEffects.Link) != 0;
-                                menu.Items.Add(symlinkItem);
-
-                                menu.Items.Add(new Separator());
-
-                                MenuItem cancelItem = new MenuItem() { Header = _window.TryFindResource("SettingsButtonCancel") as string ?? "Cancel" };
-                                cancelItem.Click += (s, ev) => finishOnce();
-                                menu.Items.Add(cancelItem);
-
-                                menu.Closed += (s, ev) => finishOnce();
-
-                                menu.PlacementTarget = targetTabBd;
-                                menu.IsOpen = true;
-                            }
-                            else
-                            {
-                                DragDropEffects effect = GetFileDropEffect(e.KeyStates, e.AllowedEffects, paths, destination);
-                                e.Effects = effect;
-                                if (effect == DragDropEffects.Copy || effect == DragDropEffects.Move)
-                                    ExecuteFileOperation(paths, destination,
-                                        effect == DragDropEffects.Move ? NativeMethods.FO_MOVE : NativeMethods.FO_COPY, onFinished);
-                                else if (effect == DragDropEffects.Link) ExecuteLinkOperation(paths, destination, false, onFinished);
-                                else onFinished?.Invoke();
-                            }
+                            DragDropEffects effect = GetFileDropEffect(e.KeyStates, e.AllowedEffects, paths, destination);
+                            e.Effects = effect;
+                            if (effect == DragDropEffects.Copy || effect == DragDropEffects.Move)
+                                ExecuteFileOperation(paths, destination,
+                                    effect == DragDropEffects.Move ? NativeMethods.FO_MOVE : NativeMethods.FO_COPY, onFinished);
+                            else if (effect == DragDropEffects.Link) ExecuteLinkOperation(paths, destination, false, onFinished);
+                            else onFinished?.Invoke();
                         }
                         else
                         {
@@ -276,6 +244,58 @@ namespace KjTabBar.Views
                 onFinished?.Invoke();
             }
             finally { _wasRightDrag = false; _dragData = null; _dragPaths = null; _sourceDragData = null; _dragSourceWindow = IntPtr.Zero; }
+        }
+
+        private void ShowLegacyDropMenu(Border target, string[] paths, string destination,
+            DragDropEffects allowed, Action onFinished)
+        {
+            int finishState = 0;
+            Action finishOnce = delegate
+            {
+                if (Interlocked.Exchange(ref finishState, 1) == 0)
+                {
+                    onFinished?.Invoke();
+                }
+            };
+
+            ContextMenu menu = new ContextMenu();
+            _contextMenuBuilder.ApplyFluentMenuStyle(menu);
+            MenuItem copyItem = new MenuItem() { Header = _window.TryFindResource("MenuCopyHere") as string ?? "Copy Here(&C)" };
+            copyItem.Click += (s, ev) => ExecuteFileOperation(paths, destination, NativeMethods.FO_COPY, finishOnce);
+            copyItem.IsEnabled = (allowed & DragDropEffects.Copy) != 0;
+            menu.Items.Add(copyItem);
+
+            MenuItem moveItem = new MenuItem() { Header = _window.TryFindResource("MenuMoveHere") as string ?? "Move Here(&M)" };
+            moveItem.Click += (s, ev) => ExecuteFileOperation(paths, destination, NativeMethods.FO_MOVE, finishOnce);
+            moveItem.IsEnabled = (allowed & DragDropEffects.Move) != 0;
+            menu.Items.Add(moveItem);
+
+            MenuItem shortcutItem = new MenuItem() { Header = _window.TryFindResource("MenuShortcutHere") as string ?? "Create Shortcut Here(&S)" };
+            shortcutItem.Click += (s, ev) =>
+            {
+                ExecuteLinkOperation(paths, destination, false, finishOnce);
+            };
+            shortcutItem.IsEnabled = (allowed & DragDropEffects.Link) != 0;
+            menu.Items.Add(shortcutItem);
+
+            MenuItem symlinkItem = new MenuItem() { Header = _window.TryFindResource("MenuSymlinkHere") as string ?? "Create Symbolic Link Here(&L)" };
+            symlinkItem.Click += (s, ev) =>
+            {
+                ExecuteLinkOperation(paths, destination, true, finishOnce);
+            };
+            symlinkItem.IsEnabled = (allowed & DragDropEffects.Link) != 0;
+            menu.Items.Add(symlinkItem);
+
+            menu.Items.Add(new Separator());
+
+            MenuItem cancelItem = new MenuItem() { Header = _window.TryFindResource("SettingsButtonCancel") as string ?? "Cancel" };
+            cancelItem.Click += (s, ev) => finishOnce();
+            menu.Items.Add(cancelItem);
+
+            menu.Closed += (s, ev) => finishOnce();
+
+            menu.PlacementTarget = target;
+            menu.IsOpen = true;
         }
 
         internal static int GetDropIndex(ItemsControl tabItemsControl, DragEventArgs e)

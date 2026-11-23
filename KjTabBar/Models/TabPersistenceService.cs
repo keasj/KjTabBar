@@ -162,21 +162,12 @@ namespace KjTabBar.Models
                 List<string> paths = BuildPersistablePathList(viewModel);
                 string activeTabPath = GetPersistableActiveTabPath(viewModel);
                 int? activeTabIndex = GetPersistableActiveTabIndex(viewModel);
-                string file = GetTabsFilePathInstance();
-                // This single atomic replacement is the authoritative commit. The two
-                // legacy files remain mirrors for compatibility with older versions.
-                List<string> snapshot = new List<string> { "kjtb-tabs-v2", (activeTabIndex ?? -1).ToString(), activeTabPath ?? string.Empty, paths.Count.ToString() };
-                snapshot.AddRange(paths);
-                snapshot.AddRange(SerializeHistory(viewModel.GetPersistableHistory()));
-                string snapshotFile = GetSnapshotFilePathInstance();
+                List<List<ClosedTabInfo>> history = viewModel.GetPersistableHistory();
                 Action write = delegate
                 {
                     try
                     {
-                        Directory.CreateDirectory(Path.GetDirectoryName(file));
-                        _saveLines(snapshotFile, snapshot);
-                        _saveLines(file, paths);
-                        SaveActiveTabSelection(activeTabIndex, activeTabPath);
+                        WriteTabFiles(paths, activeTabPath, activeTabIndex, history);
                         _lastSavedTabs = currentTabsString;
                     }
                     catch (Exception ex) { AppLogger.LogError("TabPersistenceService", "Failed to save tabs.txt.", ex); }
@@ -190,6 +181,35 @@ namespace KjTabBar.Models
                 AppLogger.LogError("TabPersistenceService", "Failed to save tabs.txt.", ex);
                 return Task.CompletedTask;
             }
+        }
+
+        internal void SaveLastTabClosed(TabBarViewModel viewModel)
+        {
+            FlushPendingSave();
+            if (_tabsLoadFailed) throw new InvalidOperationException("Cannot replace the unreadable tab snapshot.");
+
+            ClosedTabHistory history = new ClosedTabHistory();
+            history.RestoreBatches(viewModel.GetPersistableHistory());
+            history.Record(viewModel.Tabs[0].Path, 0);
+            List<List<ClosedTabInfo>> batches = history.GetBatches();
+            List<string> paths = new List<string>();
+            // If a mirror or the close request fails, force the live tabs to be written again.
+            _lastSavedTabs = null;
+            WriteTabFiles(paths, null, null, batches);
+            _lastSavedTabs = BuildPersistedStateString(paths, null, null) + HistoryState(batches);
+        }
+
+        private void WriteTabFiles(List<string> paths, string activeTabPath, int? activeTabIndex, List<List<ClosedTabInfo>> history)
+        {
+            string file = GetTabsFilePathInstance();
+            Directory.CreateDirectory(Path.GetDirectoryName(file));
+            List<string> snapshot = new List<string> { "kjtb-tabs-v2", (activeTabIndex ?? -1).ToString(), activeTabPath ?? string.Empty, paths.Count.ToString() };
+            snapshot.AddRange(paths);
+            snapshot.AddRange(SerializeHistory(history));
+            // The snapshot is authoritative. The two legacy files mirror it.
+            _saveLines(GetSnapshotFilePathInstance(), snapshot);
+            _saveLines(file, paths);
+            SaveActiveTabSelection(activeTabIndex, activeTabPath);
         }
 
         private static int ReadCount(string[] state, ref int cursor)

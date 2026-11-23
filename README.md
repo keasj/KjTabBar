@@ -18,8 +18,7 @@ Instead of hooking into or modifying Explorer itself, it places an independent t
   - Move or copy files and folders onto tabs by dropping items from outside
   - Drag an independent Explorer window onto the dedicated merge zone at the right edge of the tab bar to absorb it as a new tab
   - When absorbed by dragging, Control Panel items such as Power Options are added as separate tabs even when an equivalent tab already exists
-  - Show a context menu on right-drag drop such as "Copy here", "Move here", and "Create symbolic link here"
-  - Symbolic links are first created with the current user privileges. If privileges are insufficient, a dedicated helper retries only the failed links as administrator after Windows UAC approval. Canceling UAC stops that retry.
+  - Right-drag files or folders onto a tab to open the Explorer drop menu for that folder. Hold Shift when releasing the right mouse button to open the original KjTabBar menu, which includes shortcut and symbolic link creation.
 - **Seamless tracking and UI integration**
   - Tracks Explorer position, size, and DPI scale changes in real time
   - Automatically follows the Windows dark/light mode setting
@@ -47,7 +46,8 @@ This behavior is implemented in the source. Launch-origin detection, display, an
 ## Opening folders externally
 
 - With an existing tab bar, Explorer windows launched from the taskbar, other apps, the Start menu, or Explorer's Open in new window command remain independent windows without a tab bar. They are not automatically absorbed.
-- When Explorer is reopened after closing, saved tabs are restored and preserved. Select a restored tab matching the launch folder, or append a new tab if no match exists.
+- Closing the last tab clears the saved tab list and closes its Explorer window. Closing Explorer with the window’s × button saves the open tabs and selection.
+- When Explorer is reopened after closing, saved tabs are restored and preserved. A desktop launch selects the matching tab or appends the destination. Opening Home from the taskbar or another non-desktop source restores the previously selected tab without adding Home. If there are no tabs to restore, Home is selected. Other destinations select the matching tab or are appended.
 - If the initial Shell path is unavailable and the title only identifies a temporary Home page, wait for the path using the existing bounded retry before restoring tabs. This prevents the launch destination resolved later from overwriting the previously selected tab.
 
 ## Usage

@@ -144,6 +144,8 @@ namespace KjTabBar.Services
                     isDesktopInteractiveCandidate = _windowTracking.DesktopInteractiveLaunchCandidates.Contains(hwnd);
                 }
 
+                Func<string> resolveDesktopInvocation;
+                _windowTracking.DesktopInvocationTargets.TryGetValue(hwnd, out resolveDesktopInvocation);
                 bool isHiddenPending = _windowTracking.HiddenPendingAbsorb.ContainsKey(hwnd);
 
                 System.Diagnostics.Stopwatch evaluationTimer = AppLogger.StartDiagnosticTiming();
@@ -155,6 +157,7 @@ namespace KjTabBar.Services
                         ExplorerHwnd = hwnd,
                         RetryCount = retryCount,
                         IsDesktopCandidate = isDesktopCandidate,
+                        ResolveDesktopInvocation = resolveDesktopInvocation,
                         IsDesktopInteractiveCandidate = isDesktopInteractiveCandidate,
                         IsHiddenPending = isHiddenPending,
                         IsControlPanelTabLaunchCandidate = isControlPanelTabLaunchCandidate,

@@ -29,6 +29,7 @@ namespace KjTabBar.Models
         public HashSet<IntPtr> ProcessingExplorerWindows { get; private set; }
         public Dictionary<IntPtr, int> AbsorbPathRetryCounts { get; private set; }
         public Dictionary<IntPtr, int> AbsorptionFailureRetryCounts { get; private set; }
+        internal readonly Dictionary<IntPtr, Func<string>> DesktopInvocationTargets = new Dictionary<IntPtr, Func<string>>();
         public HashSet<IntPtr> DesktopLaunchCandidates { get; private set; }
         public HashSet<IntPtr> DesktopInteractiveLaunchCandidates { get; private set; }
         public HashSet<IntPtr> ControlPanelTabLaunchCandidates { get; private set; }
@@ -161,6 +162,7 @@ namespace KjTabBar.Models
             RemoveClosedWindows(InternalHostSwitchLaunchWindows, explorerWindows);
             RemoveClosedWindowKeys(AbsorbPathRetryCounts, explorerWindows);
             RemoveClosedWindowKeys(AbsorptionFailureRetryCounts, explorerWindows);
+            RemoveClosedWindowKeys(DesktopInvocationTargets, explorerWindows);
             RemoveClosedWindows(DesktopLaunchCandidates, explorerWindows);
             RemoveClosedWindows(DesktopInteractiveLaunchCandidates, explorerWindows);
             RemoveClosedWindows(ControlPanelTabLaunchCandidates, explorerWindows);
@@ -192,6 +194,7 @@ namespace KjTabBar.Models
         {
             AbsorbPathRetryCounts.Remove(hwnd);
             AbsorptionFailureRetryCounts.Remove(hwnd);
+            DesktopInvocationTargets.Remove(hwnd);
             DesktopLaunchCandidates.Remove(hwnd);
             DesktopInteractiveLaunchCandidates.Remove(hwnd);
             ControlPanelTabLaunchCandidates.Remove(hwnd);

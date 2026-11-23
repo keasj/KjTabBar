@@ -234,6 +234,30 @@ namespace KjTabBar.Models
             return IsControlPanelItemPath(path);
         }
 
+        internal static bool IsHomeInitialPath(IExplorerService explorerService, string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return false;
+            }
+
+            string normalizedPath = explorerService.NormalizeKnownPath(path);
+            string normalizedHomePath = explorerService.NormalizeKnownPath(explorerService.HomeFolderPath);
+            if (string.Equals(normalizedPath, normalizedHomePath, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            string resolvedHomePath = explorerService.GetResolvedHomeFolderPath();
+            if (string.IsNullOrEmpty(resolvedHomePath))
+            {
+                return false;
+            }
+
+            return string.Equals(path.TrimEnd('\\'), resolvedHomePath.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalizedPath, resolvedHomePath.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+        }
+
         public bool IsTransientShellPlaceholderPath(string path)
         {
             string normalizedPath = NormalizeShellNamespacePath(path);
