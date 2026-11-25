@@ -2241,6 +2241,31 @@ namespace UnitTestProject
         }
 
         [TestMethod]
+        public void SyncWithExplorerAsync_CompletesControlPanelRootAliasNavigation()
+        {
+            string rootAlias = "::{5399E694-6CE5-4D6C-8FCE-1D8870FDCBA0}";
+            SynchronizerControlPanelExplorerService explorer = new SynchronizerControlPanelExplorerService();
+            explorer.IsControlPanelRootPathFunc = path => path == rootAlias || path == explorer.AllControlPanelPath;
+            explorer.IsControlPanelPathFunc = path => explorer.IsControlPanelRootPath(path) || path == explorer.PowerOptionsPath;
+            using (TabBarViewModel viewModel = new TabBarViewModel((IntPtr)123, new MockUserSettings(), explorer, @"C:\Desktop"))
+            {
+                TabItemViewModel source = viewModel.ActiveTab;
+                TabItemViewModel target = new TabItemViewModel(rootAlias, "Control Panel", explorer);
+                viewModel.Tabs.Add(target);
+                viewModel.SetActiveTabOnly(target);
+                viewModel.NavigationTracker.StartNavigation(rootAlias, source, 0);
+                explorer.CurrentPath = explorer.AllControlPanelPath;
+
+                viewModel.SyncWithExplorerAsync().GetAwaiter().GetResult();
+
+                Assert.IsNull(viewModel.NavigationTracker.NavigatingToPath, "The root alias must confirm arrival instead of timing out to Desktop.");
+                Assert.AreSame(target, viewModel.ActiveTab);
+                Assert.IsTrue(viewModel.PathEquals(explorer.AllControlPanelPath, target.Path));
+                Assert.IsFalse(viewModel.PathEquals(rootAlias, explorer.PowerOptionsPath));
+            }
+        }
+
+        [TestMethod]
         public void SyncWithExplorerAsync_KeepsItemNavigationPending_WhileControlPanelParentIsStillDisplayed()
         {
             SynchronizerControlPanelExplorerService explorer = new SynchronizerControlPanelExplorerService();

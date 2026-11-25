@@ -1763,6 +1763,8 @@ namespace KjTabBar.ViewModels
             string normalizedPath2 = NormalizeTabPath(path2);
             if (normalizedPath1 == null && normalizedPath2 == null) return true;
             if (normalizedPath1 == null || normalizedPath2 == null) return false;
+            if (_explorerService.IsControlPanelRootPath(normalizedPath1) &&
+                _explorerService.IsControlPanelRootPath(normalizedPath2)) return true;
             return string.Equals(normalizedPath1.TrimEnd('\\'), normalizedPath2.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
         }
 
